@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="banner.jpg" alt="Claude Code Audit — 6 parallel agents, zero overlap" width="100%"/>
+</p>
+
 # CCA-Audit
 
 **6-layer parallel code audit pipeline powered by LLMs.**
