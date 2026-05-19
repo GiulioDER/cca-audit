@@ -1,6 +1,6 @@
 # Promotion Kit — CCA-Audit Launch
 
-> Copy-paste ready posts for each channel. Replace `[LINK]` with `https://github.com/GiulioDER/cca-audit`.
+> Copy-paste ready posts for each channel.
 
 ---
 
@@ -10,7 +10,7 @@
 
 **Title:**
 ```
-Show HN: CCA-Audit – 6 parallel LLM auditors with non-overlapping scopes, zero duplicate findings
+Show HN: CCA-Audit – 6 parallel LLM auditors, non-overlapping scopes
 ```
 
 **Body (paste into URL field: leave blank, text field: paste below):**
@@ -181,17 +181,16 @@ Clean findings, no triage fatigue.
 
 **Tweet 3 (pipeline):**
 ```
-The 7-step pipeline:
+The pipeline:
 
-0. Detect changed files
-0.5. Auto-detect language + test runner + linter
-1. Launch 6 auditors in parallel
-2. Deduplicate (same file:line → merge)
-3. Prioritize: P1 Critical → P2 High → P3 cosmetic
-4. Auto-fix P1+P2
-5. Re-verify (your tests + linter)
-6. Architect review gate: APPROVED / REVISE / BLOCKED
-7. Commit
+1. Detect changed files + auto-detect language
+2. Launch 6 auditors in parallel
+3. Deduplicate (same file:line → merge)
+4. Prioritize: P1 Critical → P2 High → P3 cosmetic
+5. Auto-fix P1+P2
+6. Re-verify (your tests + linter)
+7. Architect review gate: APPROVED / REVISE / BLOCKED
+8. Commit
 ```
 
 **Tweet 4 (variants):**
@@ -395,7 +394,7 @@ GitHub: https://github.com/GiulioDER/cca-audit
 | Wednesday | r/programming | 9:00 AM |
 | Wednesday | r/ChatGPTCoding | 10:00 AM |
 | Thursday | r/devops | 9:00 AM |
-| Thursday | Dev.to article | 10:00 AM |
+| Thursday | Dev.to article | 10:00 AM | PUBLISHED |
 | Following week | ProductHunt | Tuesday 12:01 AM PT |
 
 ## Post-Launch Checklist
