@@ -385,32 +385,6 @@ GitHub: https://github.com/GiulioDER/cca-audit
 
 ---
 
-## 6. LinkedIn Post
-
-```
-I just open-sourced CCA-Audit — a 6-layer code audit pipeline powered by LLMs.
-
-The problem it solves: when you ask an AI to "review this code," you get duplicate and contradictory findings. Half the output is noise.
-
-The fix: 6 specialized auditors, each with a non-overlapping scope. Security is the single authority for security. Bug scanner handles runtime issues only. No cross-contamination.
-
-Pipeline:
-Detect files → Auto-detect language → 6 parallel auditors → Dedup → Prioritize → Auto-fix → Re-verify tests → Architect review gate
-
-Three variants:
-- Claude Code (one slash command)
-- Codex CLI (shell orchestrator)
-- Any model via OpenRouter (pip install)
-
-Works with Python, TypeScript, Go, Rust, Java, Ruby.
-
-MIT licensed: https://github.com/GiulioDER/cca-audit
-
-#opensource #ai #codereview #devtools
-```
-
----
-
 ## Posting Schedule
 
 | Day | Channel | Time (ET) |
@@ -420,7 +394,6 @@ MIT licensed: https://github.com/GiulioDER/cca-audit
 | Tuesday | Twitter/X thread | 11:00 AM |
 | Wednesday | r/programming | 9:00 AM |
 | Wednesday | r/ChatGPTCoding | 10:00 AM |
-| Wednesday | LinkedIn | 12:00 PM |
 | Thursday | r/devops | 9:00 AM |
 | Thursday | Dev.to article | 10:00 AM |
 | Following week | ProductHunt | Tuesday 12:01 AM PT |
