@@ -21,6 +21,7 @@ console = Console()
 @click.option("--config", "-c", "config_path", default=None, type=click.Path(), help="Config file")
 @click.option("--no-fix", is_flag=True, help="Audit only, no fixes")
 @click.option("--p1-only", is_flag=True, help="Fix only P1 Critical findings")
+@click.option("--deferred", is_flag=True, help="Second pass: fix P3 items deferred from previous round")
 @click.option("--dry-run", is_flag=True, help="Show what would be audited without running")
 @click.option("--commit", "-n", default=None, type=int, help="Audit last N commits")
 @click.option("--files", "-f", multiple=True, help="Audit specific files")
@@ -34,6 +35,7 @@ def main(
     config_path: str | None,
     no_fix: bool,
     p1_only: bool,
+    deferred: bool,
     dry_run: bool,
     commit: int | None,
     files: tuple[str, ...],
@@ -57,6 +59,20 @@ def main(
             "[red]Error: No API key. Set OPENROUTER_API_KEY env var or api_key in config.[/red]"
         )
         sys.exit(1)
+
+    if deferred:
+        from cca_audit.pipeline import run_deferred_pass
+
+        result = asyncio.run(run_deferred_pass(cfg))
+        if result.get("status") == "NO_DEFERRED":
+            console.print("[yellow]No deferred items found. Run a full audit first.[/yellow]")
+        else:
+            fixed = result.get("fixed", 0)
+            stale = result.get("stale", 0)
+            console.print(
+                f"\n[green bold]Second pass complete: {fixed} fixed, {stale} stale[/green bold]"
+            )
+        return
 
     from cca_audit.pipeline import run_pipeline
 

@@ -225,3 +225,78 @@ def _build_result(
         "verdict": verdict,
         "auditors": len(audit_results),
     }
+
+
+async def run_deferred_pass(cfg: Config) -> dict[str, Any]:
+    """Second pass: fix P3 items deferred from the previous CCA round.
+
+    Reads the last CCA audit commit message, extracts deferred items,
+    and sends them to the LLM for resolution.
+    """
+    import re as _re
+
+    console.print("[bold]Second Pass: Fixing deferred P3 items[/bold]\n")
+
+    try:
+        result = subprocess.run(
+            ["git", "log", "-5", "--format=%B", "--grep=audit fixes from.*CCA review"],
+            capture_output=True, text=True, timeout=15,
+        )
+        commit_body = result.stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        commit_body = ""
+
+    if not commit_body:
+        return {"status": "NO_DEFERRED"}
+
+    p3_match = _re.search(r"P3.*?:(.+?)(?:Audit:|Co-Authored|$)", commit_body, _re.DOTALL)
+    if not p3_match:
+        deferred_match = _re.search(r"Deferred.*?:(.+?)(?:Audit:|Co-Authored|$)", commit_body, _re.DOTALL)
+        if not deferred_match:
+            return {"status": "NO_DEFERRED"}
+        deferred_text = deferred_match.group(1).strip()
+    else:
+        deferred_text = p3_match.group(1).strip()
+
+    items = [line.strip().lstrip("- ") for line in deferred_text.split("\n") if line.strip().startswith("-")]
+    if not items:
+        return {"status": "NO_DEFERRED"}
+
+    console.print(f"Found {len(items)} deferred items:")
+    for item in items:
+        console.print(f"  - {item}")
+
+    prompt = (
+        "You are fixing deferred P3 items from a previous CCA audit.\n\n"
+        "Deferred items:\n" + "\n".join(f"- {i}" for i in items) + "\n\n"
+        "For each item:\n"
+        "1. Read the target file and check if the issue still exists\n"
+        "2. If still relevant: describe the fix (minimal diff)\n"
+        "3. If code moved/deleted: mark STALE\n\n"
+        "Output for each item: FIXED (with description) or STALE (with reason)."
+    )
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {cfg.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": cfg.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "max_tokens": cfg.max_tokens,
+                "temperature": cfg.temperature,
+            },
+        )
+        resp.raise_for_status()
+        body = resp.json()
+
+    response_text = body["choices"][0]["message"]["content"]
+    console.print(f"\n{response_text}")
+
+    fixed = response_text.lower().count("fixed")
+    stale = response_text.lower().count("stale")
+
+    return {"status": "COMPLETE", "fixed": fixed, "stale": stale, "items": len(items)}

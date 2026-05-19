@@ -9,6 +9,7 @@ AGENTS_DIR="$SCRIPT_DIR/agents"
 AUDIT_DIR=".claude/audits"
 NO_FIX=false
 P1_ONLY=false
+DEFERRED=false
 AUDITORS_FILTER=""
 
 usage() {
@@ -18,11 +19,13 @@ Usage: $(basename "$0") [OPTIONS]
 Options:
   --no-fix              Audit only, do not implement fixes
   --p1-only             Fix only P1 Critical findings
+  --deferred            Second pass: fix P3 items deferred from previous round
   --auditors LIST       Comma-separated auditor names (e.g., security,bug,code)
   --help                Show this help
 
 Examples:
-  $(basename "$0")                          # Full pipeline
+  $(basename "$0")                          # Full pipeline (Round 1: P1+P2)
+  $(basename "$0") --deferred              # Second pass (Round 2: fix deferred P3)
   $(basename "$0") --no-fix                 # Audit only
   $(basename "$0") --auditors security,bug  # Specific auditors only
   $(basename "$0") --p1-only               # Fix only critical findings
@@ -34,11 +37,40 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --no-fix) NO_FIX=true; shift ;;
     --p1-only) P1_ONLY=true; shift ;;
+    --deferred) DEFERRED=true; shift ;;
     --auditors) AUDITORS_FILTER="$2"; shift 2 ;;
     --help) usage ;;
     *) echo "Unknown option: $1"; usage ;;
   esac
 done
+
+# Second Pass: fix deferred P3 items from previous round
+if [[ "$DEFERRED" == true ]]; then
+  echo "=== Second Pass: Fixing deferred P3 items ==="
+  LAST_CCA_MSG=$(git log -5 --format=%B --grep="audit fixes from.*CCA review" | head -60)
+  if [[ -z "$LAST_CCA_MSG" ]]; then
+    echo "No deferred items found. Run a full audit first."
+    exit 0
+  fi
+
+  DEFERRED_PROMPT="You are fixing deferred P3 items from a previous CCA audit.
+
+Here is the commit message from the last CCA audit round:
+$LAST_CCA_MSG
+
+Extract the P3/Deferred items. For each one:
+1. Read the target file and check if the issue still exists
+2. If still relevant: fix it (minimal diff)
+3. If code moved/deleted: mark STALE and skip
+
+After fixing, run tests and lint to verify nothing broke."
+
+  codex --prompt "$DEFERRED_PROMPT" 2>/dev/null || echo "Deferred fix failed"
+
+  echo ""
+  echo "=== Second Pass Complete ==="
+  exit 0
+fi
 
 # Step 0: Detect changed files
 echo "=== Step 0: Detecting changed files ==="

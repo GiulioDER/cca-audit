@@ -47,8 +47,9 @@ Drop-in agents for [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 # Install
 curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/main/claude-code/install.sh | bash
 
-# Run
-/audit-fix              # audit + fix all uncommitted changes
+# Run (two-pass workflow)
+/audit-fix              # Round 1: audit + fix P1+P2, defer P3
+/audit-fix deferred     # Round 2: fix deferred P3 items from previous round
 /audit-fix no-fix       # audit only, no fixes
 /audit-fix p1-only      # fix only critical findings
 /audit-fix commit 3     # audit last 3 commits
@@ -64,8 +65,9 @@ Shell orchestrator for [OpenAI Codex CLI](https://github.com/openai/codex). Runs
 # Install
 cd your-project && bash /path/to/cca-audit/codex/install.sh
 
-# Run
-bash cca-audit.sh                    # full pipeline
+# Run (two-pass workflow)
+bash cca-audit.sh                    # Round 1: full pipeline (P1+P2)
+bash cca-audit.sh --deferred         # Round 2: fix deferred P3 items
 bash cca-audit.sh --no-fix           # audit only
 bash cca-audit.sh --auditors security,bug   # specific auditors
 ```
@@ -80,8 +82,9 @@ Standalone Python CLI. Works with any model via [OpenRouter](https://openrouter.
 # Install
 pip install cca-audit
 
-# Run
-cca-audit                          # full pipeline
+# Run (two-pass workflow)
+cca-audit                          # Round 1: full pipeline (P1+P2)
+cca-audit --deferred               # Round 2: fix deferred P3 items
 cca-audit --no-fix                 # audit only
 cca-audit --model anthropic/claude-sonnet-4   # choose model
 cca-audit --format json            # JSON output
@@ -97,7 +100,16 @@ All variants use the same 3-tier priority system:
 |----------|----------|--------|
 | **P1 Critical** | Security vulns, data corruption, auth bypass, injection | Fix before deploy |
 | **P2 High** | DRY divergence risk, stale misleading comments, config inconsistencies | Fix now |
-| **P3 Nice-to-have** | Cosmetic, style, naming, unused params | Deferred |
+| **P3 Nice-to-have** | Cosmetic, style, naming, unused params | Deferred to Round 2 |
+
+## Two-Pass Workflow
+
+CCA-Audit is designed for a clean two-pass close-out:
+
+1. **Round 1** (`/audit-fix` or `cca-audit`): runs full 6-agent audit, fixes P1 Critical + P2 High, defers P3 cosmetic items. Commits with a structured message listing deferred items.
+2. **Round 2** (`/audit-fix deferred` or `cca-audit --deferred`): reads the deferred list from the previous commit, checks each item is still relevant, fixes what remains, marks stale items. Commits separately.
+
+This ensures every audit is fully closed out -- no lingering deferred items across PRs.
 
 ## Documentation
 

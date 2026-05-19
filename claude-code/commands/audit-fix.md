@@ -14,6 +14,7 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 - `files path1 path2 ...` = audit specific files only
 - `no-fix` = audit only, report findings but do NOT implement fixes
 - `p1-only` = only fix P1 Critical findings, skip P2/P3
+- `deferred` = second pass — fix P3 items deferred from the previous round (see § Second Pass below)
 
 ## Step 0: Detect Target Files
 
@@ -258,4 +259,54 @@ At the end, print:
 
 ### Deferred (P3)
 - <list>
+
+💡 To fix deferred items, run: `/audit-fix deferred`
 ```
+
+## Second Pass — Fixing Deferred Items
+
+When invoked with `deferred`, skip the full 6-agent audit and instead:
+
+1. **Read the last commit message** (`git log -1 --format=%B`). Extract the `P3:` section listing deferred items.
+   - If no P3 section found, also check the previous 3 commits for a CCA audit commit (contains "audit fixes from 6-layer CCA review").
+   - If still nothing, STOP with "No deferred items found. Run a full `/audit-fix` first."
+
+2. **Parse deferred items** into a fix list. Each item has: description, file (if mentioned), category.
+
+3. **For each deferred item**:
+   - Read the target file
+   - Assess whether the fix is still relevant (code may have changed since the first pass)
+   - If still relevant: implement the fix (same rules as Step 4 — minimal diffs, no refactoring)
+   - If no longer relevant (code moved/deleted): mark as STALE and skip
+
+4. **Re-verify** (same as Step 5): run TEST_CMD + LINT_CMD. Fix failures.
+
+5. **Commit** with message:
+   ```
+   fix(<scope>): N deferred fixes from CCA second pass
+
+   P3 fixes:
+   - <list of fixes, one line each>
+
+   Stale (skipped):
+   - <list of stale items, if any>
+
+   Second pass of 6-layer CCA review.
+
+   Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+   ```
+
+6. **Report**:
+   ```
+   ## CCA Second Pass Complete
+
+   | Item | Status |
+   |------|--------|
+   | <description> | FIXED / STALE / BLOCKED |
+
+   All deferred items from the previous audit round are now resolved.
+   ```
+
+This two-pass workflow ensures the audit is fully closed out:
+- **Round 1** (`/audit-fix`): fixes P1 Critical + P2 High, defers P3 cosmetic/style items
+- **Round 2** (`/audit-fix deferred`): cleans up P3 items in a separate commit
