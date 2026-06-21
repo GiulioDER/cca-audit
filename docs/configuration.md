@@ -24,99 +24,18 @@ P2 High: [your criteria]
 P3 Nice-to-have: [your criteria]
 ```
 
-## Codex Variant
+### v2-specific configuration
 
-### CLI options
+`/audit-fix-v2` adds 3 conditional domain auditors. Tune which diffs trigger them by editing the
+`HIGH_STAKES_PATHS` / `NUMERIC_PATHS` / `DATA_PATHS` lists in Step 0.5 of `audit-fix-v2.md`, and
+add your project's hard invariants to the High-Stakes and Data-Integrity auditor scopes (Step 1).
+Replace the `{PROJECT_CONTEXT}` placeholder in the prompt template with your project's description.
 
-```bash
-bash cca-audit.sh [OPTIONS]
-
---no-fix              Audit only
---p1-only             Fix only P1
---auditors LIST       Comma-separated (e.g., security,bug)
-```
-
-### Agent customization
-
-Edit files in `.cca-audit/agents/` to adjust checks or add context.
-
-## OpenRouter Variant
-
-### Config file
-
-Create `cca-audit.yaml` in your project root:
-
-```yaml
-# API key (or use OPENROUTER_API_KEY env var)
-api_key: sk-or-...
-
-# Model (see https://openrouter.ai/models)
-model: anthropic/claude-sonnet-4-20250514
-
-# Max tokens per auditor response
-max_tokens: 8192
-
-# Temperature (0.0 = deterministic)
-temperature: 0.0
-
-# Auditors to run
-auditors:
-  - code
-  - bug
-  - security
-  - perf
-  - doc
-  - env
-  - dep
-
-# Output directory
-output_dir: .claude/audits
-
-# Output format: markdown or json
-output_format: markdown
-
-# Max review iterations
-max_revise_iterations: 3
-
-# Project context injected into all prompts
-project_context: ""
-```
-
-### CLI options
-
-```bash
-cca-audit [OPTIONS]
-
--m, --model TEXT      LLM model override
--c, --config PATH     Config file path
--n, --commit INT      Audit last N commits
--f, --files PATH      Audit specific files (repeatable)
--a, --auditors TEXT   Comma-separated auditor names
---format [markdown|json]  Output format
---no-fix              Audit only
---p1-only             Fix only P1
---dry-run             Show what would be audited
-```
-
-### Environment variables
-
-| Variable | Description |
-|----------|-------------|
-| `OPENROUTER_API_KEY` | API key (required) |
-| `CCA_MODEL` | Model override |
-
-### Config file search order
-
-1. Path given via `--config`
-2. `cca-audit.yaml`
-3. `cca-audit.yml`
-4. `.cca-audit.yaml`
-
-## Common Configuration Across Variants
+## Output Reports
 
 ### Output directory
 
-All variants write reports to `.claude/audits/` by default. Files created:
+Both pipelines write reports to `.claude/audits/` by default. Files created:
 
 | File | Content |
 |------|---------|

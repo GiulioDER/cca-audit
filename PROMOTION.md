@@ -29,10 +29,7 @@ The pipeline:
 
 The key design decision: non-overlapping scopes. When you give an LLM "review this code for everything," you get 30 findings where half are duplicates and some contradict each other. When you give 6 agents each a strict, exclusive scope, you get clean, actionable findings.
 
-Three variants:
-- Claude Code: drop-in `/audit-fix` slash command (one-line install)
-- Codex CLI: shell script that parallelizes `codex` calls
-- OpenRouter API: `pip install cca-audit` — works with any model (Claude, GPT-4, Gemini, Llama)
+Two pipelines for Claude Code: `/audit-fix` (fast, 6 auditors) and `/audit-fix-v2` (up to 9 auditors plus anti-hallucination, anti-regression, and fix→finding verification gates).
 
 MIT licensed. Built this for a production system, extracted and generalized it.
 
@@ -56,7 +53,7 @@ I've been running this internally on a production codebase for a while and final
 
 **How to install (Claude Code):**
 
-    curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/main/claude-code/install.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
 
 **How to use:**
 
@@ -67,7 +64,7 @@ I've been running this internally on a production codebase for a while and final
 
 The pipeline deduplicates findings, auto-fixes critical issues, re-runs your tests to make sure nothing broke, then gates through an architect review agent that gives a final APPROVED/REVISE/BLOCKED verdict.
 
-Also has a Codex CLI variant and a standalone Python CLI via OpenRouter if you want to use GPT-4 or other models.
+There's also a heavier `/audit-fix-v2` with 3 conditional domain auditors (high-stakes, numerical/units, data-integrity) and verification gates for findings and regressions.
 
 GitHub: https://github.com/GiulioDER/cca-audit
 
@@ -85,10 +82,9 @@ Built an audit pipeline that runs 6 AI auditors in parallel on your code changes
 
 The pipeline: detect files → language detection → 6 parallel auditors → dedup → prioritize (P1/P2/P3) → auto-fix → re-verify tests → architect review gate.
 
-Three ways to run it:
-1. **Claude Code:** `/audit-fix` (one slash command)
-2. **Codex CLI:** `bash cca-audit.sh` (shell orchestrator)
-3. **Any model via OpenRouter:** `pip install cca-audit && cca-audit`
+Two pipelines, both for Claude Code:
+1. **`/audit-fix`** — fast default, 6 parallel auditors
+2. **`/audit-fix-v2`** — up to 9 auditors + verification gates (anti-hallucination, anti-regression, fix→finding mapping)
 
 The dedup step is where the magic happens — same file:line across different auditors gets merged into one finding with the highest severity. No more sorting through 30 findings that are really 12 unique issues.
 
@@ -121,11 +117,11 @@ The "Does NOT Check" column is what makes it work. Each agent knows its boundari
 
 Pipeline: detect files → auto-detect language → 6 parallel auditors → dedup (same file:line = merge) → prioritize P1/P2/P3 → auto-fix → re-verify with tests+lint → architect review gate.
 
-Three variants: Claude Code agents, Codex CLI shell script, or standalone Python CLI via OpenRouter (any model).
+Two pipelines for Claude Code: `/audit-fix` (6 auditors) and `/audit-fix-v2` (up to 9 auditors + verification gates).
 
 MIT: https://github.com/GiulioDER/cca-audit
 
-Technical details in the docs: https://github.com/GiulioDER/cca-audit/blob/main/docs/auditor-scopes.md
+Technical details in the docs: https://github.com/GiulioDER/cca-audit/blob/master/docs/auditor-scopes.md
 ```
 
 ### r/devops
@@ -146,7 +142,7 @@ Priority framework:
 
 The two-pass workflow is nice for PRs: Round 1 fixes what matters, Round 2 (`--deferred`) cleans up cosmetic items separately so your PR diff stays focused.
 
-Three variants: Claude Code slash command, Codex CLI bash script (background jobs for parallelism), or `pip install cca-audit` (works with any model via OpenRouter).
+Two pipelines: `/audit-fix` (fast, 6 auditors) and `/audit-fix-v2` (up to 9 auditors with anti-hallucination and anti-regression gates).
 
 https://github.com/GiulioDER/cca-audit
 ```
@@ -193,19 +189,16 @@ The pipeline:
 8. Commit
 ```
 
-**Tweet 4 (variants):**
+**Tweet 4 (two pipelines):**
 ```
-Three ways to use it:
+Two pipelines for Claude Code:
 
-Claude Code:
-curl install → /audit-fix
+/audit-fix
+→ fast default, 6 parallel auditors
 
-Codex CLI:
-bash cca-audit.sh (parallel background jobs)
-
-Any model via OpenRouter:
-pip install cca-audit
-cca-audit --model anthropic/claude-sonnet-4
+/audit-fix-v2
+→ up to 9 auditors + 3 verification gates
+  (anti-hallucination, anti-regression, fix→finding mapping)
 
 Works with Python, TypeScript, Go, Rust, Java, Ruby.
 ```
@@ -303,23 +296,20 @@ One design choice that saved us a lot of noise: defer cosmetic items to a separa
 
 This keeps your main PR focused on what matters, with a clean follow-up for cosmetic cleanup.
 
-## Three Ways to Use It
+## Two Pipelines
 
-### Claude Code (recommended)
+### `/audit-fix` — fast default
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/main/claude-code/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
 /audit-fix
 ```
 
-### Codex CLI
+### `/audit-fix-v2` — thorough
+Adds 3 conditional domain auditors (high-stakes/safety, numerical/units, data-integrity) and
+3 verification gates: anti-hallucination (findings re-verified before any fix), anti-regression
+(fix diff reviewed for scope creep), and fix→finding mapping at the architect gate.
 ```bash
-bash cca-audit.sh
-```
-
-### Any model via OpenRouter
-```bash
-pip install cca-audit
-cca-audit --model anthropic/claude-sonnet-4
+/audit-fix-v2
 ```
 
 ## Results
@@ -356,10 +346,9 @@ CCA-Audit runs 6 specialized LLM auditors in parallel on your codebase. Each aud
 
 The pipeline deduplicates, prioritizes (P1 Critical / P2 High / P3 cosmetic), auto-fixes critical issues, re-verifies with your test suite, and gates through an architect review.
 
-Three variants:
-- Claude Code: one slash command (/audit-fix)
-- Codex CLI: shell orchestrator for parallel auditing
-- OpenRouter API: pip install cca-audit — works with any model (Claude, GPT-4, Gemini, Llama)
+Two pipelines for Claude Code:
+- `/audit-fix`: fast default, 6 parallel auditors
+- `/audit-fix-v2`: up to 9 auditors + verification gates (anti-hallucination, anti-regression, fix→finding mapping)
 
 Works with Python, TypeScript, Go, Rust, Java, and Ruby via auto-detection.
 
@@ -377,7 +366,7 @@ The two-pass workflow is my favorite part: Round 1 fixes what matters, Round 2 c
 I'd love feedback on:
 1. How the language auto-detection works for non-Python projects
 2. What additional auditor types would be useful (database? accessibility? i18n?)
-3. Whether the Codex CLI variant works well in CI/CD pipelines
+3. Whether `/audit-fix-v2`'s verification gates earn their extra cost on your codebase
 
 GitHub: https://github.com/GiulioDER/cca-audit
 ```

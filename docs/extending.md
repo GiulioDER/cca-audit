@@ -2,7 +2,7 @@
 
 Add custom auditors to check domain-specific patterns.
 
-## Claude Code / Codex: Adding an Agent File
+## Adding an Agent File
 
 ### 1. Create the agent file
 
@@ -85,84 +85,8 @@ Output: Finding IDs MY-001..N, severity, file:line, fix.
 
 Add your auditor's scope to `docs/auditor-scopes.md` and ensure no overlap with existing auditors.
 
-## OpenRouter: Adding a Python Auditor
-
-### 1. Create the prompt template
-
-Create `cca_audit/prompts/my_auditor.j2`:
-
-```jinja2
-You are a [domain] auditor. Analyze the following {{ file_count }} files.
-
-**Scope (NON-OVERLAPPING):**
-- [Your exclusive checks]
-
-**Does NOT check:**
-- [What other auditors handle]
-
-**Languages detected:** {{ languages }}
-
-**Files changed:**
-{% for f in files %}
-{{ loop.index }}. {{ f }}
-{% endfor %}
-
-{% if project_context %}
-**Project context:** {{ project_context }}
-{% endif %}
-
-**Diff to review:**
-\```
-{{ diff_content }}
-\```
-
-Report with IDs ({{ prefix }}-001, etc.), severity, file:line, and fix.
-```
-
-### 2. Create the auditor class
-
-Create `cca_audit/auditors/my_auditor.py`:
-
-```python
-from cca_audit.auditors.base import BaseAuditor
-
-class MyAuditor(BaseAuditor):
-    name = "my_auditor"
-    prefix = "MY"
-    output_file = "AUDIT_MY.md"
-
-    def template_name(self) -> str:
-        return "my_auditor.j2"
-```
-
-### 3. Register in the auditor registry
-
-Edit `cca_audit/auditors/__init__.py`:
-
-```python
-from cca_audit.auditors.my_auditor import MyAuditor
-
-AUDITOR_REGISTRY: dict[str, type[BaseAuditor]] = {
-    # ... existing auditors ...
-    "my_auditor": MyAuditor,
-}
-```
-
-### 4. Enable in config
-
-Add to `cca-audit.yaml`:
-
-```yaml
-auditors:
-  - code
-  - bug
-  - security
-  - perf
-  - doc
-  - env
-  - dep
-  - my_auditor  # new
-```
+> For a v2-style **conditional** domain auditor, also add a detection flag in Step 0.5 of
+> `audit-fix-v2.md` (e.g. a `*_PATHS` list) and gate the agent's launch on that flag in Step 1.
 
 ## Design Principles
 

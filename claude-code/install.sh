@@ -18,9 +18,11 @@ for agent in "$SCRIPT_DIR/agents/"cca-*.md; do
   echo "  Installed $(basename "$agent") -> $AGENTS_DIR/"
 done
 
-# Copy orchestrator command
-cp "$SCRIPT_DIR/commands/audit-fix.md" "$COMMANDS_DIR/audit-fix.md"
-echo "  Installed audit-fix.md -> $COMMANDS_DIR/"
+# Copy orchestrator commands (v1 + v2)
+for cmd in "$SCRIPT_DIR/commands/"audit-fix*.md; do
+  cp "$cmd" "$COMMANDS_DIR/$(basename "$cmd")"
+  echo "  Installed $(basename "$cmd") -> $COMMANDS_DIR/"
+done
 
 echo ""
-echo "CCA-Audit installed. Run /audit-fix in Claude Code to start."
+echo "CCA-Audit installed. Run /audit-fix (or /audit-fix-v2) in Claude Code to start."

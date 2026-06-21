@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This project welcomes contributions of
 ### Reporting Issues
 
 - Use GitHub Issues to report bugs or request features
-- Include your variant (Claude Code / Codex / OpenRouter), OS, and reproduction steps
+- Include the pipeline (`/audit-fix` v1 or `/audit-fix-v2`), OS, and reproduction steps
 
 ### Pull Requests
 
@@ -28,26 +28,11 @@ See [docs/extending.md](docs/extending.md) for the full guide. In short:
 ### Code Style
 
 - Agent markdown files: follow the existing structure (frontmatter, status block, scope, checks, output format, execution logging, output verification)
-- Python code (OpenRouter variant): use `ruff` for formatting and linting, type hints required
-- Shell scripts: use `shellcheck` for linting
 
 ## Testing
 
-### Claude Code Variant
-
-Install in a test project and run `/audit-fix no-fix` on a file with known issues.
-
-### Codex Variant
-
-```bash
-cd codex && bash cca-audit.sh --dry-run
-```
-
-### OpenRouter Variant
-
-```bash
-cd openrouter && pip install -e ".[dev]" && pytest
-```
+Install in a test project and run `/audit-fix no-fix` (or `/audit-fix-v2 no-fix`) on a file with
+known issues, and confirm the findings report is produced without applying fixes.
 
 ## License
 

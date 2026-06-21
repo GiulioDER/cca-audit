@@ -23,12 +23,15 @@ cd your-project
 ```
 
 This copies the agent and command files into your project's `.claude/` directory:
-- `.claude/commands/audit-fix.md` -- the orchestrator
-- `.claude/agents/cca-*.md` -- 10 specialized agents
+- `.claude/commands/audit-fix.md` -- the v1 orchestrator
+- `.claude/commands/audit-fix-v2.md` -- the v2 orchestrator (9 auditors + verification gates)
+- `.claude/agents/cca-*.md` -- 13 specialized agents
 
 ## Usage
 
-Inside Claude Code, use the `/audit-fix` slash command:
+Two pipelines ship; pick depth per task.
+
+### `/audit-fix` (v1) — fast default
 
 ```
 /audit-fix                    # Audit + fix all uncommitted changes
@@ -38,6 +41,21 @@ Inside Claude Code, use the `/audit-fix` slash command:
 /audit-fix commit 3           # Audit the last 3 commits
 /audit-fix files src/app.py   # Audit specific files
 ```
+
+### `/audit-fix-v2` — thorough
+
+Adds 3 conditional domain auditors (high-stakes/safety, numerical/units, data-integrity) and
+3 verification gates: L2.5 anti-hallucination (findings re-verified before any fix), L5.5
+anti-regression (fix diff reviewed for scope creep), and L6 fix→finding mapping.
+
+```
+/audit-fix-v2                 # Full 9-auditor pipeline with verification gates
+/audit-fix-v2 no-fix          # Audit + verify only, no fixes
+/audit-fix-v2 deferred        # Second pass for deferred P3 items
+```
+
+Use **v1** for everyday changes; reach for **v2** on high-stakes diffs (money, auth, data
+migrations, numeric-heavy code) or when you want findings independently verified before they're acted on.
 
 ## What Happens
 
