@@ -17,9 +17,11 @@ Get-ChildItem "$ScriptDir\agents\cca-*.md" | ForEach-Object {
     Write-Host "  Installed $($_.Name) -> $AgentsDir\"
 }
 
-# Copy orchestrator command
-Copy-Item "$ScriptDir\commands\audit-fix.md" -Destination "$CommandsDir\audit-fix.md"
-Write-Host "  Installed audit-fix.md -> $CommandsDir\"
+# Copy orchestrator commands (v1 + v2)
+Get-ChildItem "$ScriptDir\commands\audit-fix*.md" | ForEach-Object {
+    Copy-Item $_.FullName -Destination "$CommandsDir\$($_.Name)"
+    Write-Host "  Installed $($_.Name) -> $CommandsDir\"
+}
 
 Write-Host ""
-Write-Host "CCA-Audit installed. Run /audit-fix in Claude Code to start."
+Write-Host "CCA-Audit installed. Run /audit-fix (or /audit-fix-v2) in Claude Code to start."

@@ -231,7 +231,7 @@ P3:
 Audit: 6 parallel agents, X raw findings → Y unique after dedup → Z fixed.
 Architect-reviewer: APPROVED.
 
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
 ```
 
 ## Output Summary
@@ -293,7 +293,7 @@ When invoked with `deferred`, skip the full 6-agent audit and instead:
 
    Second pass of 6-layer CCA review.
 
-   Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
+   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
    ```
 
 6. **Report**:
