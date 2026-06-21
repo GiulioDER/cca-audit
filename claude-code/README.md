@@ -25,7 +25,7 @@ cd your-project
 This copies the agent and command files into your project's `.claude/` directory:
 - `.claude/commands/audit-fix.md` -- the v1 orchestrator
 - `.claude/commands/audit-fix-v2.md` -- the v2 orchestrator (9 auditors + verification gates)
-- `.claude/agents/cca-*.md` -- 13 specialized agents
+- `.claude/agents/cca-*.md` -- 12 specialized agents
 
 ## Usage
 
