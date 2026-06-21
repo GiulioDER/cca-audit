@@ -4,9 +4,11 @@
 
 # CCA-Audit
 
-**6-layer parallel code audit pipeline powered by LLMs.**
+**Parallel multi-agent code audit + fix pipeline for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).**
 
-CCA-Audit runs 6 specialized auditors in parallel on your codebase, deduplicates findings, auto-fixes critical issues, re-verifies, and gates the result through an architect review -- all in one command.
+CCA-Audit runs specialized auditors in parallel on your codebase, deduplicates findings, auto-fixes critical issues, re-verifies, and gates the result through an architect review -- all in one command.
+
+Two pipelines ship: **`/audit-fix`** (fast, 6 auditors) and **`/audit-fix-v2`** (up to 9 auditors plus anti-hallucination, anti-regression, and fix→finding verification gates).
 
 Works with **any language** (Python, TypeScript, Go, Rust, Java, Ruby) via auto-detection.
 
