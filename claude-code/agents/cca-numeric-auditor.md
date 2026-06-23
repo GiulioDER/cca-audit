@@ -8,7 +8,7 @@ model: inherit
 # Numerical / Units Audit
 
 Find dimensional, units, scaling, and sign-correctness bugs in changed code. This is the
-recurring "the math looks right but the units/sign are wrong" class. Used by the v2 pipeline
+recurring "the math looks right but the units/sign are wrong" class. Used by the CCA pipeline
 (domain auditor, runs when the diff touches numeric/quantitative code).
 
 **NOT for general runtime bugs** (use bug-auditor) or performance (use perf-auditor).

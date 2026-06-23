@@ -8,7 +8,7 @@ model: inherit
 # Findings Verification (Anti-Hallucination)
 
 Verify that audit findings are real **before** any fix is applied. This agent is the
-anti-hallucination gate used by the v2 pipeline (Layer 2.5). It does NOT fix anything —
+anti-hallucination gate used by the CCA pipeline (Layer 2.5). It does NOT fix anything —
 it only renders a verdict per finding.
 
 Output to `.claude/audits/AUDIT_FPCHECK.md`.

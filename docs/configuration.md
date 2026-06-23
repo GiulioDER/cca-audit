@@ -24,18 +24,26 @@ P2 High: [your criteria]
 P3 Nice-to-have: [your criteria]
 ```
 
-### v2-specific configuration
+### Tiers and domain dispatch
 
-`/audit-fix-v2` adds 3 conditional domain auditors. Tune which diffs trigger them by editing the
-`HIGH_STAKES_PATHS` / `NUMERIC_PATHS` / `DATA_PATHS` lists in Step 0.5 of `audit-fix-v2.md`, and
-add your project's hard invariants to the High-Stakes and Data-Integrity auditor scopes (Step 1).
-Replace the `{PROJECT_CONTEXT}` placeholder in the prompt template with your project's description.
+`/audit-fix` is tiered (FAST / STANDARD / DEEP), auto-selected in Step 0.6. To tune it:
+- **Tier thresholds** — edit Step 0.6 (the FAST size/file limits), or force a tier per run with the
+  `fast` / `deep` argument.
+- **Which diffs trigger the conditional auditors** — edit the `*_PATHS` lists
+  (`HIGH_STAKES_PATHS` / `NUMERIC_PATHS` / `DATA_PATHS` / `DEP_PATHS` / `DEPLOY_PATHS`) in Step 0.5.
+- **Project invariants** — add your hard rules to the High-Stakes / Data-Integrity / Deployability
+  auditor scopes (look for `CUSTOMIZE:`), and replace the `{PROJECT_CONTEXT}` placeholder in the
+  Step 1 prompt template with your project's description.
+
+`/audit-fix-v2` is a backward-compatible alias that just forces the DEEP tier.
 
 ## Output Reports
 
 ### Output directory
 
-Both pipelines write reports to `.claude/audits/` by default. Files created:
+Auditors return their findings as structured JSON, which the pipeline consumes as the **authoritative**
+source. They may **optionally** also write a human-readable trail to `.claude/audits/` (the pipeline
+does not depend on these files). Files that may be created:
 
 | File | Content |
 |------|---------|
@@ -45,6 +53,7 @@ Both pipelines write reports to `.claude/audits/` by default. Files created:
 | `AUDIT_PERF.md` | Performance findings |
 | `AUDIT_DOCS.md` | Documentation findings |
 | `AUDIT_ENV.md` | Environment config findings |
+| `AUDIT_DEPLOY.md` | Deployability findings |
 | `AUDIT_DEPS.md` | Dependency findings |
 | `FIXES.md` | Consolidated fix plan |
 | `REVIEW.md` | Architect-reviewer verdict |

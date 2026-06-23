@@ -85,8 +85,10 @@ Output: Finding IDs MY-001..N, severity, file:line, fix.
 
 Add your auditor's scope to `docs/auditor-scopes.md` and ensure no overlap with existing auditors.
 
-> For a v2-style **conditional** domain auditor, also add a detection flag in Step 0.5 of
-> `audit-fix-v2.md` (e.g. a `*_PATHS` list) and gate the agent's launch on that flag in Step 1.
+> For a **conditional** domain auditor, also add a detection flag in Step 0.5 of `audit-fix.md`
+> (e.g. a `*_PATHS` list), gate the agent's launch on that flag in the Step 1 tier table, and decide
+> which tiers run it. Auditors should return findings as the canonical JSON schema (see the Findings
+> Schema section of `audit-fix.md`) — that return value is what the orchestrator consumes.
 
 ## Design Principles
 
