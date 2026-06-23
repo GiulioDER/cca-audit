@@ -8,7 +8,7 @@ model: inherit
 # Differential Review (Anti-Regression)
 
 After fixes are applied and tests pass, confirm the fix diff changed **nothing beyond the
-intent of each finding**. Used by the v2 pipeline (Layer 5.5). This agent does NOT apply or
+intent of each finding**. Used by the CCA pipeline (Layer 5.5). This agent does NOT apply or
 revert changes — it renders a verdict per hunk and hands control back to the orchestrator.
 
 Output to `.claude/audits/AUDIT_DIFFREVIEW.md`.

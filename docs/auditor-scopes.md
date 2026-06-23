@@ -73,6 +73,25 @@ The security auditor owns ALL security checks. Other auditors must NOT flag:
 - **Dep auditor**: "This package hasn't been updated in 3 years" (maintenance risk)
 - **Security auditor**: "This package has CVE-2024-XXXX" (known vulnerability)
 
+## Conditional Auditors
+
+The matrix above covers the **core** auditors that always run (the FAST tier runs only Code / Bug /
+Security). The tiered pipeline also dispatches **conditional** auditors when the diff touches their
+concern:
+
+| Auditor | Runs when | Exclusive scope | Does NOT check |
+|---------|-----------|-----------------|----------------|
+| **High-Stakes / Safety** | money / auth / delete / irreversible paths | Bounds, caps, guards, kill-switches, idempotency on irreversible actions | Generic bugs (bug), units (numeric) |
+| **Numerical / Units** | non-trivial arithmetic | Sign, units, scaling, rounding, conversions | Generic bugs, performance |
+| **Data-Integrity** | migrations / SQL / schema | Migration+grant presence, type assumptions, safe accessors, stale reads | CVEs (security), query latency (perf) |
+| **Deployability** | deployable code / units / migrations | Generated/protected files, dependency pin/lock breakers, service↔scheduler unit pairing, migration grants, deploy-target assumptions | Runtime correctness (bug/high-stakes), CVEs (security), maintenance (dep) |
+
+### Deploy vs others
+- **Deploy auditor**: "this new table has no GRANT shipping in the migration" (the role won't see it after deploy)
+- **Data-Integrity auditor**: "this column is read with the wrong type assumption" (correctness)
+- **Deploy auditor**: "this dependency bump breaks a pinned/locked constraint" (deploy-time)
+- **Dep auditor**: "this package is unmaintained" (health) — **Security**: "this package has a CVE"
+
 ## Adding a New Auditor
 
 When adding a custom auditor, you MUST:

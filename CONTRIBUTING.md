@@ -7,7 +7,7 @@ Thanks for your interest in contributing! This project welcomes contributions of
 ### Reporting Issues
 
 - Use GitHub Issues to report bugs or request features
-- Include the pipeline (`/audit-fix` v1 or `/audit-fix-v2`), OS, and reproduction steps
+- Include the tier used (`/audit-fix`, or `fast` / `deep` / the `/audit-fix-v2` alias), OS, and reproduction steps
 
 ### Pull Requests
 
@@ -31,7 +31,7 @@ See [docs/extending.md](docs/extending.md) for the full guide. In short:
 
 ## Testing
 
-Install in a test project and run `/audit-fix no-fix` (or `/audit-fix-v2 no-fix`) on a file with
+Install in a test project and run `/audit-fix no-fix` (or `/audit-fix deep no-fix`) on a file with
 known issues, and confirm the findings report is produced without applying fixes.
 
 ## License

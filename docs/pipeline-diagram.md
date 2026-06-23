@@ -2,53 +2,64 @@
 
 ## Overview
 
-CCA-Audit runs a deterministic 7-step pipeline (plus a Step 0.5 for language detection). The key insight is **parallel auditors with non-overlapping scopes** — each auditor is the sole authority for its domain, eliminating duplicate findings.
+CCA-Audit runs a deterministic, **tiered** pipeline. A single `/audit-fix` command auto-selects a
+tier (FAST / STANDARD / DEEP) from the diff's size and risk, then runs the matching stages. The key
+insight is **parallel auditors with non-overlapping scopes** — each auditor is the sole authority for
+its domain, eliminating duplicate findings — wrapped in verification gates that keep false positives
+and regressions out.
 
-## Full Pipeline
+## Full Pipeline (STANDARD / DEEP)
 
 ```mermaid
 flowchart TD
-    A["Step 0: Detect Target Files"] --> B["Step 0.5: Language & Tooling Detection"]
-    B --> C["Step 1: Launch 6 Parallel Auditors"]
-    
+    A["Step 0: Detect Target Files"] --> B["Step 0.5: Language, Tooling & Domain Detection"]
+    B --> T["Step 0.6: Tier Selection (FAST / STANDARD / DEEP)"]
+    T --> C["Step 1: Launch Parallel Auditors"]
+
     C --> C1["Code Quality"]
     C --> C2["Bug Scanner"]
     C --> C3["Security"]
     C --> C4["Performance"]
     C --> C5["Documentation"]
     C --> C6["Environment"]
-    
+    C --> C7["Conditional: High-Stakes / Numeric / Data / Dep / Deploy"]
+
     C1 --> D["Step 2: Consolidate & Deduplicate"]
     C2 --> D
     C3 --> D
     C4 --> D
     C5 --> D
     C6 --> D
-    
-    D --> E{"Step 3: Fix Plan"}
-    E -->|"no-fix mode"| STOP["Report & Exit"]
-    E -->|"fix mode"| F["Step 4: Implement Fixes"]
-    
+    C7 --> D
+
+    D --> V["Step 2.5: Verify findings (anti-hallucination)"]
+    V -->|"no-fix mode"| STOP["Report & Exit"]
+    V --> E{"Step 3: Fix Plan"}
+    E --> F["Step 4: Implement Fixes (P1 red→green)"]
+
     F --> G["Step 5: Re-verify (tests + lint)"]
-    G --> H{"Step 6: Architect Gate"}
-    
+    G --> R["Step 5.5: Regression Diff (anti-regression)"]
+    R --> H{"Step 6: Architect Gate + fix→finding map"}
+
     H -->|"APPROVED"| I["Step 7: Commit"]
     H -->|"REVISE"| F
     H -->|"BLOCKED"| BLOCK["Stop — needs human"]
 ```
+
+The **FAST** tier runs only the 3 core auditors (security, bug, code) and skips Steps 2.5 and 5.5.
 
 ## Step-by-Step
 
 ### Step 0: Detect Target Files
 
 Determines which files to audit based on arguments:
-- **Default**: all uncommitted changes (staged + unstaged vs HEAD)
-- **`commit N`**: diff of last N commits
-- **`files path1 path2`**: specific files only
+- **Default**: all uncommitted changes (staged + unstaged vs HEAD) plus untracked files.
+- **`commit N`**: diff of last N commits.
+- **`files path1 path2`**: specific files only.
 
 If no changes found, the pipeline stops immediately.
 
-### Step 0.5: Language & Tooling Detection
+### Step 0.5: Language, Tooling & Domain Detection
 
 Auto-detects from file extensions and project files:
 
@@ -58,56 +69,67 @@ Auto-detects from file extensions and project files:
 | `.ts`/`.tsx` files | TypeScript — looks for jest/vitest, eslint |
 | `.go` files | Go — uses `go test`, `golangci-lint` |
 | `.rs` files | Rust — uses `cargo test`, `clippy` |
-| `package.json` | Detects React, Next.js, Express |
-| `manage.py` | Detects Django |
 
-This information is passed to all auditors so they apply language-appropriate checks.
+It also maps the diff to **domains** (high-stakes, numeric, data, dependency, deployability) to decide
+which conditional auditors to dispatch.
+
+### Step 0.6: Tier Selection
+
+Picks the tier from the diff:
+- **DEEP** if the diff touches a high-stakes or numeric path (never auto-downgraded), or `deep` is forced.
+- **FAST** if the diff is trivial (small, low-stakes, non-deploy), or `fast` is forced.
+- **STANDARD** otherwise.
 
 ### Step 1: Parallel Auditors
 
-All 6 auditors launch **simultaneously** (not sequentially). Each receives:
-- The file list
-- The diff command
-- Detected languages
-- Project context (if configured)
-
-Each auditor produces findings with unique prefixes (CODE-001, BUG-001, SEC-001, etc.).
+The applicable auditors launch **simultaneously** (not sequentially). Each receives the file list, the
+diff command, detected languages, the project context, and the canonical **findings schema**. Each
+returns its findings as a structured JSON array (the authoritative output the orchestrator consumes).
 
 ### Step 2: Consolidate & Deduplicate
 
-After all auditors return, findings are merged:
+Findings are merged deterministically on `(file, line, category)`:
+1. **Same `(file, line, category)`** — merge into one finding, keep highest severity.
+2. **Same category on the same file within ±3 lines** — merge, cite all source auditors.
+3. **Missing config/table/grant findings** — flagged for Step 2.5 verification (common false positive).
 
-1. **Same file:line across auditors** — merge into one finding, keep highest severity
-2. **Same issue type on same file** — merge, cite all source auditors
-3. **Verify before accepting** — ENV findings about missing config are checked with grep (common false positive)
+### Step 2.5: Findings Verification (anti-hallucination) — STANDARD / DEEP
+
+Before any fix, P1/P2 findings are re-checked against the real code by an `fp-check` agent: does the
+issue exist, is it in changed code, is the impact real, does it contradict a settled decision? Verdict
+per finding: CONFIRMED / FALSE_POSITIVE / UNCERTAIN. False positives are dropped; uncertain ones are
+escalated to the user (never fixed blind). **High-stakes P1 findings** get an adversarial **2-of-3**
+check (three independent skeptics, default-to-refute) on the DEEP tier.
 
 ### Step 3: Fix Plan
 
-Findings are prioritized:
-- **P1 Critical**: Always fix (security vulns, data corruption, auth bypass)
-- **P2 High**: Fix unless `p1-only` mode (DRY divergence, config issues)
-- **P3 Nice-to-have**: Deferred (cosmetic, naming)
+From CONFIRMED findings only:
+- **P1 Critical**: always fix.
+- **P2 High**: fix unless `p1-only` mode.
+- **P3 Nice-to-have**: deferred.
 
-In `no-fix` mode, the pipeline reports findings and stops here.
+In `no-fix` mode, the pipeline reports findings + verdicts and stops here.
 
 ### Step 4: Implement Fixes
 
-Each fix is applied with minimal diffs:
-- Fix ONLY what the audit found
-- No unrelated refactoring
-- No test structure changes (unless a test is wrong)
-- Uncertain fixes flagged as BLOCKED
+Each fix is applied with minimal diffs (fix ONLY what was confirmed; no unrelated refactoring; no test
+structure changes unless a test is wrong; uncertain fixes flagged BLOCKED). On STANDARD/DEEP, each
+CONFIRMED P1 follows **red→green**: write a failing test that reproduces the bug, then fix, then confirm green.
 
 ### Step 5: Re-verify
 
-Runs the detected test and lint commands:
-- Tests must pass (baseline must hold)
-- Linter must be clean on changed files
-- If tests fail: diagnose, fix, re-run
+Runs the detected test and lint commands — baseline plus any new P1 tests must pass; linter clean on
+changed files. If tests fail: diagnose, fix, re-run.
+
+### Step 5.5: Regression Diff (anti-regression) — STANDARD / DEEP
+
+A `differential-review` agent reviews ONLY the fix diff, mapping each hunk to the finding it serves and
+flagging any behaviour change outside scope. Verdict per hunk: SAFE / SCOPE_CREEP / REGRESSION_RISK.
 
 ### Step 6: Architect Gate
 
-A final reviewer assesses the combined diff:
+A read-only final reviewer assesses the combined diff (it has no write tools — it returns REVISE with
+instructions rather than fixing anything itself):
 
 | Assessment | Criteria |
 |------------|----------|
@@ -116,11 +138,11 @@ A final reviewer assesses the combined diff:
 | Correctness | No regressions introduced |
 | Security | No new vulnerabilities |
 
-Verdicts:
-- **APPROVED** — proceed to commit
-- **REVISE** — specific feedback, re-fix, re-verify (max 3 iterations)
-- **BLOCKED** — needs human decision, pipeline stops
+On STANDARD/DEEP it also emits a **fix→finding mapping** table — an orphan P1 (or a P1 missing its
+red→green test) or a phantom fix forces a REVISE. Verdicts: **APPROVED** (commit) / **REVISE** (re-fix,
+re-verify, max 3 iterations) / **BLOCKED** (needs human).
 
 ### Step 7: Commit
 
-Creates a structured commit message listing all fixes by priority, with audit metadata.
+Creates a structured commit message listing all fixes by priority, with audit metadata (tier, auditor
+counts, confirmed/dropped findings).
