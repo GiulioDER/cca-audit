@@ -63,12 +63,18 @@ Plus verification agents: **fp-check** (anti-hallucination) and **differential-r
 Drop-in agents for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). One command installs, one slash command runs.
 
 ```bash
-# Install into your project's .claude/ directory
+# Unix/macOS — install into your project's .claude/ directory (requires git)
 curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
 ```
 
+```powershell
+# Windows PowerShell (requires git)
+irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.ps1 | iex
+```
+
 This copies the command files into `.claude/commands/` and the agents into `.claude/agents/`.
-See the [Claude Code README](claude-code/README.md) for Windows/PowerShell install and details.
+Run it from the root of the project you want to audit. See the
+[Claude Code README](claude-code/README.md) for local-clone install and details.
 
 ## Usage
 

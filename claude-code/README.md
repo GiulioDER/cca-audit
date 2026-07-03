@@ -8,17 +8,26 @@ Drop-in agents for [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 
 ## Installation
 
+Run from the root of the project you want to audit. Both installers work either from a
+local clone or piped straight from GitHub (they shallow-clone the repo to a temp dir).
+
 ### Unix/macOS
 
 ```bash
-cd your-project
+# One-liner (requires git)
+curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
+
+# ...or from a local clone
 bash /path/to/cca-audit/claude-code/install.sh
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-cd your-project
+# One-liner (requires git)
+irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.ps1 | iex
+
+# ...or from a local clone
 & \path\to\cca-audit\claude-code\install.ps1
 ```
 
