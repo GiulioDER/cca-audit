@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CCA-Audit — run replay</title>
+<style>
+  html,body{margin:0;height:100%}
+  body{background:#010409;display:flex;align-items:center;justify-content:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+  .term{--bg:#0d1117;--fg:#c9d1d9;--dim:#8b949e;--red:#ff7b72;--grn:#3fb950;--amb:#d29922;--cyn:#58a6ff;--hl:#1f6feb;
+    width:760px;max-width:94vw;background:var(--bg);border:1px solid #30363d;border-radius:10px;
+    box-shadow:0 10px 40px rgba(0,0,0,.5);overflow:hidden}
+  .bar{display:flex;align-items:center;gap:7px;padding:10px 12px;background:#161b22;border-bottom:1px solid #30363d}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
+  .ttl{margin-left:8px;color:var(--dim);font-size:12.5px}
+  .body{padding:18px 20px;min-height:384px;font-size:14px;line-height:1.72;color:var(--fg)}
+  .ln{opacity:0;transform:translateY(3px);animation:ccain .26s ease forwards}
+  @keyframes ccain{to{opacity:1;transform:none}}
+  .red{color:var(--red)}.grn{color:var(--grn)}.amb{color:var(--amb)}.cyn{color:var(--cyn)}.dim{color:var(--dim)}
+  .b{font-weight:700}
+  .banner{display:inline-block;margin-top:4px;padding:5px 11px;border-radius:6px;background:var(--hl);color:#fff;font-weight:700}
+  .cur{display:inline-block;width:8px;height:16px;background:var(--grn);margin-left:4px;vertical-align:-2px;animation:ccabl 1s steps(1) infinite}
+  @keyframes ccabl{50%{opacity:0}}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:3px 0}
+  .chip{padding:1px 9px;border:1px solid #30363d;border-radius:20px;color:var(--dim);font-size:12px;opacity:.32;transition:opacity .25s,color .25s,border-color .25s}
+  .chip.on{opacity:1;color:var(--cyn);border-color:var(--cyn)}
+</style>
+</head>
+<body>
+  <div class="term">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ttl">CCA-Audit&nbsp;·&nbsp;/audit-fix commit 1</span></div>
+    <div class="body" id="cca-body"></div>
+  </div>
+<script>
+(function(){
+  var body=document.getElementById("cca-body");
+  var steps=[
+    {segs:[{t:"❯ ",c:"cyn b"},{t:"/audit-fix commit 1"}],d:700},
+    {segs:[{t:"Layer 1 · 6 auditors fan out on the diff…",c:"dim"}],d:520},
+    {chips:["security","bug","code","perf","docs","numeric"],d:1000},
+    {gap:true,d:180},
+    {segs:[{t:"🔴 NUM-001  CRITICAL",c:"red b"},{t:"  sizer.py:18",c:"dim"}],d:560},
+    {segs:[{t:"   risk_limit_bps / 100  →  must be / 10 000   (100× oversize)",c:"red"}],d:620},
+    {segs:[{t:"   $500 → $50 000 risked · $2.5M notional on $100k · 25:1",c:"red"}],d:960},
+    {gap:true,d:180},
+    {segs:[{t:"🛡️ bug · security · perf",c:"grn b"},{t:" — saw the div-by-zero and declined it",c:"grn"}],d:620},
+    {segs:[{t:"   “guarded: price>0, stop≥1 — not a bug”   ·   0 false positives",c:"grn dim"}],d:960},
+    {segs:[{t:"🔁 consolidate · 6 findings → 1 root fix",c:"amb"}],d:720},
+    {segs:[{t:"✅ fp-check gate · 4/4 CONFIRMED · 0 dropped",c:"grn b"}],d:820},
+    {segs:[{t:"🔧 fix · /100 → /BPS_PER_UNIT · size 50 000 → 500 · tests green",c:"cyn"}],d:820},
+    {segs:[{t:"🏁 architect gate · APPROVED",c:"grn b"}],d:720},
+    {gap:true,d:160},
+    {banner:"caught the $2.5M bug · refused 3 traps · 0 hallucinations",d:420},
+    {segs:[{t:"CCA-Audit — github.com/GiulioDER/cca-audit",c:"dim"}],d:3600}
+  ];
+  var cursor=null;
+  function seg(t,c){var s=document.createElement("span");if(c)s.className=c;s.textContent=t;return s;}
+  function addStep(s){
+    var d=document.createElement("div");d.className="ln";
+    if(s.gap){d.textContent=" ";}
+    else if(s.banner){d.appendChild(seg(s.banner,"banner"));}
+    else{s.segs.forEach(function(g){d.appendChild(seg(g.t,g.c));});}
+    body.appendChild(d);return d;
+  }
+  function addChips(names){
+    var w=document.createElement("div");w.className="ln chips";
+    names.forEach(function(n,i){var c=document.createElement("span");c.className="chip";c.textContent=n;w.appendChild(c);setTimeout(function(){c.classList.add("on");},130*i);});
+    body.appendChild(w);return w;
+  }
+  function clear(){while(body.firstChild)body.removeChild(body.firstChild);}
+  function run(){
+    clear();cursor=null;var t=0;
+    steps.forEach(function(s){
+      t+=s.d;
+      setTimeout(function(){
+        if(cursor&&cursor.parentNode)cursor.parentNode.removeChild(cursor);
+        var last=s.chips?addChips(s.chips):addStep(s);
+        cursor=document.createElement("span");cursor.className="cur";last.appendChild(cursor);
+      },t);
+    });
+    setTimeout(run,t+1300);
+  }
+  run();
+})();
+</script>
+</body>
+</html>

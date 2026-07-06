@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 452" role="img" aria-labelledby="t d" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+  <title id="t">CCA-Audit run: catches a $2.5M bug, refuses 3 traps, 0 hallucinations, architect APPROVED</title>
+  <desc id="d">Terminal showing CCA-Audit catch a critical 100x position-sizing bug, three auditors decline a false-positive division-by-zero with zero false positives, the verification gate confirm 4 of 4, and the architect gate approve.</desc>
+  <rect x="8" y="8" width="804" height="436" rx="12" fill="#0d1117" stroke="#30363d"/>
+  <rect x="8" y="8" width="804" height="40" rx="12" fill="#161b22"/>
+  <rect x="8" y="36" width="804" height="12" fill="#161b22"/>
+  <line x1="8" y1="48" x2="812" y2="48" stroke="#30363d"/>
+  <circle cx="30" cy="28" r="6" fill="#ff5f56"/>
+  <circle cx="50" cy="28" r="6" fill="#ffbd2e"/>
+  <circle cx="70" cy="28" r="6" fill="#27c93f"/>
+  <text x="92" y="33" fill="#8b949e" font-size="13">CCA-Audit &#183; /audit-fix commit 1</text>
+  <text x="28" y="88" font-size="15.5"><tspan fill="#58a6ff" font-weight="700">$ </tspan><tspan fill="#c9d1d9">/audit-fix commit 1</tspan></text>
+  <text x="28" y="118" fill="#8b949e" font-size="13.5">6 auditors &#8594; security &#183; bug &#183; code &#183; perf &#183; docs &#183; numeric</text>
+  <text x="28" y="160" font-size="15.5" fill="#ff7b72" font-weight="700">&#9679; NUM-001  CRITICAL<tspan fill="#8b949e" font-weight="400">   sizer.py:18</tspan></text>
+  <text x="28" y="188" font-size="14" fill="#ff7b72">   risk_limit_bps / 100 &#8594; 100&#215; oversize &#183; $2.5M notional &#183; 25:1</text>
+  <text x="28" y="230" font-size="15" fill="#3fb950" font-weight="700">&#9679; bug &#183; security &#183; perf<tspan font-weight="400"> declined the div-by-zero &#8212; 0 false positives</tspan></text>
+  <text x="28" y="272" font-size="15" fill="#3fb950" font-weight="700">&#9679; fp-check 4/4 CONFIRMED &#183; 0 dropped<tspan fill="#d29922" font-weight="400">   &#183;   6 findings &#8594; 1 fix</tspan></text>
+  <text x="28" y="314" font-size="15" fill="#3fb950" font-weight="700">&#9679; architect gate &#8212; APPROVED</text>
+  <rect x="28" y="336" width="520" height="30" rx="6" fill="#1f6feb"/>
+  <text x="44" y="356" fill="#ffffff" font-size="14.5" font-weight="700">caught the $2.5M bug &#183; refused 3 traps &#183; 0 hallucinations</text>
+  <text x="28" y="404" fill="#8b949e" font-size="13">CCA-Audit &#8212; github.com/GiulioDER/cca-audit</text>
+</svg>

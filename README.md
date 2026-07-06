@@ -16,10 +16,11 @@ We planted **one subtle, money-losing bug** in a position sizer — `risk_limit_
 
 CCA caught the money bug and **refused all three traps:**
 
-<!-- Drop the demo recording at docs/demo.gif -->
+<!-- Swap in the animated recording at docs/demo.gif when ready -->
 <p align="center">
-  <img src="docs/demo.gif" alt="CCA-Audit catching a 100x sizing bug while refusing three false-positive traps" width="100%"/>
+  <img src="docs/demo.svg" alt="CCA-Audit catching a 100x sizing bug while refusing three false-positive traps" width="100%"/>
 </p>
+<p align="center"><sub><strong>&#9654; animated:</strong> open <a href="docs/demo.html"><code>docs/demo.html</code></a> &nbsp;&#183;&nbsp; <strong>full run + real transcripts:</strong> <a href="https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/DEMO.md">the case study</a></sub></p>
 
 - 🎯 **Caught** `NUM-001` (Critical): the 100× sizing bug → **$2,500,000 notional on a $100k account (25:1 leverage)** — while the smoke test stayed green.
 - 🛡️ **Refused every false positive** — the bug, security, and performance auditors each looked straight at the "possible `ZeroDivisionError`" and *declined it* after tracing the validator. Zero hallucinations across the whole fan-out.
