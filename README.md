@@ -1,16 +1,49 @@
 <p align="center">
-  <img src="banner.jpg" alt="Claude Code Audit — parallel multi-agent audit + fix pipeline" width="100%"/>
+  <img src="banner.jpg" alt="CCA-Audit — multi-agent code audit + fix pipeline for Claude Code" width="100%"/>
 </p>
 
 # CCA-Audit
 
-**Parallel multi-agent code audit + fix pipeline for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).**
+**The multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that doesn't cry wolf.**
 
-CCA-Audit runs specialized auditors in parallel on your changed code, deduplicates findings, verifies them against the real code, auto-fixes critical issues, re-verifies, and gates the result through an architect review — all in one command.
+Every AI reviewer has the same problem: it hallucinates. It flags a null-deref that's guarded three lines up, "fixes" things that were never broken, and buries the one bug that actually matters under a pile of noise. CCA-Audit is built to do the opposite — it **verifies every finding against your real code before it touches a line**, so it catches the expensive bug *and* stays quiet about the fake ones.
 
-It is **tiered**: a single `/audit-fix` command auto-selects **FAST**, **STANDARD**, or **DEEP** by how big and how risky the diff is. Trivial diffs stay cheap; high-stakes diffs (money, auth, data, irreversible actions, numeric-heavy code) automatically get the full treatment — conditional domain auditors plus anti-hallucination, anti-regression, and fix→finding verification gates.
+One command — `/audit-fix` — runs specialized auditors in parallel on your changed code, deduplicates their findings, **verifies each one against the real code (anti-hallucination gate)**, auto-fixes what's confirmed, re-verifies, checks the fix introduced no regression, and gates the result through an architect review. Any language, auto-tiered by how risky the diff is.
 
-Works with **any language** (Python, TypeScript, Go, Rust, Java, Ruby) via auto-detection.
+## See it work
+
+We planted **one subtle, money-losing bug** in a position sizer — `risk_limit_bps / 100` where basis points require `/ 10_000`, a **100× over-size** that a green test suite sails right past — plus **three false-positive traps** designed to bait a lazy reviewer (a guarded division, a cross-file guard, an off-diff config key).
+
+CCA caught the money bug and **refused all three traps:**
+
+<!-- Drop the demo recording at docs/demo.gif -->
+<p align="center">
+  <img src="docs/demo.gif" alt="CCA-Audit catching a 100x sizing bug while refusing three false-positive traps" width="100%"/>
+</p>
+
+- 🎯 **Caught** `NUM-001` (Critical): the 100× sizing bug → **$2,500,000 notional on a $100k account (25:1 leverage)** — while the smoke test stayed green.
+- 🛡️ **Refused every false positive** — the bug, security, and performance auditors each looked straight at the "possible `ZeroDivisionError`" and *declined it* after tracing the validator. Zero hallucinations across the whole fan-out.
+- 🧮 **Self-corrected** — the verification gate re-derived an overstated impact figure *before* any fix was applied.
+- ✂️ **Deduped** 6 raw findings into a **single one-line fix**, then proved it (tests green, architect **APPROVED**).
+
+**Reproduce it yourself** — full walkthrough + the real, unedited agent transcripts:
+→ [the case study](https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/DEMO.md) · [the receipts](https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/RECEIPTS.md)
+
+```bash
+git clone -b demo/bps-sizing https://github.com/GiulioDER/cca-audit
+# install (see below), then in Claude Code, from the repo root:
+/audit-fix commit 1
+```
+
+## What makes it different
+
+Multi-agent review is table stakes now. These parts aren't:
+
+- **Anti-hallucination gate (`fp-check`)** — every P1/P2 finding is re-checked against the actual code *before* it's eligible to be fixed. False positives are dropped **with evidence**; overstated impacts get corrected. Biased to refute.
+- **Anti-regression gate (`differential-review`)** — after fixes, a differential pass confirms the fix diff changed **nothing** beyond the intent of each finding.
+- **Fix→finding mapping** — the architect gate emits a table proving every confirmed finding maps to a fix and every change maps to a finding. An orphan finding or a phantom edit forces a revise.
+- **Non-overlapping auditor scopes** — security is the single authority for security, numeric owns units/sign, etc. No duplicate findings, no turf wars.
+- **Risk-tiered** — trivial diffs stay cheap; money / auth / numeric diffs automatically get the full adversarial treatment.
 
 ## Pipeline
 
