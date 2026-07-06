@@ -39,7 +39,7 @@ Provenance is underrated. If you can't point at *why* each line changed, you can
 
 ## The stress test: one real bug, three traps
 
-Talk is cheap, so here's a run I set up to keep myself honest. I built a tiny position sizer with **one subtle, money-losing bug** and **three planted false-positive traps**, then ran a multi-agent audit pipeline over it.
+Talk is cheap, so here's a run I set up to keep myself honest. I built a tiny position sizer with **one subtle, money-losing bug** and **three planted false-positive traps**, then ran [CCA-Audit](https://github.com/GiulioDER/cca-audit) — a multi-agent audit pipeline for Claude Code — over it.
 
 **The real bug** — a units error:
 
@@ -65,7 +65,7 @@ per_unit_risk = price * (stop_distance_bps / BPS_PER_UNIT)   # correct
 - On the config trap, the validator **read the settings file, confirmed the key exists, and passed** — no phantom "missing key."
 - The verification gate then confirmed the real findings, deduped four of them into one root fix, and even corrected an overstated impact number that one auditor had fumbled.
 
-Six raw findings collapsed to **one one-line fix** (`/ 100` → `/ BPS_PER_UNIT`), the tests stayed green, and a final architect gate mapped every finding to the fix before committing. **Zero hallucinations across the whole run** — and I'd tried three ways to force one.
+Six raw findings collapsed to **one one-line fix** (`/ 100` → `/ BPS_PER_UNIT`), the tests stayed green, and a final architect gate mapped every finding to the fix before committing. **Zero hallucinations across the whole run** — and I'd tried three ways to force one. [The full run — every finding, verdict, and unedited agent transcript — is in the repo.](https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/RECEIPTS.md)
 
 ## Takeaways you can apply anywhere
 
