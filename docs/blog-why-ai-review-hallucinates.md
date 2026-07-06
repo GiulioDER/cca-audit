@@ -4,6 +4,8 @@ published: false
 tags: ai, codereview, devtools, claude
 ---
 
+> **CCA-Audit** — the multi-agent code auditor in this post — is open source (MIT): https://github.com/GiulioDER/cca-audit
+
 AI code review has a trust problem, and it's not that it misses bugs. It's that it *invents* them.
 
 If you've run an LLM over a diff, you've seen it: a "possible null dereference" on a value that's guarded three lines up. A "SQL injection" your ORM already parameterizes. A "race condition" that can't happen. And then — worse — it confidently rewrites working code to "fix" the thing that was never broken. The real bug, meanwhile, sits quietly in the noise.
