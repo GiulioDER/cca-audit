@@ -106,9 +106,9 @@ curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-c
 irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.ps1 | iex
 ```
 
-This copies the command files into `.claude/commands/` and the agents into `.claude/agents/`.
-Run it from the root of the project you want to audit. See the
-[Claude Code README](claude-code/README.md) for local-clone install and details.
+This copies the commands into `.claude/commands/`, the agents into `.claude/agents/`, and installs the **`cca_checks`** helper package (`python -m cca_checks`) that powers the deterministic verifier. Run it from the root of the project you want to audit.
+
+**For the deterministic verification layer**, also have `pyright` and `pytest` on your `PATH` (`pip install pyright pytest`). Without `cca_checks` or those tools, `/audit-fix` gracefully **falls back to LLM-only verification** — no crash, no regression. See the [Claude Code README](claude-code/README.md) for local-clone install and details.
 
 ## Usage
 

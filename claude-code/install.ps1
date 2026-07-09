@@ -58,6 +58,24 @@ try {
         Write-Host "  Installed $($_.Name) -> $CommandsDir\"
     }
 
+    # Install the cca_checks package so the deterministic verifier (fp-check calls `python -m cca_checks`) works.
+    $RepoRoot = Split-Path -Parent $SrcDir
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+    if ($py -and (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
+        Write-Host "Installing cca_checks (deterministic verification helpers)..."
+        try {
+            & $py.Source -m pip install --user --quiet $RepoRoot 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { Write-Host "  Installed cca_checks -> python -m cca_checks" }
+            else { Write-Host "  NOTE: cca_checks install failed; /audit-fix falls back to LLM-only verification (v2)." }
+        } catch {
+            Write-Host "  NOTE: cca_checks install errored; /audit-fix falls back to LLM-only verification (v2)."
+        }
+    } else {
+        Write-Host "  NOTE: python/pip not found; skipping cca_checks. /audit-fix falls back to LLM-only verification (v2)."
+    }
+    Write-Host "  For deterministic checks, also install: pyright, pytest (on PATH)."
+
     Write-Host ""
     Write-Host "CCA-Audit installed. Run /audit-fix in Claude Code to start."
 }

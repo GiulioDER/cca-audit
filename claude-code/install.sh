@@ -56,5 +56,20 @@ for cmd in "${commands[@]}"; do
   echo "  Installed $(basename "$cmd") -> $COMMANDS_DIR/"
 done
 
+# Install the cca_checks package so the deterministic verifier (fp-check calls `python -m cca_checks`) works.
+REPO_ROOT="$(dirname "$SRC_DIR")"
+PY="$(command -v python3 || command -v python || true)"
+if [[ -n "$PY" && -f "$REPO_ROOT/pyproject.toml" ]]; then
+  echo "Installing cca_checks (deterministic verification helpers)..."
+  if "$PY" -m pip install --user --quiet "$REPO_ROOT" >/dev/null 2>&1; then
+    echo "  Installed cca_checks -> python -m cca_checks"
+  else
+    echo "  NOTE: cca_checks install failed; /audit-fix falls back to LLM-only verification (v2)."
+  fi
+else
+  echo "  NOTE: python/pip not found; skipping cca_checks. /audit-fix falls back to LLM-only verification (v2)."
+fi
+echo "  For deterministic checks, also install: pyright, pytest (on PATH)."
+
 echo ""
 echo "CCA-Audit installed. Run /audit-fix in Claude Code to start."
