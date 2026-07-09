@@ -53,16 +53,40 @@ Emit exactly one verdict per finding:
 - **UNCERTAIN** — cannot confirm or refute without runtime or business context. → never fix blind;
   escalate to a human.
 
+## Deterministic-first verification (v3.0-min)
+
+For each P1/P2 finding, run TWO phases in order:
+
+**Phase 1 — mechanical (preferred).** Classify the finding into a claim_type, then:
+
+- `definedness` / undefined symbol / missing import / config-key-undefined →
+  `python -m cca_checks definedness --finding-id <ID> --file <path> --line <N> --symbol <name>`
+- `crash_impact` (crash / wrong value with a concrete input) → FIRST write a minimal repro test
+  `t_<ID>.py` that drives the code through its **public entry point** (respect validators — never
+  call the raw internal function), predicting the impact, THEN:
+  `python -m cca_checks repro --finding-id <ID> --test t_<ID>.py --expect-error <ErrorType>`
+
+Use the tool's JSON `{verdict, evidence, source}` verbatim. Delete the temp repro test after.
+
+**Phase 2 — semantic (residue only).** If claim_type is `semantic`, or the required tool is missing
+(command not found / non-Python), adjudicate with a fresh judgment that MUST cite the specific facts
+you gathered (guard location, caller list, resolved symbol) — never re-read the finding text alone.
+Mark `source: llm` and `evidence:` = the cited facts.
+
+**Verdict rule:** a `CONFIRMED`/`FALSE_POSITIVE` verdict MUST carry non-empty `evidence`; otherwise
+emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you couldn't reproduce — that is
+`UNCERTAIN`, not `FALSE_POSITIVE`.
+
 ## Output Format
 
 ```markdown
 # Findings Verification
 
-| ID | Verdict | Evidence |
-|----|---------|----------|
-| BUG-003 | CONFIRMED | null deref at handler.py:88, added in this diff |
-| SEC-002 | FALSE_POSITIVE | input already validated at router.py:40 (upstream) |
-| ENV-001 | UNCERTAIN | depends on deployment config not in repo |
+| ID | Verdict | Source | Evidence |
+|----|---------|--------|----------|
+| BUG-003 | CONFIRMED | tool | `cca_checks definedness` resolved symbol at handler.py:88, added in this diff |
+| SEC-002 | FALSE_POSITIVE | llm | input already validated at router.py:40 (upstream) |
+| ENV-001 | UNCERTAIN | llm | depends on deployment config not in repo |
 
 ## Confirmed
 - <ID>: <one-line reason>
@@ -73,6 +97,10 @@ Emit exactly one verdict per finding:
 ## Uncertain — needs human
 - <ID>: <what context is missing>
 ```
+
+Every row MUST fill `Evidence` (a tool artifact — the JSON `evidence` field verbatim — or the
+specific cited facts for an `llm`-sourced verdict). A row with an empty `Evidence` cell is not
+acceptable; downgrade that verdict to `UNCERTAIN` instead.
 
 ## Execution Logging
 
