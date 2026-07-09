@@ -53,9 +53,14 @@ Emit exactly one verdict per finding:
 - **UNCERTAIN** — cannot confirm or refute without runtime or business context. → never fix blind;
   escalate to a human.
 
+→ answer these three questions using the two-phase method below, not by re-reading the finding text.
+
 ## Deterministic-first verification (v3.0-min)
 
-For each P1/P2 finding, run TWO phases in order:
+This is *how* you answer Existence / In-scope / Impact: re-derive each against the real code —
+mechanically via `python -m cca_checks` where a tool covers the claim_type, otherwise by
+cited-fact adjudication — rather than by re-reading the finding text. For each P1/P2 finding,
+run TWO phases in order:
 
 **Phase 1 — mechanical (preferred).** Classify the finding into a claim_type, then:
 
