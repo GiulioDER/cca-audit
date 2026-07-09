@@ -125,7 +125,7 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
 
 ## 7. Roadmap
 
-- **v3.0-min (this slice):** claim schema + `fp-check` router + `pyright` adapter + `pytest` repro-gen, Python, with v2 fallback. Acceptance = the trap suite above.
+- **v3.0-min (this slice): IMPLEMENTED** — claim schema + `fp-check` router + `pyright` adapter + `pytest` repro-gen, Python, with v2 fallback. Checkers (`cca_checks.claim`, `cca_checks.pyright_check`, `cca_checks.repro_runner`), the fp-check protocol rewrite, and the trap-suite acceptance test (`tests/acceptance/test_trap_suite.py` — definedness dropped by `pyright`, guarded crash escalated not refuted by repro-gen) are in place; see the [implementation plan](superpowers/plans/2026-07-09-v3-deterministic-verification.md).
 - **v3.1:** `taint` via `semgrep`; nullability/reachability via a proper CFG check; more claim types.
 - **v3.x:** language adapters (TS via `tsc`/LSP, Go via `go vet`/type info, Rust via `cargo check`).
 - **Architecture B:** once ≥3 checker classes exist, split the mechanical checks into their own Layer 2.4 (independently testable) ahead of the L2.5 adjudicator.
