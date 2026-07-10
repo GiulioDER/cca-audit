@@ -74,16 +74,36 @@ REFUTE_LABEL = {
 # --- pyright invocation -----------------------------------------------------
 
 def run_pyright(path: str) -> Optional[list[dict]]:
+    """pyright over `path` in normal mode.
+
+    None means "could not tell -- escalate": pyright is missing, crashed, timed
+    out, produced unparseable output, or (per `summary.filesAnalyzed`) never
+    actually analyzed the file. A `list` (possibly empty) means pyright
+    genuinely ran and reported those diagnostics -- an empty list is "ran
+    clean, genuinely silent", not "we couldn't tell". Mirrors
+    `run_pyright_strict`'s fail-safe cascade so the two stay consistent: any
+    failure mode that would otherwise read as false "ran clean" must escalate
+    instead, because that silence is what licenses a FALSE_POSITIVE.
+    """
     try:
-        proc = subprocess.run(["pyright", "--outputjson", path], capture_output=True, text=True)
-    except FileNotFoundError:
-        # pyright binary not on PATH: distinct "tool unavailable" signal (None),
-        # NOT an empty list -- an empty list means "pyright ran and found nothing".
+        proc = subprocess.run(
+            ["pyright", "--outputjson", path], capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
+        # covers FileNotFoundError (pyright binary not on PATH) and any other OS-level
+        # failure launching the subprocess.
         return None
     try:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
-        return []
+        return None
+    files_analyzed = (data.get("summary") or {}).get("filesAnalyzed")
+    if not files_analyzed or files_analyzed < 1:
+        # pyright ran but analyzed nothing -- e.g. an unreadable file. This is
+        # "could not tell", not "ran clean".
+        return None
     return data.get("generalDiagnostics", [])
 
 
@@ -226,7 +246,7 @@ def verdict_for_claim(
 
     hit = _diag_at(diags, claim.line, rules)
     if hit:
-        ev = f"pyright {hit['rule']} @ {claim.file}:{claim.line}: {hit['message']}"
+        ev = f"pyright {hit.get('rule')} @ {claim.file}:{claim.line}: {hit.get('message', '')}"
         return make_verdict(claim.finding_id, "CONFIRMED", ev, "pyright")
 
     at_line = _diags_at(diags, claim.line)

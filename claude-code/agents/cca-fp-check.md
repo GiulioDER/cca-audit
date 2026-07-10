@@ -103,7 +103,7 @@ couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 
 | ID | Verdict | Source | Evidence |
 |----|---------|--------|----------|
-| BUG-003 | CONFIRMED | tool | `cca_checks definedness` resolved symbol at handler.py:88, added in this diff |
+| BUG-003 | CONFIRMED | pyright | `pyright reportUndefinedVariable @ handler.py:88: "RISK_CAP" is not defined` |
 | SEC-002 | FALSE_POSITIVE | llm | input already validated at router.py:40 (upstream) |
 | ENV-001 | UNCERTAIN | llm | depends on deployment config not in repo |
 
