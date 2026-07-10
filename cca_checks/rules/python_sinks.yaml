@@ -1,0 +1,88 @@
+# Two-tier sink catalog. STRICT = vetted sinks; a match means the sink exists.
+# LOOSE  = unvetted name heuristics; a match means we may not recognise the sink,
+#          so the finding's premise must NOT be refuted.
+# These are plain pattern rules, never taint rules: this file answers only
+# "does a sink of class C occur here".
+rules:
+  - id: sink-strict-sql
+    languages: [python]
+    severity: INFO
+    message: vetted sql sink
+    patterns:
+      - pattern-either:
+          - pattern: $C.execute($Q, ...)
+          - pattern: $C.executemany($Q, ...)
+
+  - id: sink-loose-sql
+    languages: [python]
+    severity: INFO
+    message: possible unvetted sql sink
+    patterns:
+      - pattern-either:
+          - pattern: $C.sql(...)
+          - pattern: $C.raw(...)
+          - pattern: $C.executescript(...)
+          - pattern: $C.execute_query(...)
+
+  - id: sink-strict-command
+    languages: [python]
+    severity: INFO
+    message: vetted command sink
+    patterns:
+      - pattern-either:
+          - pattern: os.system(...)
+          - pattern: os.popen(...)
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+
+  - id: sink-loose-command
+    languages: [python]
+    severity: INFO
+    message: possible unvetted command sink
+    patterns:
+      - pattern-either:
+          - pattern: $C.spawn(...)
+          - pattern: $C.shell(...)
+          - pattern: $C.check_output(...)
+
+  - id: sink-strict-code_exec
+    languages: [python]
+    severity: INFO
+    message: vetted code-execution sink
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+          - pattern: pickle.loads(...)
+          - pattern: marshal.loads(...)
+
+  - id: sink-loose-code_exec
+    languages: [python]
+    severity: INFO
+    message: possible unvetted code-execution sink
+    patterns:
+      - pattern-either:
+          - pattern: $C.eval(...)
+          - pattern: $C.loads(...)
+
+  - id: sink-strict-path
+    languages: [python]
+    severity: INFO
+    message: vetted filesystem sink
+    patterns:
+      - pattern-either:
+          - pattern: open(...)
+          - pattern: os.remove(...)
+          - pattern: os.unlink(...)
+          - pattern: shutil.rmtree(...)
+
+  - id: sink-loose-path
+    languages: [python]
+    severity: INFO
+    message: possible unvetted filesystem sink
+    patterns:
+      - pattern-either:
+          - pattern: $C.read_text(...)
+          - pattern: $C.write_text(...)
+          - pattern: $C.unlink(...)

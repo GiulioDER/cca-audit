@@ -1,0 +1,78 @@
+# These taint rules exist ONLY to enrich the evidence attached to an UNCERTAIN.
+# They never set a verdict. A semgrep taint hit does not prove a bug: verified
+# against semgrep 1.168.0, taint-sql fires on a safely-parameterized execute,
+# because the pattern cannot see that the value arrives as a bound parameter.
+rules:
+  - id: taint-sql
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: user-controlled input reaches a sql sink
+    pattern-sources:
+      - pattern: flask.request.args.get(...)
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+      - pattern: request.GET.get(...)
+      - pattern: os.environ.get(...)
+      - pattern: input(...)
+      - pattern: sys.argv
+    pattern-sanitizers:
+      - pattern: int(...)
+      - pattern: float(...)
+    pattern-sinks:
+      - pattern: $C.execute($Q, ...)
+      - pattern: $C.executemany($Q, ...)
+
+  - id: taint-command
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: user-controlled input reaches a command sink
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+      - pattern: os.environ.get(...)
+      - pattern: input(...)
+      - pattern: sys.argv
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)
+    pattern-sinks:
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.call(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+
+  - id: taint-code_exec
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: user-controlled input reaches a code-execution sink
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+      - pattern: os.environ.get(...)
+      - pattern: input(...)
+      - pattern: sys.argv
+    pattern-sinks:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: pickle.loads(...)
+
+  - id: taint-path
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: user-controlled input reaches a filesystem sink
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form.get(...)
+      - pattern: os.environ.get(...)
+      - pattern: input(...)
+      - pattern: sys.argv
+    pattern-sanitizers:
+      - pattern: os.path.basename(...)
+    pattern-sinks:
+      - pattern: open(...)
+      - pattern: os.remove(...)
+      - pattern: shutil.rmtree(...)

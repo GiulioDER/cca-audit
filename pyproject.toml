@@ -4,12 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cca_checks"
-version = "0.2.0"
+version = "0.3.0"
 description = "Deterministic verification helpers for CCA-Audit's fp-check gate"
 requires-python = ">=3.10"
 
 [tool.setuptools]
 packages = ["cca_checks"]
+
+[tool.setuptools.package-data]
+cca_checks = ["rules/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
