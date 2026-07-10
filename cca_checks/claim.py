@@ -8,6 +8,7 @@ class Claim:
     claim_type: str
     proposition: str = ""
     predicted_impact: str = ""
+    sink_class: str = ""
 
 @dataclass(frozen=True)
 class Verdict:
