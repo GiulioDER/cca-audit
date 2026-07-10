@@ -194,3 +194,49 @@ def test_crashed_pyright_escalates_definedness_claim_not_refutes(monkeypatch):
     assert v.verdict == "UNCERTAIN"
     assert v.verdict != "FALSE_POSITIVE"
     assert v.source == "llm"
+
+
+def test_run_pyright_returns_none_when_summary_is_not_dict(monkeypatch):
+    """Guard against AttributeError when summary is a non-dict value."""
+    import json as _json
+    # Test with summary as a string
+    _patch_run(monkeypatch, _json.dumps(
+        {"summary": "not a dict", "generalDiagnostics": []}
+    ))
+    assert run_pyright("whatever.py") is None
+    # Test with summary as a list
+    _patch_run(monkeypatch, _json.dumps(
+        {"summary": [1, 2], "generalDiagnostics": []}
+    ))
+    assert run_pyright("whatever.py") is None
+    # Test with summary as an int
+    _patch_run(monkeypatch, _json.dumps(
+        {"summary": 5, "generalDiagnostics": []}
+    ))
+    assert run_pyright("whatever.py") is None
+
+
+def test_run_pyright_returns_none_when_files_analyzed_is_string(monkeypatch):
+    """Guard against TypeError when filesAnalyzed is a string, not int."""
+    import json as _json
+    # filesAnalyzed as string "1" should not trigger TypeError
+    _patch_run(monkeypatch, _json.dumps(
+        {"summary": {"filesAnalyzed": "1"}, "generalDiagnostics": []}
+    ))
+    assert run_pyright("whatever.py") is None
+    # filesAnalyzed as string "0" should also return None
+    _patch_run(monkeypatch, _json.dumps(
+        {"summary": {"filesAnalyzed": "0"}, "generalDiagnostics": []}
+    ))
+    assert run_pyright("whatever.py") is None
+
+
+def test_run_pyright_still_returns_empty_list_with_valid_payload(monkeypatch):
+    """Verify that valid payloads still work as expected."""
+    import json as _json
+    _patch_run(monkeypatch, _json.dumps(
+        {"summary": {"filesAnalyzed": 1}, "generalDiagnostics": []}
+    ))
+    result = run_pyright("whatever.py")
+    assert result == []
+    assert result is not None

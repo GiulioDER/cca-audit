@@ -99,8 +99,13 @@ def run_pyright(path: str) -> Optional[list[dict]]:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
         return None
-    files_analyzed = (data.get("summary") or {}).get("filesAnalyzed")
-    if not files_analyzed or files_analyzed < 1:
+    # Guard summary access: must be a dict to safely call .get()
+    summary = data.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    files_analyzed = summary.get("filesAnalyzed")
+    # Guard filesAnalyzed comparison: must be int to compare with int
+    if not isinstance(files_analyzed, int) or files_analyzed < 1:
         # pyright ran but analyzed nothing -- e.g. an unreadable file. This is
         # "could not tell", not "ran clean".
         return None
@@ -190,8 +195,13 @@ def run_pyright_strict(path: str) -> Optional[list[dict]]:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
         return None
-    files_analyzed = (data.get("summary") or {}).get("filesAnalyzed")
-    if not files_analyzed or files_analyzed < 1:
+    # Guard summary access: must be a dict to safely call .get()
+    summary = data.get("summary")
+    if not isinstance(summary, dict):
+        return None
+    files_analyzed = summary.get("filesAnalyzed")
+    # Guard filesAnalyzed comparison: must be int to compare with int
+    if not isinstance(files_analyzed, int) or files_analyzed < 1:
         # pyright ran but analyzed nothing -- e.g. include/glob mismatch, or an
         # unreadable file. This is "could not tell", not "ran clean".
         return None
