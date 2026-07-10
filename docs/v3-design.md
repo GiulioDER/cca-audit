@@ -58,7 +58,7 @@ Findings stop being prose. Each auditor finding emits:
 | `nullability` | "Optional value accessed without a guard" | `pyright` optional-access diagnostics |
 | `reachability` | "line N is reachable with value V" (e.g. div-by-zero) | CFG/dominator reasoning; in v3.0-min, subsumed by the repro check |
 | `crash_impact` | "input I triggers the predicted impact" | **generated `pytest` repro** through the real entry point |
-| `taint` | "untrusted source reaches sink" | static taint (`semgrep` / CodeQL-style) — later slice |
+| `taint` | "untrusted source reaches sink" | `semgrep`, over a bundled two-tier sink catalog — **shipped in v3.2**. Refutes a false premise and informs adjudication; never confirms (its taint rule fires on safely-parameterized calls). |
 | `semantic` | domain/business-logic judgment | **no tool** → LLM adjudicator with cited facts |
 
 ### 3.3 Verdict rule
@@ -130,6 +130,9 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
   plus a blindness probe so a refutation is only issued when pyright actually had type
   information in the claim's enclosing scope. See
   `docs/superpowers/specs/2026-07-10-v3.1-type-nullability-design.md`.
-- **v3.2** — `taint` claims via `semgrep`.
+- **v3.2 (shipped)** — `taint` claims via a bundled two-tier semgrep sink catalog. Semgrep
+  refutes a false premise and informs adjudication, but never confirms: it flags safely
+  parameterized queries, so a hit is evidence, not proof. See
+  `docs/superpowers/specs/2026-07-10-v3.2-taint-semgrep-design.md`.
 - **v3.3** — other languages (TypeScript via `tsc`, Go, Rust), which is also the point at
   which the mechanical checks should move behind their own layer.

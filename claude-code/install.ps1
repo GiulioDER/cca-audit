@@ -74,7 +74,7 @@ try {
     } else {
         Write-Host "  NOTE: python/pip not found; skipping cca_checks. /audit-fix falls back to LLM-only verification (v2)."
     }
-    Write-Host "  For deterministic checks, also install: pyright, pytest (on PATH)."
+    Write-Host "  For deterministic checks, also install: pyright, pytest, semgrep (on PATH)."
 
     Write-Host ""
     Write-Host "CCA-Audit installed. Run /audit-fix in Claude Code to start."

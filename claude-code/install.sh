@@ -69,7 +69,7 @@ if [[ -n "$PY" && -f "$REPO_ROOT/pyproject.toml" ]]; then
 else
   echo "  NOTE: python/pip not found; skipping cca_checks. /audit-fix falls back to LLM-only verification (v2)."
 fi
-echo "  For deterministic checks, also install: pyright, pytest (on PATH)."
+echo "  For deterministic checks, also install: pyright, pytest, semgrep (on PATH)."
 
 echo ""
 echo "CCA-Audit installed. Run /audit-fix in Claude Code to start."
