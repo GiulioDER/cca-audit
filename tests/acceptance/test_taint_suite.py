@@ -41,12 +41,18 @@ def test_parameterized_sql_is_neither_blessed_nor_refuted():
     """Semgrep's taint rule fires here even though the query is safely parameterized.
 
     We must not launder that hit into CONFIRMED, and we must not refute a sink that
-    genuinely exists. UNCERTAIN is the only honest verdict.
+    genuinely exists. UNCERTAIN is the only honest verdict. This row exists precisely
+    because the taint rule fires on safe code—that false positive is the feature we're
+    testing.
     """
     v = settle("sql_parameterized.py", 4)
     assert v.verdict == "UNCERTAIN"
     assert v.verdict != "CONFIRMED"
     assert v.verdict != "FALSE_POSITIVE"
+    assert v.source == "semgrep"
+    assert "sink-strict-sql" in v.evidence
+    assert "taint-sql" in v.evidence  # the rule genuinely matches, proving the property
+    assert "not proof" in v.evidence.lower()
 
 
 @needs_semgrep
