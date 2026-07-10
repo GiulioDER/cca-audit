@@ -1,4 +1,3 @@
-import ast
 import json
 import os
 import subprocess
@@ -6,6 +5,7 @@ import tempfile
 from typing import Optional
 
 from .claim import Claim, Verdict, make_verdict
+from .scope import enclosing_span
 
 # --- Rule sets -------------------------------------------------------------
 # A claim type maps to exactly one interpretation of a pyright diagnostic, so
@@ -135,29 +135,6 @@ def _diag_at(diags: list[dict], line_1based: int, rules: frozenset) -> Optional[
 # access is safe, but because pyright knows nothing about `user`. Refuting there
 # would silently trade a false positive for a false negative. So before refuting a
 # type-dependent claim we ask pyright, in strict mode, whether it could see at all.
-
-def enclosing_span(path: str, line_1based: int) -> tuple[int, int]:
-    """1-indexed inclusive line span of the innermost function containing the line.
-
-    Falls back to the whole module when the line sits at module level. Scoped to the
-    function because the blindness diagnostic fires on the `def` (the untyped
-    parameter), not on the access that dereferences it -- and scoped to the function
-    rather than the file because file scope would escalate everything.
-    """
-    with open(path, encoding="utf-8") as fh:
-        src = fh.read()
-    tree = ast.parse(src)
-    best: Optional[tuple[int, int]] = None
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            end = getattr(node, "end_lineno", None) or node.lineno
-            if node.lineno <= line_1based <= end:
-                if best is None or node.lineno > best[0]:
-                    best = (node.lineno, end)
-    if best is not None:
-        return best
-    return (1, max(1, src.count("\n") + 1))
-
 
 def run_pyright_strict(path: str) -> Optional[list[dict]]:
     """pyright over `path` in strict mode. None on any failure (assume blind).
