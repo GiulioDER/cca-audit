@@ -139,20 +139,41 @@ def run_pyright_strict(path: str) -> Optional[list[dict]]:
 
     Strict is the only mode that emits the blindness rules, and pyright has no CLI
     flag for typeCheckingMode -- hence the generated temporary project config.
+
+    The file is passed to pyright *positionally*, not via the config's `include`.
+    pyright treats `include` entries as glob patterns, so an absolute path containing
+    a glob metacharacter (`[`, `]`, `*`, `?`) would match a different path or nothing,
+    causing pyright to silently analyze zero files and report a clean, empty
+    diagnostics list. A positional file argument is a literal path and overrides the
+    config's include list, while the config still supplies typeCheckingMode. We then
+    double-check pyright's own `summary.filesAnalyzed` before trusting silence --
+    zero files analyzed must read as "could not tell" (None), never as "ran clean"
+    ([]); conflating the two is exactly the false-refutation hole this closes.
     """
     abs_path = os.path.abspath(path)
     try:
         with tempfile.TemporaryDirectory() as td:
             cfg = os.path.join(td, "pyrightconfig.json")
             with open(cfg, "w", encoding="utf-8") as fh:
-                json.dump({"include": [abs_path], "typeCheckingMode": "strict"}, fh)
-            proc = subprocess.run(["pyright", "--project", td, "--outputjson"],
-                                  capture_output=True, text=True)
-    except (FileNotFoundError, OSError):
+                json.dump({"typeCheckingMode": "strict"}, fh)
+            proc = subprocess.run(
+                ["pyright", "--project", td, "--outputjson", abs_path],
+                capture_output=True, text=True, timeout=120,
+            )
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
+        # covers FileNotFoundError (pyright binary not on PATH) and any other OS-level
+        # failure launching the subprocess or writing the temp config.
         return None
     try:
         data = json.loads(proc.stdout or "{}")
     except json.JSONDecodeError:
+        return None
+    files_analyzed = (data.get("summary") or {}).get("filesAnalyzed")
+    if not files_analyzed or files_analyzed < 1:
+        # pyright ran but analyzed nothing -- e.g. include/glob mismatch, or an
+        # unreadable file. This is "could not tell", not "ran clean".
         return None
     return data.get("generalDiagnostics", [])
 
@@ -161,22 +182,28 @@ def pyright_is_blind_at(path: str, line_1based: int) -> bool:
     """True if pyright has no type information in the claim's enclosing scope.
 
     Returns True on ANY failure. A probe that could not run must never license a
-    refutation.
+    refutation. The entire body lives inside one try/except: a diagnostics list
+    containing a malformed (non-dict) entry must escalate to blind, not raise past
+    this function and into the pipeline.
     """
     try:
         lo, hi = enclosing_span(path, line_1based)
         diags = run_pyright_strict(path)
+        if diags is None:
+            return True
+        for d in diags:
+            if d.get("rule") in BLINDNESS_RULES:
+                start = (d.get("range") or {}).get("start")
+                if not start or "line" not in start:
+                    # A blindness-rule diagnostic whose line we can't determine is
+                    # unsafe to treat as "outside the span" -- assume blind.
+                    return True
+                line = start["line"] + 1
+                if lo <= line <= hi:
+                    return True
+        return False
     except Exception:
         return True
-    if diags is None:
-        return True
-    for d in diags:
-        if d.get("rule") in BLINDNESS_RULES:
-            start = (d.get("range") or {}).get("start") or {}
-            line = start.get("line", -1) + 1
-            if lo <= line <= hi:
-                return True
-    return False
 
 
 # --- Verdict ----------------------------------------------------------------

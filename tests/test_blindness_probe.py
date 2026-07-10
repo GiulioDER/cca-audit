@@ -167,3 +167,39 @@ def test_probe_is_not_run_on_the_confirm_path():
     v = verdict_for_claim(claim, diags, NULLABILITY_RULES, blind_probe=probe)
     assert v.verdict == "CONFIRMED"
     assert calls == []
+
+
+# --- default probe wiring + end-to-end safety property ---------------------
+# Every test above injects blind_probe=..., so `probe = blind_probe or
+# pyright_is_blind_at` (the default binding in verdict_for_claim) is never
+# exercised there. A typo in that default name would pass the whole suite above
+# while silently disabling the safety property in production. These two tests
+# drive the *default* probe -- the one real callers actually get.
+
+def test_default_probe_is_wired_when_no_blind_probe_is_passed(monkeypatch):
+    # No blind_probe kwarg at all: verdict_for_claim must fall back to the module's
+    # real pyright_is_blind_at, not silently skip the blindness check.
+    monkeypatch.setattr(pc, "pyright_is_blind_at", lambda path, line: True)
+    claim = Claim("F-1", "svc.py", 7, "nullability")
+    v = verdict_for_claim(claim, [], NULLABILITY_RULES)
+    assert v.verdict == "UNCERTAIN"
+
+
+def test_probe_failure_escalates_end_to_end_not_false_positive(tmp_path, monkeypatch):
+    # This is the branch's central safety property: if the strict-pyright subprocess
+    # itself blows up, the failure must propagate all the way through
+    # pyright_is_blind_at into verdict_for_claim as UNCERTAIN -- never as a
+    # FALSE_POSITIVE that silently drops a real null-dereference bug.
+    path = write(tmp_path, "svc.py", """
+        def charge(user):
+            return user.card.token
+    """)
+
+    def boom(p):
+        raise RuntimeError("pyright exploded")
+
+    monkeypatch.setattr(pc, "run_pyright_strict", boom)
+    claim = Claim("F-1", path, 2, "nullability")
+    v = verdict_for_claim(claim, [], NULLABILITY_RULES)
+    assert v.verdict == "UNCERTAIN"
+    assert v.verdict != "FALSE_POSITIVE"
