@@ -77,12 +77,11 @@ run TWO phases in order:
   call the raw internal function), predicting the impact, THEN:
   `python -m cca_checks repro --finding-id <ID> --test t_<ID>.py --expect-error <ErrorType>`
 
-Delete the temp repro test after running it.
-
-Use the returned JSON **verbatim**. You may not overturn a `CONFIRMED` or a
-`FALSE_POSITIVE` that carries a pyright artifact — the checker read the code; you are
-guessing. You adjudicate `UNCERTAIN` only, and when you do you must cite the facts you
-gathered and emit `source: llm`.
+Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
+temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
+that carries a pyright artifact — the checker read the code; you are guessing. You
+adjudicate `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit
+`source: llm`.
 
 An `UNCERTAIN` verdict reading "no type information in the enclosing scope" means pyright
 was blind, not that the code is safe. Treat it exactly as you would an unverified finding:
@@ -93,9 +92,9 @@ investigate, do not drop.
 you gathered (guard location, caller list, resolved symbol) — never re-read the finding text alone.
 Mark `source: llm` and `evidence:` = the cited facts.
 
-**Verdict rule:** a `CONFIRMED`/`FALSE_POSITIVE` verdict MUST carry non-empty `evidence`; otherwise
-emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you couldn't reproduce — that is
-`UNCERTAIN`, not `FALSE_POSITIVE`.
+**Artifact-or-UNCERTAIN rule:** a `CONFIRMED`/`FALSE_POSITIVE` verdict MUST carry non-empty
+`evidence`; otherwise emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you
+couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 
 ## Output Format
 
