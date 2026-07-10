@@ -43,6 +43,16 @@ def test_rule_name_strips_the_config_path_namespace():
     assert rule_name("") == ""
 
 
+def test_rule_name_never_raises_on_a_non_string_check_id():
+    # A malformed semgrep result could carry check_id as None, an int, or a dict.
+    # rule_name must degrade to "" (no match) rather than raise, so a malformed
+    # entry falls through to the caller's escalate-don't-drop handling instead of
+    # crashing the adapter.
+    assert rule_name(None) == ""
+    assert rule_name(123) == ""
+    assert rule_name({}) == ""
+
+
 def test_rules_path_resolves_bundled_files():
     for name in ("python_sinks.yaml", "python_taint.yaml"):
         p = rules_path(name)
@@ -157,10 +167,36 @@ def test_hits_in_span_is_inclusive_at_both_ends():
     assert len(hits_in_span(results, 4, 7, "sink-strict-sql")) == 2
 
 
-def test_hits_in_span_survives_a_malformed_result():
+def test_hits_in_span_escalates_a_malformed_result_for_the_matching_rule():
+    # A result naming the requested rule but carrying no interpretable line (missing
+    # `start`, or `start: None`) must be treated as "a sink may be present here" --
+    # escalated, not silently dropped as if the sink did not exist. Only the entry
+    # that is not a dict at all is skipped: it carries no rule name, so it cannot be
+    # a hit for any class.
     results = [{"check_id": "cca_checks.rules.sink-strict-sql"},
                {"check_id": "cca_checks.rules.sink-strict-sql", "start": None},
                "not a dict"]
+    assert len(hits_in_span(results, 1, 10, "sink-strict-sql")) == 2
+
+
+def test_hits_in_span_includes_a_hit_whose_line_is_a_string():
+    # Not reachable with semgrep 1.168.0 (start.line is always an int there), but a
+    # malformed/future payload could send it as a string. That must escalate, not
+    # refute: str is not int, so the line is uninterpretable, not "elsewhere".
+    results = [{"check_id": "cca_checks.rules.sink-strict-sql", "start": {"line": "5"}}]
+    assert len(hits_in_span(results, 1, 10, "sink-strict-sql")) == 1
+
+
+def test_hits_in_span_includes_a_hit_with_start_missing_entirely():
+    results = [{"check_id": "cca_checks.rules.sink-strict-sql"}]
+    assert len(hits_in_span(results, 1, 10, "sink-strict-sql")) == 1
+
+
+def test_hits_in_span_still_skips_a_malformed_hit_of_the_wrong_class():
+    # The malformed-line escalation only applies to the requested rule. A malformed
+    # result for a different rule id carries no class for THIS query, so it is still
+    # skipped -- as it is today for well-formed non-matching results.
+    results = [{"check_id": "cca_checks.rules.sink-loose-command", "start": {"line": "5"}}]
     assert hits_in_span(results, 1, 10, "sink-strict-sql") == []
 
 
@@ -219,6 +255,17 @@ def test_a_sink_of_another_class_does_not_prevent_a_refutation(monkeypatch):
     span_1_to_10(monkeypatch)
     v = verdict_for_taint(claim(sink_class="sql"), sinks=[hit("sink-strict-command", 6)], taint=[])
     assert v.verdict == "FALSE_POSITIVE"
+
+
+def test_verdict_for_taint_escalates_on_a_malformed_line_instead_of_refuting(monkeypatch):
+    # End-to-end proof of the inverted invariant: a genuine sink-strict-sql hit whose
+    # start.line arrives as the string "5" must not be silently dropped by
+    # hits_in_span and read back as "no sink" -> FALSE_POSITIVE. It must escalate.
+    span_1_to_10(monkeypatch)
+    malformed = {"check_id": "cca_checks.rules.sink-strict-sql", "start": {"line": "5"}}
+    v = verdict_for_taint(claim(), sinks=[malformed], taint=[])
+    assert v.verdict == "UNCERTAIN"
+    assert v.verdict != "FALSE_POSITIVE"
 
 
 def test_semgrep_unavailable_escalates_to_llm(monkeypatch):

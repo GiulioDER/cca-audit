@@ -23,9 +23,17 @@ def rules_path(name: str) -> str:
     return str(resources.files("cca_checks") / "rules" / name)
 
 
-def rule_name(check_id: str) -> str:
-    """Semgrep namespaces check_id by the config file's path. Rule ids contain no dots."""
-    return (check_id or "").rsplit(".", 1)[-1]
+def rule_name(check_id) -> str:
+    """Semgrep namespaces check_id by the config file's path. Rule ids contain no dots.
+
+    check_id is untrusted input from semgrep's JSON output: it must be a str to be
+    meaningful, but a malformed result could carry None, an int, or a dict. Any
+    non-string input yields "" rather than raising, so a malformed entry falls through
+    to "no match" here and is handled by the caller's escalate-don't-drop policy.
+    """
+    if not isinstance(check_id, str):
+        return ""
+    return check_id.rsplit(".", 1)[-1]
 
 
 def run_semgrep(config: str, path: str) -> Optional[list[dict]]:
@@ -67,14 +75,22 @@ def hits_in_span(results: list[dict], lo: int, hi: int, rule_id: str) -> list[di
     """Results for `rule_id` whose start line falls inside [lo, hi], 1-indexed inclusive.
 
     Semgrep's start.line is 1-indexed -- unlike pyright's 0-indexed range.start.line.
+
+    A result is skipped outright when it is not a dict (it carries no class, so it
+    cannot be a hit for this class) or when its rule name does not match `rule_id`.
+    Otherwise -- the rule name matches -- a line we cannot interpret (missing/None/
+    non-int `start.line`, or a non-dict `start`) does NOT drop the result: it is
+    included. An uninterpretable entry for the claimed sink class must read as
+    "a sink may be present" (escalate), never as "no sink" (refute); only a line we
+    can positively place outside [lo, hi] rules a hit out.
     """
     out = []
     for r in results:
-        if not isinstance(r, dict) or rule_name(r.get("check_id", "")) != rule_id:
+        if not isinstance(r, dict) or rule_name(r.get("check_id")) != rule_id:
             continue
         start = r.get("start")
         line = start.get("line") if isinstance(start, dict) else None
-        if isinstance(line, int) and lo <= line <= hi:
+        if not isinstance(line, int) or lo <= line <= hi:
             out.append(r)
     return out
 

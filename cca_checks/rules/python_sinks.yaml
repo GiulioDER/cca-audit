@@ -12,6 +12,7 @@ rules:
       - pattern-either:
           - pattern: $C.execute($Q, ...)
           - pattern: $C.executemany($Q, ...)
+          - pattern: $C.exec_driver_sql(...)
 
   - id: sink-loose-sql
     languages: [python]
@@ -56,7 +57,9 @@ rules:
           - pattern: eval(...)
           - pattern: exec(...)
           - pattern: pickle.loads(...)
+          - pattern: pickle.load(...)
           - pattern: marshal.loads(...)
+          - pattern: marshal.load(...)
           - pattern: yaml.load(...)
 
   - id: sink-loose-code_exec
@@ -90,4 +93,5 @@ rules:
       - pattern-either:
           - pattern: $C.read_text(...)
           - pattern: $C.write_text(...)
+          - pattern: $C.read_bytes(...)
           - pattern: $C.unlink(...)
