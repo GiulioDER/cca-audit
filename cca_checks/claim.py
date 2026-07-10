@@ -8,13 +8,14 @@ class Claim:
     claim_type: str
     proposition: str = ""
     predicted_impact: str = ""
+    sink_class: str = ""
 
 @dataclass(frozen=True)
 class Verdict:
     finding_id: str
     verdict: str  # CONFIRMED | FALSE_POSITIVE | UNCERTAIN
     evidence: str
-    source: str   # pyright | pytest | llm
+    source: str   # pyright | pytest | semgrep | llm
 
 def make_verdict(finding_id: str, verdict: str, evidence: str, source: str) -> Verdict:
     # Artifact-or-UNCERTAIN: a decisive verdict must carry evidence.

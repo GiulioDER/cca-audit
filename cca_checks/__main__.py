@@ -6,8 +6,9 @@ from dataclasses import asdict
 from .claim import Claim, Verdict
 from .pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from .repro_runner import run_repro
+from .semgrep_check import verdict_for_taint
 
-CLAIM_TYPES = sorted(RULES_BY_CLAIM)
+CLAIM_TYPES = sorted(set(RULES_BY_CLAIM) | {"taint"})
 
 
 def _add_claim_args(parser):
@@ -17,11 +18,17 @@ def _add_claim_args(parser):
     # Informational only. Matching is line + rule granular; --symbol never
     # participates in it. Kept so callers can record what they were asking about.
     parser.add_argument("--symbol", default="")
+    # Deliberately not an argparse `choices` list: an agent may name a sink class we
+    # do not cover, and that must escalate to UNCERTAIN, not exit non-zero with a
+    # usage error.
+    parser.add_argument("--sink-class", default="")
 
 
 def _check(claim_type: str, args) -> Verdict:
     claim = Claim(args.finding_id, args.file, args.line, claim_type,
-                  proposition=args.symbol)
+                  proposition=args.symbol, sink_class=args.sink_class)
+    if claim_type == "taint":
+        return verdict_for_taint(claim)
     return verdict_for_claim(claim, run_pyright(args.file), RULES_BY_CLAIM[claim_type])
 
 

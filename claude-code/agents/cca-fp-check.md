@@ -72,6 +72,11 @@ run TWO phases in order:
 - **`type`** — the finding asserts a value's type is wrong for its use: bad argument,
   bad return, bad operand, missing attribute.
   `python -m cca_checks check --claim-type type --finding-id <ID> --file <FILE> --line <LINE>`
+- **`taint`** — the finding asserts untrusted input reaches a dangerous sink (injection,
+  command execution, unsafe deserialization, path traversal). Classify the sink as one of
+  `sql`, `command`, `code_exec`, `path`; if it fits none of those, omit `--sink-class` and
+  the checker will escalate.
+  `python -m cca_checks check --claim-type taint --sink-class <CLASS> --finding-id <ID> --file <FILE> --line <LINE>`
 - `crash_impact` (crash / wrong value with a concrete input) → FIRST write a minimal repro test
   `t_<ID>.py` that drives the code through its **public entry point** (respect validators — never
   call the raw internal function), predicting the impact, THEN:
@@ -79,9 +84,17 @@ run TWO phases in order:
 
 Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
 temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
-that carries a pyright artifact — the checker read the code; you are guessing. You
-adjudicate `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit
-`source: llm`.
+that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`, or
+`pytest`. The checker read the code; you are guessing. You adjudicate `UNCERTAIN` only, and
+when you do you must cite the facts you gathered and emit `source: llm`.
+
+**Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.
+A `FALSE_POSITIVE` means no sink of that class exists anywhere in the enclosing scope, so the
+finding's premise does not hold — honour it. An `UNCERTAIN` that names a `taint-*` rule means
+semgrep found a source-to-sink path but **cannot distinguish a real injection from a safely
+parameterized call** — read the code, adjudicate, cite the match plus what you read, and emit
+`source: llm`. An `UNCERTAIN` that says "possible unrecognized sink" means the sink is not in
+our vetted catalog: investigate, do not drop.
 
 An `UNCERTAIN` verdict reading "no type information in the enclosing scope" means pyright
 was blind, not that the code is safe. Treat it exactly as you would an unverified finding:

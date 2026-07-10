@@ -4,6 +4,7 @@ import pytest
 
 from cca_checks import __main__ as cli
 from cca_checks import pyright_check as pc
+from cca_checks.claim import make_verdict
 
 
 @pytest.fixture
@@ -72,7 +73,7 @@ def test_check_confirms_a_type_claim(capsys, monkeypatch):
 
 def test_unknown_claim_type_is_rejected(no_pyright):
     with pytest.raises(SystemExit):
-        cli.main(["check", "--claim-type", "taint",
+        cli.main(["check", "--claim-type", "invalid_type",
                   "--finding-id", "T", "--file", "s.py", "--line", "1"])
 
 
@@ -93,9 +94,65 @@ def test_symbol_lands_in_proposition_not_a_positional_slot(monkeypatch, capsys, 
 
 
 def test_repro_subcommand_still_works(capsys, monkeypatch):
-    from cca_checks.claim import make_verdict
     monkeypatch.setattr(cli, "run_repro",
                         lambda fid, test, exp: make_verdict(fid, "UNCERTAIN", "stub", "pytest"))
     out = run(capsys, ["repro", "--finding-id", "R", "--test", "t.py"])
     assert out["finding_id"] == "R"
     assert out["source"] == "pytest"
+
+
+def test_check_taint_refutes_when_no_sink(capsys, monkeypatch):
+    monkeypatch.setattr(cli, "verdict_for_taint",
+                        lambda claim: make_verdict(claim.finding_id, "FALSE_POSITIVE",
+                                                   "semgrep: no sql sink in the enclosing scope",
+                                                   "semgrep"))
+    out = run(capsys, ["check", "--claim-type", "taint", "--sink-class", "sql",
+                       "--finding-id", "T-1", "--file", "svc.py", "--line", "9"])
+    assert out["verdict"] == "FALSE_POSITIVE"
+    assert out["source"] == "semgrep"
+
+
+def test_check_taint_passes_the_sink_class_through(capsys, monkeypatch):
+    captured = {}
+
+    def spy(claim):
+        captured["claim"] = claim
+        return make_verdict(claim.finding_id, "UNCERTAIN", "stub", "semgrep")
+
+    monkeypatch.setattr(cli, "verdict_for_taint", spy)
+    run(capsys, ["check", "--claim-type", "taint", "--sink-class", "command",
+                 "--finding-id", "T-2", "--file", "svc.py", "--line", "3"])
+    assert captured["claim"].claim_type == "taint"
+    assert captured["claim"].sink_class == "command"
+    assert captured["claim"].line == 3
+
+
+def test_unknown_sink_class_is_not_an_argparse_error(capsys, monkeypatch):
+    # An agent may name a class we do not cover. That must escalate, not crash.
+    monkeypatch.setattr(cli, "verdict_for_taint",
+                        lambda claim: make_verdict(claim.finding_id, "UNCERTAIN",
+                                                   "sink class not covered; escalated", "llm"))
+    out = run(capsys, ["check", "--claim-type", "taint", "--sink-class", "xxe",
+                       "--finding-id", "T-3", "--file", "svc.py", "--line", "1"])
+    assert out["verdict"] == "UNCERTAIN"
+    assert out["source"] == "llm"
+
+
+def test_taint_without_sink_class_still_returns_a_verdict(capsys, monkeypatch):
+    monkeypatch.setattr(cli, "verdict_for_taint",
+                        lambda claim: make_verdict(claim.finding_id, "UNCERTAIN",
+                                                   "no sink class given; escalated", "llm"))
+    out = run(capsys, ["check", "--claim-type", "taint",
+                       "--finding-id", "T-4", "--file", "svc.py", "--line", "1"])
+    assert out["verdict"] == "UNCERTAIN"
+
+
+def test_taint_is_an_accepted_claim_type():
+    assert "taint" in cli.CLAIM_TYPES
+
+
+def test_sink_class_is_ignored_for_non_taint_claims(capsys, no_pyright):
+    out = run(capsys, ["check", "--claim-type", "definedness", "--sink-class", "sql",
+                       "--finding-id", "D", "--file", "s.py", "--line", "1"])
+    assert out["verdict"] == "UNCERTAIN"
+    assert out["source"] == "llm"
