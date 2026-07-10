@@ -64,14 +64,29 @@ run TWO phases in order:
 
 **Phase 1 — mechanical (preferred).** Classify the finding into a claim_type, then:
 
-- `definedness` / undefined symbol / missing import / config-key-undefined →
-  `python -m cca_checks definedness --finding-id <ID> --file <path> --line <N> --symbol <name>`
+- **`definedness`** — the finding asserts a name/import does not resolve.
+  `python -m cca_checks check --claim-type definedness --finding-id <ID> --file <FILE> --line <LINE>`
+- **`nullability`** — the finding asserts a value may be `None`/absent at a use site
+  (the classic "possible null dereference").
+  `python -m cca_checks check --claim-type nullability --finding-id <ID> --file <FILE> --line <LINE>`
+- **`type`** — the finding asserts a value's type is wrong for its use: bad argument,
+  bad return, bad operand, missing attribute.
+  `python -m cca_checks check --claim-type type --finding-id <ID> --file <FILE> --line <LINE>`
 - `crash_impact` (crash / wrong value with a concrete input) → FIRST write a minimal repro test
   `t_<ID>.py` that drives the code through its **public entry point** (respect validators — never
   call the raw internal function), predicting the impact, THEN:
   `python -m cca_checks repro --finding-id <ID> --test t_<ID>.py --expect-error <ErrorType>`
 
-Use the tool's JSON `{verdict, evidence, source}` verbatim. Delete the temp repro test after.
+Delete the temp repro test after running it.
+
+Use the returned JSON **verbatim**. You may not overturn a `CONFIRMED` or a
+`FALSE_POSITIVE` that carries a pyright artifact — the checker read the code; you are
+guessing. You adjudicate `UNCERTAIN` only, and when you do you must cite the facts you
+gathered and emit `source: llm`.
+
+An `UNCERTAIN` verdict reading "no type information in the enclosing scope" means pyright
+was blind, not that the code is safe. Treat it exactly as you would an unverified finding:
+investigate, do not drop.
 
 **Phase 2 — semantic (residue only).** If claim_type is `semantic`, or the required tool is missing
 (command not found / non-Python), adjudicate with a fresh judgment that MUST cite the specific facts
@@ -104,8 +119,8 @@ emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you couldn't
 ```
 
 Every row MUST fill `Evidence` (a tool artifact — the JSON `evidence` field verbatim — or the
-specific cited facts for an `llm`-sourced verdict). A row with an empty `Evidence` cell is not
-acceptable; downgrade that verdict to `UNCERTAIN` instead.
+specific cited facts for an `llm`-sourced verdict). Verdicts obey the artifact-or-UNCERTAIN
+rule stated above.
 
 ## Execution Logging
 
