@@ -84,9 +84,9 @@ run TWO phases in order:
 
 Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
 temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
-that carries a pyright artifact — the checker read the code; you are guessing. You
-adjudicate `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit
-`source: llm`.
+that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`, or
+`pytest`. The checker read the code; you are guessing. You adjudicate `UNCERTAIN` only, and
+when you do you must cite the facts you gathered and emit `source: llm`.
 
 **Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.
 A `FALSE_POSITIVE` means no sink of that class exists anywhere in the enclosing scope, so the

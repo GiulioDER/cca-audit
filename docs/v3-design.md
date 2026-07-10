@@ -58,7 +58,7 @@ Findings stop being prose. Each auditor finding emits:
 | `nullability` | "Optional value accessed without a guard" | `pyright` optional-access diagnostics |
 | `reachability` | "line N is reachable with value V" (e.g. div-by-zero) | CFG/dominator reasoning; in v3.0-min, subsumed by the repro check |
 | `crash_impact` | "input I triggers the predicted impact" | **generated `pytest` repro** through the real entry point |
-| `taint` | "untrusted source reaches sink" | static taint (`semgrep` / CodeQL-style) — later slice |
+| `taint` | "untrusted source reaches sink" | `semgrep`, over a bundled two-tier sink catalog — **shipped in v3.2**. Refutes a false premise and informs adjudication; never confirms (its taint rule fires on safely-parameterized calls). |
 | `semantic` | domain/business-logic judgment | **no tool** → LLM adjudicator with cited facts |
 
 ### 3.3 Verdict rule
