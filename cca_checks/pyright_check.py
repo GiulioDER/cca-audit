@@ -1,5 +1,8 @@
+import ast
 import json
+import os
 import subprocess
+import tempfile
 from typing import Optional
 
 from .claim import Claim, Verdict, make_verdict
@@ -101,6 +104,81 @@ def _diag_at(diags: list[dict], line_1based: int, rules: frozenset) -> Optional[
     return None
 
 
+# --- The blindness probe ----------------------------------------------------
+# definedness is annotation-independent. type/nullability are not: given
+# `def charge(user):`, `user.card.token` produces no diagnostic -- not because the
+# access is safe, but because pyright knows nothing about `user`. Refuting there
+# would silently trade a false positive for a false negative. So before refuting a
+# type-dependent claim we ask pyright, in strict mode, whether it could see at all.
+
+def enclosing_span(path: str, line_1based: int) -> tuple[int, int]:
+    """1-indexed inclusive line span of the innermost function containing the line.
+
+    Falls back to the whole module when the line sits at module level. Scoped to the
+    function because the blindness diagnostic fires on the `def` (the untyped
+    parameter), not on the access that dereferences it -- and scoped to the function
+    rather than the file because file scope would escalate everything.
+    """
+    with open(path, encoding="utf-8") as fh:
+        src = fh.read()
+    tree = ast.parse(src)
+    best: Optional[tuple[int, int]] = None
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end = getattr(node, "end_lineno", None) or node.lineno
+            if node.lineno <= line_1based <= end:
+                if best is None or node.lineno > best[0]:
+                    best = (node.lineno, end)
+    if best is not None:
+        return best
+    return (1, max(1, src.count("\n") + 1))
+
+
+def run_pyright_strict(path: str) -> Optional[list[dict]]:
+    """pyright over `path` in strict mode. None on any failure (assume blind).
+
+    Strict is the only mode that emits the blindness rules, and pyright has no CLI
+    flag for typeCheckingMode -- hence the generated temporary project config.
+    """
+    abs_path = os.path.abspath(path)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            cfg = os.path.join(td, "pyrightconfig.json")
+            with open(cfg, "w", encoding="utf-8") as fh:
+                json.dump({"include": [abs_path], "typeCheckingMode": "strict"}, fh)
+            proc = subprocess.run(["pyright", "--project", td, "--outputjson"],
+                                  capture_output=True, text=True)
+    except (FileNotFoundError, OSError):
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    return data.get("generalDiagnostics", [])
+
+
+def pyright_is_blind_at(path: str, line_1based: int) -> bool:
+    """True if pyright has no type information in the claim's enclosing scope.
+
+    Returns True on ANY failure. A probe that could not run must never license a
+    refutation.
+    """
+    try:
+        lo, hi = enclosing_span(path, line_1based)
+        diags = run_pyright_strict(path)
+    except Exception:
+        return True
+    if diags is None:
+        return True
+    for d in diags:
+        if d.get("rule") in BLINDNESS_RULES:
+            start = (d.get("range") or {}).get("start") or {}
+            line = start.get("line", -1) + 1
+            if lo <= line <= hi:
+                return True
+    return False
+
+
 # --- Verdict ----------------------------------------------------------------
 
 def verdict_for_claim(
@@ -111,7 +189,8 @@ def verdict_for_claim(
 ) -> Verdict:
     """Settle a claim against pyright's diagnostics. Three-way, never false-refutes.
 
-    blind_probe is injected in Task 2; until then a refutation is unconditional.
+    For type-dependent claims a refutation is only issued when the blindness probe
+    confirms pyright actually had type information in the enclosing scope.
     """
     if diags is None:
         # tool unavailable: never conflate with "pyright ran and was silent" (FALSE_POSITIVE)
@@ -131,6 +210,13 @@ def verdict_for_claim(
         ev = (f"pyright reported {len(at_line)} diagnostic(s) @ {claim.file}:{claim.line} "
               f"but none in the expected rule set (saw: {seen}); escalated")
         return make_verdict(claim.finding_id, "UNCERTAIN", ev, "pyright")
+
+    if claim.claim_type in TYPE_DEPENDENT_CLAIMS:
+        probe = blind_probe or pyright_is_blind_at
+        if probe(claim.file, claim.line):
+            ev = (f"pyright has no type information in the enclosing scope "
+                  f"@ {claim.file}:{claim.line}; escalated")
+            return make_verdict(claim.finding_id, "UNCERTAIN", ev, "pyright")
 
     label = REFUTE_LABEL.get(claim.claim_type, claim.claim_type)
     ev = f"pyright: no {label} diagnostic @ {claim.file}:{claim.line}"
