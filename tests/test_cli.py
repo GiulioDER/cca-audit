@@ -27,8 +27,8 @@ def test_check_nullability_emits_a_verdict(capsys, no_pyright):
 def test_check_type_emits_a_verdict(capsys, no_pyright):
     out = run(capsys, ["check", "--claim-type", "type",
                        "--finding-id", "BUG-2", "--file", "svc.py", "--line", "4"])
-    assert out["finding_id"] == "BUG-2"
-    assert out["verdict"] == "UNCERTAIN"
+    assert out == {"finding_id": "BUG-2", "verdict": "UNCERTAIN",
+                   "evidence": "pyright unavailable; falling back to LLM", "source": "llm"}
 
 
 def test_definedness_alias_matches_the_generic_subcommand(capsys, no_pyright):
@@ -56,6 +56,18 @@ def test_check_confirms_a_nullability_claim(capsys, monkeypatch):
     assert out["verdict"] == "CONFIRMED"
     assert out["source"] == "pyright"
     assert "reportOptionalMemberAccess" in out["evidence"]
+
+
+def test_check_confirms_a_type_claim(capsys, monkeypatch):
+    monkeypatch.setattr(cli, "run_pyright", lambda path: [
+        {"range": {"start": {"line": 8}}, "rule": "reportArgumentType",
+         "message": "Argument of type \"str\" cannot be assigned to parameter \"x\" of type \"int\" in function \"foo\""}
+    ])
+    out = run(capsys, ["check", "--claim-type", "type",
+                       "--finding-id", "TYPE-1", "--file", "svc.py", "--line", "9"])
+    assert out["verdict"] == "CONFIRMED"
+    assert out["source"] == "pyright"
+    assert "reportArgumentType" in out["evidence"]
 
 
 def test_unknown_claim_type_is_rejected(no_pyright):
