@@ -58,6 +58,7 @@ rules:
       - pattern: eval(...)
       - pattern: exec(...)
       - pattern: pickle.loads(...)
+      - pattern: yaml.load(...)
 
   - id: taint-path
     mode: taint

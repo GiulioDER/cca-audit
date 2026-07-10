@@ -35,6 +35,7 @@ rules:
           - pattern: subprocess.run(..., shell=True, ...)
           - pattern: subprocess.call(..., shell=True, ...)
           - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: asyncio.create_subprocess_shell(...)
 
   - id: sink-loose-command
     languages: [python]
@@ -56,6 +57,7 @@ rules:
           - pattern: exec(...)
           - pattern: pickle.loads(...)
           - pattern: marshal.loads(...)
+          - pattern: yaml.load(...)
 
   - id: sink-loose-code_exec
     languages: [python]
@@ -76,6 +78,9 @@ rules:
           - pattern: os.remove(...)
           - pattern: os.unlink(...)
           - pattern: shutil.rmtree(...)
+          - pattern: tarfile.open(...).extractall(...)
+          - pattern: zipfile.ZipFile(...).extractall(...)
+          - pattern: $A.extractall(...)
 
   - id: sink-loose-path
     languages: [python]
