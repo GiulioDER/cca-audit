@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from importlib import resources
 from typing import Optional
@@ -45,7 +46,7 @@ def run_semgrep(config: str, path: str) -> Optional[list[dict]]:
     Never conflate the two.
     """
     cmd = ["semgrep", "--config", config, "--json", "--metrics=off",
-           "--disable-version-check", "--quiet", path]
+           "--disable-version-check", "--quiet", os.path.abspath(path)]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=120)
