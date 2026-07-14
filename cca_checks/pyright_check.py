@@ -87,7 +87,7 @@ def run_pyright(path: str) -> Optional[list[dict]]:
     """
     try:
         proc = subprocess.run(
-            ["pyright", "--outputjson", path],
+            ["pyright", "--outputjson", os.path.abspath(path)],
             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
         )
     except subprocess.TimeoutExpired:
@@ -118,6 +118,8 @@ def _diags_at(diags: list[dict], line_1based: int) -> list[dict]:
     """All diagnostics on a line. pyright's range.start.line is 0-indexed."""
     out = []
     for d in diags:
+        if not isinstance(d, dict):
+            continue
         start = (d.get("range") or {}).get("start") or {}
         if start.get("line", -1) + 1 == line_1based:
             out.append(d)

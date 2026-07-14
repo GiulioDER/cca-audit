@@ -240,3 +240,20 @@ def test_run_pyright_still_returns_empty_list_with_valid_payload(monkeypatch):
     result = run_pyright("whatever.py")
     assert result == []
     assert result is not None
+
+
+def test_diags_at_skips_non_dict_elements():
+    # A generalDiagnostics list carrying non-dict entries (malformed / version-shifted
+    # pyright output) must not crash: bad entries are skipped, the valid one matches.
+    from cca_checks.pyright_check import _diags_at
+    diags = [None, "oops", 123, {"range": {"start": {"line": 0}}}]
+    assert _diags_at(diags, 1) == [{"range": {"start": {"line": 0}}}]
+
+
+def test_verdict_for_claim_survives_malformed_diag_element():
+    # verdict_for_claim must not raise AttributeError on a non-dict diagnostic;
+    # it returns a Verdict instead of crashing the CLI.
+    c = Claim("BUG-1", "f.py", 1, "definedness")
+    v = verdict_for_claim(c, [None, "x"], DEFINEDNESS_RULES)
+    assert v.finding_id == "BUG-1"
+    assert v.verdict in ("CONFIRMED", "FALSE_POSITIVE", "UNCERTAIN")
