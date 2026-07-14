@@ -87,7 +87,8 @@ def run_pyright(path: str) -> Optional[list[dict]]:
     """
     try:
         proc = subprocess.run(
-            ["pyright", "--outputjson", path], capture_output=True, text=True, timeout=120,
+            ["pyright", "--outputjson", path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
         )
     except subprocess.TimeoutExpired:
         return None
@@ -109,7 +110,8 @@ def run_pyright(path: str) -> Optional[list[dict]]:
         # pyright ran but analyzed nothing -- e.g. an unreadable file. This is
         # "could not tell", not "ran clean".
         return None
-    return data.get("generalDiagnostics", [])
+    diags = data.get("generalDiagnostics", [])
+    return diags if isinstance(diags, list) else None
 
 
 def _diags_at(diags: list[dict], line_1based: int) -> list[dict]:
@@ -160,7 +162,7 @@ def run_pyright_strict(path: str) -> Optional[list[dict]]:
                 json.dump({"typeCheckingMode": "strict"}, fh)
             proc = subprocess.run(
                 ["pyright", "--project", td, "--outputjson", abs_path],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
             )
     except subprocess.TimeoutExpired:
         return None
@@ -182,7 +184,8 @@ def run_pyright_strict(path: str) -> Optional[list[dict]]:
         # pyright ran but analyzed nothing -- e.g. include/glob mismatch, or an
         # unreadable file. This is "could not tell", not "ran clean".
         return None
-    return data.get("generalDiagnostics", [])
+    diags = data.get("generalDiagnostics", [])
+    return diags if isinstance(diags, list) else None
 
 
 def pyright_is_blind_at(path: str, line_1based: int) -> bool:

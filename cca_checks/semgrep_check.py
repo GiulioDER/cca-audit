@@ -47,7 +47,8 @@ def run_semgrep(config: str, path: str) -> Optional[list[dict]]:
     cmd = ["semgrep", "--config", config, "--json", "--metrics=off",
            "--disable-version-check", "--quiet", path]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=120)
     except subprocess.TimeoutExpired:
         return None
     except OSError:  # includes FileNotFoundError

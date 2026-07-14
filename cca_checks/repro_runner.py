@@ -1,10 +1,26 @@
 import subprocess
+import sys
 from typing import Optional
 from .claim import Verdict, make_verdict
 
+# WARNING: run_repro executes the target's test code. pytest imports conftest.py
+# during collection, so running this against a repo you do not trust executes
+# that repo's code with your privileges and environment. Do not point it at
+# untrusted code without a sandbox (container / seccomp / a scrubbed, offline env).
 def run_repro(finding_id: str, test_path: str, expected_error: Optional[str]) -> Verdict:
-    proc = subprocess.run(["python", "-m", "pytest", "-xq", test_path],
-                          capture_output=True, text=True)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-xq", "--", test_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return make_verdict(finding_id, "UNCERTAIN",
+                            "repro timed out after 120s; escalated", "pytest")
+    except OSError:
+        # e.g. the interpreter or pytest could not be launched
+        return make_verdict(finding_id, "UNCERTAIN",
+                            "repro could not run (pytest unavailable); escalated", "pytest")
     out = (proc.stdout or "") + (proc.stderr or "")
     tail = out[-800:]
     rc = proc.returncode
