@@ -46,6 +46,8 @@ Multi-agent review is table stakes now. These parts aren't:
 - **Non-overlapping auditor scopes** — security is the single authority for security, numeric owns units/sign, etc. No duplicate findings, no turf wars.
 - **Risk-tiered** — trivial diffs stay cheap; money / auth / numeric diffs automatically get the full adversarial treatment.
 
+And it isn't limited to your own diffs. **Hunt mode** (`/audit-fix hunt <paths>`) turns the whole pipeline on a codebase you did **not** write — an OSS dependency, a repo you're evaluating — to find pre-existing bugs, with a target-viability pre-flight that refuses to audit an archived or dead repo. See [Hunt Mode](#hunt-mode--audit-code-you-didnt-write).
+
 ## Pipeline
 
 ```mermaid
@@ -123,12 +125,41 @@ One command, auto-tiered:
 /audit-fix deep            # force the full tier (all domain auditors + adversarial verify)
 /audit-fix commit 3        # audit the last 3 commits
 /audit-fix files src/app.py
+/audit-fix hunt src/       # HUNT MODE: audit code you did NOT write for pre-existing bugs
 ```
 
 You normally don't pick a tier — the pipeline does. High-stakes/numeric diffs always run **DEEP**; trivial low-stakes diffs run **FAST**; everything else runs **STANDARD**. Use `fast` / `deep` only to override.
 
 > `/audit-fix-v2` is kept as a backward-compatible alias that forces the **DEEP** tier. The old
 > v1/v2 split has been merged into this one tiered pipeline.
+
+## Hunt Mode — audit code you didn't write
+
+`/audit-fix` normally reviews *your* diff. **Hunt mode** turns the same pipeline on a codebase you did
+**not** write — an OSS dependency, a repo you're evaluating, a legacy service — to find **pre-existing**
+bugs that ship today:
+
+```
+/audit-fix hunt src/payments        # audit a whole subtree, no diff required
+/audit-fix hunt path/to/file.py     # or specific files
+```
+
+What changes in hunt mode:
+
+- **Whole-file audit, no diff.** Auditors read each file in full; *"pre-existing bugs are the target"*
+  replaces *"only audit the diff."*
+- **A target-viability pre-flight runs first.** Before spawning a single auditor it checks the repo is
+  alive, accepts contributions, has a test harness, and is in a language it audits well. An archived
+  or deprecated repo is **rejected up front** — auditing a corpse wastes the whole run and produces a
+  fix nobody can merge.
+- **Forced DEEP tier.** Every finding faces the adversarial 2-of-3 verifier, so a plausible-but-wrong
+  finding gets killed before you act on it.
+- **Upstream-duplicate check.** L2.5 searches the target's own issues and PRs; a bug someone already
+  reported is dropped as a `DUPLICATE`, not re-submitted.
+
+The result is a bug you can stand behind: reproduced with a failing test, not already known upstream,
+and survivable under an adversarial review — exactly what you need before opening a PR against someone
+else's project.
 
 ## Tiers
 

@@ -56,8 +56,25 @@ Determines which files to audit based on arguments:
 - **Default**: all uncommitted changes (staged + unstaged vs HEAD) plus untracked files.
 - **`commit N`**: diff of last N commits.
 - **`files path1 path2`**: specific files only.
+- **`hunt path1 path2`**: **hunt mode** — audit the named paths IN FULL (no diff) for pre-existing
+  bugs, for a codebase you did not write. Sets `MODE = HUNT`; every other mode is `MODE = DIFF`.
 
 If no changes found, the pipeline stops immediately.
+
+### Step 0.4: Target Viability Pre-flight (hunt mode only)
+
+Before any auditor runs against a repo you don't own, five gates must pass, else the pipeline STOPS:
+
+| Gate | Rejects when |
+|------|--------------|
+| **Alive** | archived / deprecated / no commits in ~90 days / archive banner in the README |
+| **Accepts contributions** | no `CONTRIBUTING.md` and no external merged PR in 6 months |
+| **Test harness** | no runnable test suite (nowhere to put the red→green repro) |
+| **Language** | transpiled / generated output rather than hand-written source |
+| **Money / irreversible surface** | *(not a reject — decides whether the STAKES/NUM auditors dispatch)* |
+
+This is the step that stops you auditing a corpse: a repo can have real code, real tests, and the
+right bug class, and still carry a "no longer maintained" banner that makes any fix unmergeable.
 
 ### Step 0.5: Language, Tooling & Domain Detection
 

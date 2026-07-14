@@ -1,5 +1,5 @@
 ---
-description: "Canonical CCA audit+fix pipeline. TIERED: auto-selects FAST / STANDARD / DEEP by diff size + high-stakes risk. STANDARD/DEEP add anti-hallucination (L2.5), anti-regression (L5.5), conditional domain auditors (high-stakes/numeric/data), deployability, and fix→finding mapping. Triggers: 'audit+fixing', 'audit and fix', 'cca audit', 'run the audit'. Args: (empty)|commit N|files ...|no-fix|p1-only|fast|deep|deferred."
+description: "Canonical CCA audit+fix pipeline. TIERED: auto-selects FAST / STANDARD / DEEP by diff size + high-stakes risk. STANDARD/DEEP add anti-hallucination (L2.5), anti-regression (L5.5), conditional domain auditors (high-stakes/numeric/data), deployability, and fix→finding mapping. Triggers: 'audit+fixing', 'audit and fix', 'cca audit', 'run the audit'. Args: (empty)|commit N|files ...|hunt <paths>|no-fix|p1-only|fast|deep|deferred. HUNT MODE audits a codebase you did NOT write for pre-existing bugs (whole-file, no diff, target-viability pre-flight, forced DEEP)."
 ---
 
 # CCA Audit + Fix Pipeline (Tiered, Canonical)
@@ -20,6 +20,10 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 - `p1-only` = only fix P1 Critical findings, skip P2/P3
 - `fast` = force FAST tier (3 core auditors, no gates) regardless of diff
 - `deep` = force DEEP tier (all domain auditors + adversarial verify) regardless of diff
+- `hunt path1 [path2 ...]` = **HUNT MODE** — audit the named paths IN FULL for **pre-existing** bugs,
+  with no diff. This is the mode for a codebase you did NOT write: an OSS dependency, a repo you are
+  evaluating, a legacy service. Runs the Step 0.4 viability pre-flight first and forces DEEP. Paths
+  are REQUIRED — there is no repo-wide default.
 - `deferred` = second pass — fix P3 items deferred from the previous round (see § Second Pass)
 
 > **Argument precedence:** `no-fix` always wins. If `no-fix` is present, never edit or commit — on
@@ -28,7 +32,14 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 ## Step 0: Detect Target Files
 
 ```
-IF $ARGUMENTS contains "commit":
+IF $ARGUMENTS contains "hunt":
+  TARGETS = paths after "hunt"   # REQUIRED; if empty, STOP: "hunt needs explicit paths"
+  Run the Step 0.4 viability pre-flight. Any REJECT → STOP, and spawn NO auditors.
+  FILES = source files under TARGETS, EXCLUDING tests/, examples/, docs/, generated code
+          (protobuf / transpiled output) and vendored deps
+  DIFF_CMD = NONE                # sentinel: there IS no diff; auditors read whole files
+  MODE = HUNT
+ELIF $ARGUMENTS contains "commit":
   N = number after "commit" (default 1)
   FILES = git diff HEAD~N --name-only --diff-filter=ACMR
   DIFF_CMD = "git diff HEAD~N"
@@ -48,6 +59,37 @@ ELSE:
 ```
 
 If no files found, STOP with "No changed files to audit."
+
+> `MODE` defaults to `DIFF`; only the `hunt` branch (above) sets `MODE = HUNT`. Every `MODE`-conditional
+> step below branches on this.
+
+## Step 0.4: Target Viability Pre-flight (MODE=HUNT only — BLOCKING)
+
+Before spawning a SINGLE auditor against a repo you do not own, verify all five gates. Report the
+table. If any REJECT fires, **STOP** — do not audit.
+
+| Gate | Check | Fail |
+|------|-------|------|
+| **Alive** | default branch pushed within ~90d, AND the newest commits are not an archive/deprecation notice, AND the README carries no archive banner | REJECT |
+| **Accepts contributions** | `CONTRIBUTING.md` exists, OR ≥1 merged PR from a non-org author in the last 6 months | REJECT |
+| **Test harness** | a runnable test suite exists — you need somewhere to put the red→green repro | REJECT |
+| **Language** | the language is one this pipeline audits well (not transpiled / generated output) | REJECT |
+| **Money / irreversible surface** | order, payment, signing, auth, or destructive paths exist | Not a reject — this only decides whether the STAKES/NUM domain auditors dispatch |
+
+```bash
+gh repo view <owner>/<repo> --json isArchived,pushedAt,description
+gh pr list --repo <owner>/<repo> --state merged --limit 10 --json author,title
+head -20 README.md | grep -iE 'archiv|deprecat|no longer maintained|do not use'
+```
+
+**Why this gate exists.** Every signal can look perfect on a dead repository: real code, a real test
+suite, exactly the right bug class — and an archive banner in the README that says "no longer
+maintained, do not use." Auditing it burns the whole run and produces a fix nobody can merge. A repo
+that has already deprecated itself is the classic trap this gate catches.
+
+**The generalisation, which is the real lesson: check the target is alive before you work on it.** It
+applies to a repo, a service, a branch, or a dependency. Most wasted effort is not a wrong answer to
+the question; it is a correct answer to a dead question.
 
 ## Step 0.5: Language, Tooling & Domain Detection
 
@@ -97,7 +139,8 @@ Pick the tier. Explicit `fast` / `deep` args override auto-selection.
 HIGH_STAKES = RUN_STAKES OR RUN_NUM          # diff touches a high-stakes / numeric path
 SIZE = total changed lines (git diff --shortstat) ; FILE_COUNT = |FILES|
 
-IF arg "fast":       TIER = FAST
+IF MODE == HUNT:     TIER = DEEP             # hunt is ALWAYS deep — the adversarial gate IS the point
+ELIF arg "fast":     TIER = FAST
 ELIF arg "deep":     TIER = DEEP
 ELIF HIGH_STAKES:    TIER = DEEP             # high-stakes is ALWAYS deep, never auto-downgraded
 ELIF SIZE <= 40 AND FILE_COUNT <= 2 AND NOT (RUN_DAT OR RUN_DEPLOY):
@@ -118,7 +161,10 @@ ELSE:                TIER = STANDARD
 | L5.5 regression diff | — | yes | yes |
 | L6 architect gate | yes (verdict only) | yes + mapping | yes + mapping |
 
-Report: `Tier=<T> | <N> files (<LANGUAGES>) | domains STAKES=<…> NUM=<…> DAT=<…> DEP=<…> DEPLOY=<…> | size=<SIZE>L`
+Report: `Tier=<T> | MODE=<DIFF|HUNT> | <N> files (<LANGUAGES>) | domains STAKES=<…> NUM=<…> DAT=<…> DEP=<…> DEPLOY=<…> | size=<SIZE>L`
+
+**In HUNT mode, also log every file under TARGETS that no auditor reached.** A hunt that silently
+truncates its own coverage reads as "audited everything" when it did not.
 
 ## Findings Schema (canonical)
 
@@ -236,6 +282,7 @@ Context: {PROJECT_CONTEXT}
 (Default: "This is a software project; apply extra scrutiny to any code that handles money, auth,
 user data, or irreversible actions." Replace {PROJECT_CONTEXT} with your project's one-line risk note.)
 
+─── IF MODE == DIFF ──────────────────────────────────────────────────────────
 Check the CHANGED code (use `{DIFF_CMD}`) for: {AGENT_SPECIFIC_CHECKLIST}
 
 RULES:
@@ -243,6 +290,21 @@ RULES:
 - BEFORE flagging a design / threshold / strategy choice, check it isn't an already-SETTLED project
   decision. If the project keeps a decision log (ADRs, a DECISIONS file, or a searchable memory),
   consult it; if a finding contradicts a recorded decision, SUPPRESS it and note "settled: <ref>".
+
+─── IF MODE == HUNT ──────────────────────────────────────────────────────────
+Read each file IN FULL. There is no diff. Audit ALL of it for: {AGENT_SPECIFIC_CHECKLIST}
+
+RULES:
+- **Pre-existing bugs are the TARGET.** Age is not evidence of correctness — code can be wrong for
+  years. Do NOT skip a path because it is old, popular, well-starred, or widely depended upon. The
+  fact that nobody has reported it is the reason you are looking, not proof that it works.
+- This is a codebase you did NOT write. Before flagging a design or threshold choice, check the
+  UPSTREAM project's own issues, PRs, and docs — not yours. If it is a deliberate upstream decision,
+  SUPPRESS it and cite the reference.
+- You are not reviewing a diff for a colleague; you are looking for a defect that ships today. Prefer
+  ONE bug you can PROVE with a failing test over ten you can merely describe.
+
+─── END ──────────────────────────────────────────────────────────────────────
 - Return your findings as a JSON array per the Findings Schema as the FIRST thing in your reply,
   then a short prose summary. The JSON is the authoritative return value.
 ```
@@ -274,10 +336,22 @@ are zero P1/P2 findings, skip it.
 subagent_type: fp-check
 For each finding, verify against ACTUAL code via Read/Grep:
   (a) does the issue exist at the cited file:line?
-  (b) is it in code CHANGED in this diff ({DIFF_CMD}), not pre-existing?
+
+  (b)  [MODE=DIFF] is it in code CHANGED in this diff ({DIFF_CMD}), not pre-existing?
+
+  (b′) [MODE=HUNT] is it ALREADY KNOWN UPSTREAM?  ← criterion (b) MUST NOT run in hunt mode: every
+       hunt finding is pre-existing by definition, so (b) would reject all of them. Instead search
+       the target's open AND closed issues, and its recent commits:
+         gh issue list --repo <owner>/<repo> --state all --search "<keywords>"
+         gh pr list    --repo <owner>/<repo> --state all --search "<keywords>"
+         git log --oneline -20 -- <file>
+       Already reported, or already fixed on the default branch ⇒ verdict DUPLICATE (drop it, cite
+       the issue/PR URL). A bug someone else already found is not a finding.
+
   (c) is the stated impact real, or already mitigated (config elsewhere, upstream guard, validated before)?
-  (d) does it contradict an already-SETTLED project decision (decision log / memory)?
-Verdict per finding: CONFIRMED | FALSE_POSITIVE (give evidence) | UNCERTAIN.
+  (d) does it contradict an already-SETTLED decision?
+      (MODE=DIFF: yours — decision log / memory.  MODE=HUNT: the UPSTREAM project's.)
+Verdict per finding: CONFIRMED | FALSE_POSITIVE (give evidence) | DUPLICATE (cite URL) | UNCERTAIN.
 For UNCERTAIN where a quick test would settle it, PROPOSE a one-line assertion test (do not run blind).
 ```
 
@@ -292,6 +366,7 @@ A high-stakes P1 is CONFIRMED only if **≥2 of 3** skeptics fail to refute it. 
 (or UNCERTAIN if split with low confidence → escalate to human, never fix blind).
 
 Apply verdicts: CONFIRMED → fix plan · FALSE_POSITIVE → drop (record with evidence) ·
+DUPLICATE → drop (record the upstream URL; it is someone else's find, not yours) ·
 UNCERTAIN → list for the user, treat as deferred-to-human.
 
 If `no-fix`: STOP here. Report consolidated findings + verdicts.
