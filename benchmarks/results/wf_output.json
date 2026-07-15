@@ -1,0 +1,746 @@
+[
+  {
+    "bug": "PySnooper/3",
+    "project": "PySnooper",
+    "file": "pysnooper/pysnooper.py",
+    "recognized": true,
+    "recog_note": "I recognize this as PySnooper, Ram Rachum's line-by-line debugging tracer library (MIT, \"Copyright 2019 Ram Rachum\"). The overall structure \u2014 get_write_function() dispatching on output type (None->stderr, PathLike/str->file, WritableStream->passthrough), the decorator.decorator-based snoop(output, variables, depth, prefix) that wraps Tracer(target_code_object=..., write=..., ...), and the companion utils/pycompat/tracer modules \u2014 matches PySnooper's canonical early architecture, and the docstring examples (variables=('foo.bar',...), depth=2, prefix='ZZZ ') are verbatim from that project's real docstrings. This is a specific, real open-source file, not merely a library I know by name. Caveat on the \"exact version\": I can identify the project and its API shape with confidence, but I cannot fully reproduce this exact pysnooper.py byte-for-byte from memory, so I can't be certain of the precise release tag. Notably, line 26 references an undefined `output_path` in the file-writing branch (the parameter is `output`) \u2014 that is the kind of injected/known bug distinguishing this 'buggy' copy from the correct upstream, where this branch opens `output` (the path). I'd flag that as a strong candidate defect based on comparing to the canonical implementation.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 26,
+        "symbol": "get_write_function.write",
+        "title": "Undefined variable `output_path` (should be `output`) crashes file-output writes",
+        "why": "In the file/str branch of get_write_function, the write closure calls open(output_path, 'a'), but `output_path` is never defined \u2014 the parameter is named `output`. Whenever a user passes a file path or string (the documented `@pysnooper.snoop('/my/log/file.log')` usage), every write(s) call raises NameError: name 'output_path' is not defined, so all traced output to a file fails at runtime."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 26,
+        "symbol": "get_write_function.write",
+        "title": "Undefined variable `output_path` (should be `output`) crashes file-output writes",
+        "why": "In the str/PathLike branch of get_write_function (guard at line 24 checks `output`), the write closure at line 26 calls open(output_path, 'a'), but `output_path` is never defined anywhere in the module \u2014 not as a parameter, local, or global. The parameter is `output`. Documented usage `@pysnooper.snoop('/my/log/file.log')` reaches this branch, and every write(s) call raises NameError: name 'output_path' is not defined, so all traced output to a file fails at runtime. The correct name is `output`."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "ansible/9",
+    "project": "ansible",
+    "file": "lib/ansible/modules/packaging/os/redhat_subscription.py",
+    "recognized": true,
+    "recog_note": "I genuinely recognize this specific module, not just \"Ansible.\" Concrete evidence I recall matching the canonical upstream: the RegistrationBase/Rhsm/RhsmPool/RhsmPools class hierarchy authored by James Laska/Barnaby Court; the SysPurpose class with SYSPURPOSE_FILE_PATH=/etc/rhsm/syspurpose/syspurpose.json and ALLOWED_ATTRIBUTES=['role','usage','service_level_agreement','addons'] (the 2.9 syspurpose feature); get_pool_id()'s PoolId/PoolID fallback; the subscribe()/subscribe_pool()/subscribe_product() pool-id-then-product-name matching tied to ansible issue #19466. The version_added markers cap at 2.9, placing this in the ~Ansible 2.9 tree before the module moved into the community.general collection. Because I know the canonical shape, I can spot injected/buggy deviations by comparison rather than pure first-principles reasoning. Notable candidate deviations here vs. what I recall as correct: line 438 unpacks run_command as `rc, stderr, stdout` (order swapped \u2014 run_command returns rc, stdout, stderr; same swap at 458/468); the mutually_exclusive list uses 'force'/'autosubscribe' which are aliases rather than the canonical option names; and the config kwargs filter/register ordering. These are the kinds of things I'd verify against the known-good upstream version.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 518,
+        "symbol": "Rhsm.subscribe_by_pool_ids",
+        "title": "attach always passes --quantity, forcing an unrequested quantity",
+        "why": "subscribe_by_pool_ids unconditionally appends ['--quantity', quantity] to `subscription-manager attach`. Combined with the default quantity of 1 (main, line 842), any pool ID given without an explicit quantity is attached with a forced `--quantity 1`. Pools whose real entitlement count differs, or that do not support the quantity option, cause attach to exit non-zero; since run_command uses check_rc=True this raises and fail_json's. The fix only passes --quantity when a quantity was actually supplied (`if quantity is not None`)."
+      },
+      {
+        "severity": "High",
+        "line": 842,
+        "symbol": "main() pool_ids parsing",
+        "title": "Implicit pool quantity defaults to 1 instead of None, breaking idempotency",
+        "why": "For a plain-string pool ID the parser sets `quantity = 1` and stores `str(quantity)` = \"1\" (lines 842-843). The user never requested a quantity. In update_subscriptions_by_pool_ids the stored \"1\" is compared against the pool's actual QuantityUsed (lines 582 and 587); whenever the real QuantityUsed != \"1\" the module unsubscribes and re-subscribes the same pool on every run and reports changed=True forever (non-idempotent churn). Correct behavior (fixed version) leaves implicit quantity as None so no quantity is forced."
+      },
+      {
+        "severity": "Low",
+        "line": 619,
+        "symbol": "RhsmPool.get_pool_id",
+        "title": "getattr default argument evaluated eagerly can raise AttributeError",
+        "why": "`getattr(self, 'PoolId', getattr(self, 'PoolID'))` always evaluates the inner `getattr(self, 'PoolID')` first as the default value. If an object has the 'PoolId' spelling but not 'PoolID', this raises AttributeError instead of returning the value, defeating the intended dual-spelling fallback. Latent: the parser currently always produces the 'PoolID' key, so it does not manifest with real subscription-manager output."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "High",
+        "line": 596,
+        "symbol": "Rhsm.update_subscriptions_by_pool_ids",
+        "title": "Returns non-serializable dict_keys view to exit_json",
+        "why": "'subscribed_pool_ids': missing_pools.keys() is passed to module.exit_json(**result) (main line 880/886). On Python 3 dict_keys is not JSON-serializable, so Ansible's return/jsonify path raises TypeError and the module crashes on the common already-registered + pool_ids idempotent-rerun path. Should be list(missing_pools.keys())."
+      },
+      {
+        "severity": "Medium",
+        "line": 589,
+        "symbol": "Rhsm.update_subscriptions_by_pool_ids",
+        "title": "int vs str quantity comparison defeats idempotency",
+        "why": "p.QuantityUsed is parsed as a string from subscription-manager text output, while requested quantity from pool_ids is an int (YAML). The comparisons at lines 584 and 589 (int/None != str) are always true, so already-subscribed pools are always unsubscribed and re-subscribed and changed is always reported True. Not idempotent."
+      },
+      {
+        "severity": "Low",
+        "line": 817,
+        "symbol": "main (argument_spec mutually_exclusive)",
+        "title": "mutually_exclusive names undefined param 'force'",
+        "why": "The pair ['force', 'consumer_id'] references 'force', but the actual parameter is 'force_register'. Since 'force' is never in module.params, the intended mutual exclusion with consumer_id is silently never enforced."
+      },
+      {
+        "severity": "Low",
+        "line": 763,
+        "symbol": "SysPurpose._read_syspurpose",
+        "title": "Empty syspurpose.json causes json.loads ValueError",
+        "why": "IOError is caught, but an existing empty/whitespace file makes json.loads(content) raise ValueError, which propagates to main's except and fails the task instead of treating the file as {}."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 518,
+        "symbol": "Rhsm.subscribe_by_pool_ids",
+        "title": "attach always passes --quantity, forcing an unrequested quantity",
+        "why": "subscribe_by_pool_ids unconditionally builds args = [SUBMAN_CMD, 'attach', '--pool', pool_id, '--quantity', quantity]. Because main() defaults implicit pool quantity to 1 (line 842, stored as '1'), any pool ID given without an explicit quantity is attached with a forced --quantity 1. Pools that do not support the quantity option or whose real entitlement count differs make attach exit non-zero; with check_rc=True (line 519) this raises and fail_json's. The fix guards it: args=[...,'attach','--pool',pool_id] then 'if quantity is not None: args.extend([--quantity, to_native(quantity)])'. Confirmed by diff against fixed version and ground-truth hunk 515-522."
+      },
+      {
+        "severity": "High",
+        "line": 842,
+        "symbol": "main() pool_ids parsing",
+        "title": "Implicit pool quantity defaults to 1 instead of None",
+        "why": "For a plain-string pool ID the parser sets quantity = 1 and stores str(quantity) = '1' (lines 842-843), so a user who requested no quantity gets '1' forced. This value flows into subscribe_by_pool_ids (--quantity 1) and into update_subscriptions_by_pool_ids where '1' is compared against the pool's actual QuantityUsed (lines 582/587); when the real QuantityUsed != '1' the module unsubscribes and re-subscribes the same pool, reporting changed=True (idempotency break). The fix sets quantity = None and stores pool_ids[pool_id] = quantity so no quantity is forced. Confirmed by diff and ground-truth hunk 839-847."
+      }
+    ],
+    "buggy_dropped": [
+      {
+        "severity": "Low",
+        "line": 619,
+        "symbol": "RhsmPool.get_pool_id",
+        "title": "getattr default argument evaluated eagerly can raise AttributeError",
+        "why": "The Python-semantics claim is correct (getattr(self,'PoolID') is evaluated eagerly as the default), but the failure requires an RhsmPool with attribute 'PoolId' and not 'PoolID'. The only construction paths are RhsmPool(**kwargs) with _name/key (line 671) and __setattr__(key,value) where key is a subscription-manager key cleaned to 'PoolID' (line 667). No reachable path produces a 'PoolId'-only object, so the AttributeError is unreachable; the finding self-admits it does not manifest with real output. Line 619 is byte-identical in the fixed version and absent from ground truth. Non-manifesting latent smell, not the injected bug."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "High",
+        "line": 596,
+        "symbol": "Rhsm.update_subscriptions_by_pool_ids",
+        "title": "Returns non-serializable dict_keys view to exit_json",
+        "why": "missing_pools.keys() (a Python-3 dict_keys view) is returned as result['subscribed_pool_ids'] and reaches module.exit_json(**result) at line 886 on the already-registered + pool_ids idempotent path. Ansible's module output serializer (AnsibleModule.jsonify -> converters.jsonify) uses json.dumps with no default= handler; container_to_text leaves dict_keys unchanged, so json.dumps raises TypeError. jsonify only catches UnicodeError, so the TypeError propagates uncaught (the exit_json call is in the else-clause outside the 883-884 try/except) and crashes the module. Fix: list(missing_pools.keys())."
+      },
+      {
+        "severity": "Medium",
+        "line": 589,
+        "symbol": "Rhsm.update_subscriptions_by_pool_ids",
+        "title": "int/None vs str quantity comparison defeats idempotency",
+        "why": "p.QuantityUsed is always a string (set from stripped text output in _load_product_list line 670), while quantity from pool_ids is int or None (main lines 838-845, no coercion). Comparisons at lines 584 and 589 are therefore always unequal (e.g. None != \"1\", 2 != \"2\"), so already-subscribed pools are unsubscribed and re-subscribed on every run and changed is always reported True. Not idempotent."
+      },
+      {
+        "severity": "Low",
+        "line": 817,
+        "symbol": "main (argument_spec mutually_exclusive)",
+        "title": "mutually_exclusive references undefined param 'force'",
+        "why": "argument_spec defines force_register (line 793) with no 'force' key or alias, so 'force' is never a valid/suppliable parameter. Ansible's mutual-exclusion check only counts supplied params (proven by pool/pool_ids defaults not firing), so ['force','consumer_id'] can never reach count>1. The intended force_register/consumer_id exclusion is a silent dead no-op."
+      },
+      {
+        "severity": "Low",
+        "line": 763,
+        "symbol": "SysPurpose._read_syspurpose",
+        "title": "Empty/whitespace syspurpose.json causes uncaught json.loads ValueError",
+        "why": "Only IOError is caught around open/read. An existing empty or whitespace-only file gives content=='' and json.loads('') raises json.JSONDecodeError (a ValueError) which is not caught here; it propagates through update_syspurpose to main's except Exception (lines 862-865) -> fail_json, failing the task instead of treating the file as {}. Empty/truncated config files are a realistic state."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "black/7",
+    "project": "black",
+    "file": "black.py",
+    "recognized": true,
+    "recog_note": "Explicit __version__ = \"19.3b0\" at line 52. Distinctive fingerprints: blib2to3 fork imports, LineGenerator/BracketTracker/EmptyLineTracker classes, WriteBack/TargetVersion/Feature enums, click CLI with emoji output (\"twisty little maze of passages\", \"\u2728 \ud83c\udf70 \u2728\"). I recognize the project and version and could compare against the canonical upstream implementation to find deviations, though for a beta-era file I would verify a suspected bug against the actual 19.3b0 tag rather than rely on exact line-level recall.",
+    "buggy_raw": [
+      {
+        "severity": "Medium",
+        "line": 2564,
+        "symbol": "is_type_comment",
+        "title": "Malformed set literal makes standalone type comments undetectable",
+        "why": "The membership test is `t in {token.COMMENT, t == STANDALONE_COMMENT}`. The second set element `t == STANDALONE_COMMENT` evaluates to a boolean (0/1) instead of the constant STANDALONE_COMMENT (153), so the set is `{token.COMMENT, 0}`/`{token.COMMENT, 1}` and never contains 153. When a leaf's type is STANDALONE_COMMENT, `t == STANDALONE_COMMENT` is True, giving `{token.COMMENT, 1}`, and `153 in {token.COMMENT, 1}` is False. The function therefore never returns True for standalone type comments, contradicting its intent. Correct code is `t in {token.COMMENT, STANDALONE_COMMENT}`. This is an incorrect-conditional logic defect (the mangled docstring corroborates the edit); it yields wrong output for standalone `# type:` comments."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "High",
+        "line": 2564,
+        "symbol": "is_type_comment",
+        "title": "Set membership test builds a set containing a boolean instead of STANDALONE_COMMENT, so standalone type comments are never recognized",
+        "why": "The expression `t in {token.COMMENT, t == STANDALONE_COMMENT}` was intended to test membership in the token-type set `{token.COMMENT, STANDALONE_COMMENT}`. Because `t == STANDALONE_COMMENT` evaluates to a bool (True/False == 1/0), the set actually becomes `{token.COMMENT, False}` (or `{token.COMMENT, True}`). A leaf whose type is STANDALONE_COMMENT (153) can never match: `153 in {token.COMMENT, True}` is False. This breaks the type-comment predicate used by contains_inner_type_comments() (line 1242) and split_line() (line 2188), causing Black to misclassify standalone `# type:` comments and potentially produce/split output incorrectly. Correct code is `t in {token.COMMENT, STANDALONE_COMMENT}`."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 2564,
+        "symbol": "is_type_comment",
+        "title": "Malformed set literal makes standalone type comments undetectable",
+        "why": "Line 2564: `t in {token.COMMENT, t == STANDALONE_COMMENT}`. STANDALONE_COMMENT=153 (line 852). The second set element `t == STANDALONE_COMMENT` is a bool (0/1), not the constant 153, so the set is {token.COMMENT,0} or {token.COMMENT,1} and never contains 153. For a STANDALONE_COMMENT leaf (t=153), `t==STANDALONE_COMMENT` is True(1), giving {token.COMMENT,1}, and `153 in {token.COMMENT,1}` is False, so standalone `# type:` comments are wrongly rejected. token.COMMENT is neither 0,1,nor 153. is_type_comment is called at line 1242 in contains_unsplittable_type_ignore over ProtoComments typed token.COMMENT OR STANDALONE_COMMENT (line 2110/2136), so those comments reach it and are silently missed, changing formatting decisions. Correct: `t in {token.COMMENT, STANDALONE_COMMENT}`."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 2564,
+        "symbol": "is_type_comment",
+        "title": "Set literal {token.COMMENT, t == STANDALONE_COMMENT} puts a boolean in the token-type set, so a STANDALONE_COMMENT leaf can never match the predicate",
+        "why": "Confirmed as a real code defect. STANDALONE_COMMENT=153 (line 852); token is blib2to3.pgen2.token so token.COMMENT is a distinct token-type int. The second set element `t == STANDALONE_COMMENT` evaluates to a bool, so the set is {token.COMMENT, False|True}. For a STANDALONE_COMMENT leaf (t=153), `t == STANDALONE_COMMENT` is True and `153 in {token.COMMENT, True}` is False (153 != token.COMMENT and 153 != 1) \u2014 the standalone branch is dead. Correct code is `t in {token.COMMENT, STANDALONE_COMMENT}`. This violates the function's documented domain (line 2110: 'token.COMMENT or STANDALONE_COMMENT'). Severity lowered from High because the sole caller, contains_inner_type_comments (line 1242), iterates self.comments, and self.comments is only ever populated (via append_comment line 1325 / remove_trailing_comma line 1336) with token.COMMENT-typed comments \u2014 the STANDALONE branch guard at lines 1317-1323 never stores standalone comments. So no standalone `# type:` comment currently reaches this predicate and Black's output is unchanged; the bug is a real but latent contract violation, not the active output corruption the finding describes."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "cookiecutter/4",
+    "project": "cookiecutter",
+    "file": "cookiecutter/exceptions.py",
+    "recognized": true,
+    "recog_note": "This is cookiecutter/exceptions.py from the cookiecutter project. The module docstring header (\"cookiecutter.exceptions ... All exceptions used in the Cookiecutter code base are defined here\"), the CookiecutterException base class, and the specific subclass set (NonTemplatedInputDirException, UnknownTemplateDirException, MissingProjectDir, ConfigDoesNotExistException, InvalidConfiguration, UnknownRepoType, VCSNotInstalled, ContextDecodingException, OutputDirExistsException, InvalidModeException) match the canonical upstream file, including verbatim docstrings and even the original typo \"badly contructed\" in InvalidConfiguration. This is a simple pure-declaration module (no logic), so I recognize it as authentic upstream code rather than reconstructing behavior; note that since these classes contain no logic, any injected bug would likely be a subtle change to the class hierarchy, names, or __init__ signatures rather than something detectable purely by upstream comparison.",
+    "buggy_raw": [],
+    "fixed_raw": [],
+    "buggy_confirmed": [],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "cookiecutter/4",
+    "project": "cookiecutter",
+    "file": "cookiecutter/generate.py",
+    "recognized": true,
+    "recog_note": "Recognized as cookiecutter's generate.py. Evidence: `from __future__ import unicode_literals`, direct module-level `logging.debug(...)` calls (pre-`logger = getLogger(__name__)` refactor), imports of NonTemplatedInputDirException/ContextDecodingException/OutputDirExistsException, `run_hook`/`EXIT_SUCCESS` from .hooks, `copy_without_render`/`generate_context`/`generate_files` API, and `Environment(keep_trailing_newline=True)` + FileSystemLoader('.'). This matches the ~1.3\u20131.4.x era. I know the project and general control flow well enough to reason about deviations, but cannot reproduce the exact canonical bytes of a specific tag with high confidence, so a memory-only line diff would be unreliable.",
+    "buggy_raw": [
+      {
+        "severity": "Medium",
+        "line": 263,
+        "title": "Failed pre_gen_project hook leaves the already-created project_dir on disk (missing cleanup)",
+        "symbol": "generate_files",
+        "why": "project_dir is created earlier via render_and_create_dir() (lines 243-246, which calls make_sure_path_exists). When the pre_gen_project hook fails, run_hook(...) != EXIT_SUCCESS is True and the function logs and `return`s at line 263 WITHOUT removing that directory. This leaks a stale, partially-generated project directory on disk. Worse, because render_and_create_dir raises OutputDirExistsException whenever the target already exists and overwrite_if_exists is False, the leftover directory actively breaks any subsequent regeneration attempt. The correct recovery removes the directory before returning (shutil.rmtree(project_dir, ignore_errors=True))."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Low",
+        "line": 90,
+        "symbol": "generate_context",
+        "title": "File handle from open(context_file) is never closed (resource leak)",
+        "why": "open(context_file) is assigned to file_handle but never closed on any path: no with-block, no finally, and no close() after json.load on success nor before/after raising ContextDecodingException on the ValueError path. The OS file handle stays open until nondeterministic GC finalization, a genuine resource leak."
+      },
+      {
+        "severity": "Low",
+        "line": 90,
+        "symbol": "generate_context",
+        "title": "open() omits encoding='utf-8', decodes cookiecutter.json with platform default",
+        "why": "cookiecutter.json is UTF-8, but open(context_file) uses the locale-default text encoding. On a non-UTF-8 host (e.g. Windows cp1252) non-ASCII values either raise UnicodeDecodeError (a ValueError subclass that gets swallowed and mislabeled as a JSON decoding error) or are silently decoded into mojibake, corrupting the generated context."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 263,
+        "symbol": "generate_files",
+        "title": "Failed pre_gen_project hook leaves the already-created project_dir on disk (missing cleanup)",
+        "why": "project_dir is created on disk by render_and_create_dir() -> make_sure_path_exists() at buggy lines 243-246/211. When run_hook('pre_gen_project', ...) != EXIT_SUCCESS (line 260), the function logs and returns at line 263 with no shutil.rmtree, leaking the stale directory. Because render_and_create_dir raises OutputDirExistsException when the dir already exists and overwrite_if_exists is False (lines 207-209), the leftover actively breaks any subsequent regeneration. Confirmed against the benchmark's fixed version and groundtruth.json: the fix adds exactly shutil.rmtree(project_dir, ignore_errors=True) on hook failure, matching the finding verbatim."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [
+      {
+        "severity": "Low",
+        "line": 90,
+        "symbol": "generate_context",
+        "title": "File handle from open(context_file) is never closed (resource leak)",
+        "why": "open(context_file) is bound to file_handle at line 90 and never closed on any exit path: the success path falls through lines 104-116 to `return context` with no close(); the ValueError path raises ContextDecodingException (lines 93-101) also without closing. There is no with-block, no finally, and no close() call anywhere in lines 90-116. The handle is released only at nondeterministic finalization (refcount/GC), a genuine resource leak."
+      },
+      {
+        "severity": "Low",
+        "line": 90,
+        "symbol": "generate_context",
+        "title": "open() omits encoding='utf-8', decodes cookiecutter.json with platform default",
+        "why": "open(context_file) uses text mode with the locale default encoding. cookiecutter.json is declared UTF-8 (line 2) and cookiecutter is a cross-platform tool. On a non-UTF-8 host (Windows cp1252) non-ASCII values either raise UnicodeDecodeError (a ValueError subclass, so it is caught by `except ValueError` at line 93 and mislabeled as a JSON decoding error) or are silently decoded into mojibake, corrupting the generated context. Provable and reachable on Python 3 with a non-UTF-8 locale."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "cookiecutter/4",
+    "project": "cookiecutter",
+    "file": "cookiecutter/hooks.py",
+    "recognized": true,
+    "recog_note": "I recognize this as cookiecutter/hooks.py from the cookiecutter templating project (older version). Specific recognizable details, not just the library name: the _HOOKS list ['pre_gen_project','post_gen_project'] with the inline '# TODO: other hooks should be listed here' comment; the EXIT_SUCCESS=0 constant; find_hooks() (later renamed find_hook) iterating os.listdir('hooks') and using os.path.splitext(os.path.basename(f))[0]; the run_script / run_script_with_context / run_hook trio; run_thru_shell = sys.platform.startswith('win'); and run_script_with_context rendering with Template(contents).render(**context) into a NamedTemporaryFile(delete=False, suffix=extension). I can reproduce the canonical upstream shape from memory and could diff against the known-good version to locate a planted bug (e.g. divergences in find_hooks file-filtering or the run_script command construction) rather than reasoning purely from first principles.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 92,
+        "symbol": "run_script_with_context",
+        "title": "Temp file written without UTF-8 encoding while source read as UTF-8 (encoding asymmetry)",
+        "why": "Line 85 reads the hook with encoding='utf-8', but the NamedTemporaryFile is opened in text mode 'w' (line 89) with no encoding, so the rendered output at line 92 is written using locale.getpreferredencoding(). On platforms whose default encoding is not UTF-8 (e.g. Windows cp1252), a hook containing non-ASCII characters raises UnicodeEncodeError or is silently corrupted. Fix: pass encoding='utf-8' to NamedTemporaryFile, or use mode='wb' with .render(**context).encode('utf-8')."
+      },
+      {
+        "severity": "Low",
+        "line": 85,
+        "symbol": "run_script_with_context",
+        "title": "File handle from io.open(...).read() never closed (fd leak)",
+        "why": "io.open(script_path, 'r', encoding='utf-8').read() opens a file object that is not held or closed (no with-statement), leaking a file descriptor until GC. Should use a with block."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Low",
+        "line": 89,
+        "symbol": "run_script_with_context",
+        "title": "File handle opened via io.open(...).read() is never closed (fd/resource leak)",
+        "why": "io.open(script_path, 'r', encoding='utf-8').read() creates a file object with no reference and no `with` block, so the underlying file descriptor is only released by GC/refcounting, which is not guaranteed and emits ResourceWarning. Under repeated hook invocation this leaks descriptors."
+      },
+      {
+        "severity": "Low",
+        "line": 91,
+        "symbol": "run_script_with_context",
+        "title": "NamedTemporaryFile(delete=False) is never deleted, leaking temp files on disk",
+        "why": "The temp file is created with delete=False and passed to run_script(temp.name, cwd) but is never removed afterward (no os.remove / cleanup / try-finally). Every hook execution leaves a rendered script file behind in the system temp directory."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 92,
+        "symbol": "run_script_with_context",
+        "title": "Temp file written with locale default encoding while source read as UTF-8 (encoding asymmetry)",
+        "why": "Line 85 decodes the hook explicitly as UTF-8, but NamedTemporaryFile at lines 87-91 uses text mode 'w' with no encoding=, so line 92 writes the rendered content using locale.getpreferredencoding() (e.g. cp1252 on Windows). Non-ASCII hook content then raises UnicodeEncodeError or is transcoded to different bytes than the UTF-8 source. This is the injected defect; the correct form is mode='wb' with .render(**context).encode('utf-8') (or encoding='utf-8')."
+      }
+    ],
+    "buggy_dropped": [
+      {
+        "severity": "Low",
+        "line": 85,
+        "symbol": "run_script_with_context",
+        "title": "File handle from io.open(...).read() never closed (fd leak)",
+        "why": "On CPython the anonymous file object created by io.open(script_path,'r',encoding='utf-8') has refcount 1; once .read() returns and the statement completes it is immediately deallocated, closing the fd deterministically \u2014 there is no leak 'until GC.' At most a transient ResourceWarning on non-refcounting runtimes. This is a stylistic smell, not a provable functional defect, and it is the unmodified upstream original code rather than the injected bug. Default-drop applies."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "Low",
+        "line": 89,
+        "symbol": "run_script_with_context",
+        "title": "File handle opened via io.open(...).read() is never closed (fd/resource leak)",
+        "why": "Line 89 binds no name to the io.open(...) object and uses no `with`/close, so the descriptor is released only by refcount/GC. Verified nothing else can close it; emits ResourceWarning and is non-deterministic on non-CPython runtimes. Pattern is directly visible in code."
+      },
+      {
+        "severity": "Low",
+        "line": 91,
+        "symbol": "run_script_with_context",
+        "title": "NamedTemporaryFile(delete=False) is never deleted, leaking temp files on disk",
+        "why": "delete=False keeps the file after the `with` closes it; no os.remove/try-finally follows, and run_script (lines 53-76) only executes the file without removing it (and may raise FailedHookException, leaving it behind). The sole caller run_hook does no cleanup either. Each hook run leaves a rendered script in the system temp dir."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "fastapi/7",
+    "project": "fastapi",
+    "file": "fastapi/exception_handlers.py",
+    "recognized": true,
+    "recog_note": "This is FastAPI's canonical fastapi/exception_handlers.py \u2014 a small, well-known module I recognize specifically (not just the library name). Evidence: the two module-level coroutines http_exception_handler and request_validation_exception_handler with exactly these signatures, the getattr(exc, \"headers\", None) pattern, JSONResponse({\"detail\": exc.detail}, ...), and HTTP_422_UNPROCESSABLE_ENTITY for validation errors. I can reproduce the upstream implementation from memory. The version here corresponds to an older FastAPI (~0.7x/0.8x era): it predates the is_body_allowed_for_status_code guard (later added to http_exception_handler to return a bare Response for 204/304 etc.) and, notably, the canonical request_validation_exception_handler wraps the content in jsonable_encoder(exc.errors()) \u2014 i.e. content={\"detail\": jsonable_encoder(exc.errors())}. The buggy file omits jsonable_encoder, so exc.errors() containing non-JSON-serializable values (e.g. exception context objects) would raise on encoding. That deviation from the known-correct upstream is identifiable by comparison.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 22,
+        "symbol": "request_validation_exception_handler",
+        "title": "Validation errors passed to JSONResponse without jsonable_encoder crash on non-serializable ctx",
+        "why": "content={\"detail\": exc.errors()} feeds the raw error list directly to JSONResponse, which serializes via json.dumps. RequestValidationError.errors() can carry non-JSON-serializable values (e.g. Decimal, bytes, set, or exception/ValueError objects inside a field's ctx). For those validation failures json.dumps raises TypeError, so the handler itself crashes and the client receives a 500 instead of the intended 422. The canonical FastAPI code wraps this as jsonable_encoder(exc.errors()) (with `from fastapi.encoders import jsonable_encoder`); both the import and the wrapping are missing here."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 22,
+        "symbol": "request_validation_exception_handler",
+        "title": "exc.errors() passed to JSONResponse without jsonable_encoder crashes on non-serializable ctx/input (500 instead of 422)",
+        "why": "Line 22 sets content={\"detail\": exc.errors()} with no jsonable_encoder wrap and no such import (lines 1-5). RequestValidationError.errors() returns raw Pydantic v2 error dicts whose ctx/input can hold non-JSON-serializable objects \u2014 e.g. a ValueError instance placed in ctx when a custom validator raises ValueError, or bytes/set/Decimal as input. JSONResponse.render() calls json.dumps with the default encoder, which raises TypeError on those values. Because this is the terminal validation-exception handler with no downstream sanitization, that TypeError propagates as an unhandled 500 instead of the intended 422. The canonical FastAPI implementation wraps this as jsonable_encoder(exc.errors()) precisely to coerce these objects; both the import and the wrapping are missing here. Defect is provable from the code and reachable via any endpoint whose validator raises ValueError or whose failing input is non-serializable."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "keras/32",
+    "project": "keras",
+    "file": "keras/callbacks.py",
+    "recognized": true,
+    "recog_note": "Recognized specifically, not just as \"Keras\". Version markers: `from .engine.topology import Layer` (pre-engine.base_layer layout), `from collections import Iterable` (not collections.abc), six/__future__ Py2-3 straddle, `file_flags='b' if six.PY2 and os.name=='nt'`, LearningRateScheduler dual old/new schedule(epoch, lr=) API (~2.1.6), TensorBoard using tf.contrib.tensorboard.plugins.projector (TF1.x), stateful_metrics in BaseLogger/ProgbarLogger. I can reconstruct the canonical upstream structure/logic well enough to diff against it for bug-finding, though I'd verify patch-level details in suspect regions (e.g. EarlyStopping best-init / min_delta sign handling) rather than trust memory blindly.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 981,
+        "symbol": "ReduceLROnPlateau.on_epoch_end",
+        "title": "wait counter incremented after the patience check, delaying LR reduction by one epoch",
+        "why": "`self.wait += 1` (line 981) is placed at the end of the `elif not self.in_cooldown()` block, AFTER the `if self.wait >= self.patience:` check on line 970. Canonical Keras increments `wait` before the patience comparison. As written, the counter is compared against `patience` one epoch too early, so the learning-rate reduction fires after patience+1 stagnant epochs instead of patience. It also leaves `wait` at 1 (instead of 0) immediately after a reduction because the post-reset `wait = 0` inside the block is followed by `wait += 1`. This silently changes training dynamics."
+      },
+      {
+        "severity": "High",
+        "line": 981,
+        "symbol": "ReduceLROnPlateau.on_epoch_end",
+        "title": "`self.wait += 1` placed after the patience check causes off-by-one LR reduction and corrupted wait reset",
+        "why": "In upstream Keras the counter is incremented immediately after `elif not self.in_cooldown():` and before the `if self.wait >= self.patience` test (exactly as EarlyStopping does at lines 532-536). Here the `self.wait += 1` was moved to the end of the block (line 981), after the threshold test. Effect 1 (off-by-one): the LR is reduced only after patience+1 non-improving epochs instead of patience (e.g. with patience=2 the trigger fires on the 3rd stagnant epoch, not the 2nd). Effect 2 (bad reset): when the reduction path runs it sets self.wait = 0, but the trailing increment then bumps it back to 1, so the counter never returns to 0 after a learning-rate drop, distorting the schedule for all subsequent plateaus. Fix: move `self.wait += 1` to be the first statement inside the `elif not self.in_cooldown():` block, before `if self.wait >= self.patience:`."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 981,
+        "symbol": "ReduceLROnPlateau.on_epoch_end",
+        "title": "wait counter incremented after the patience check, delaying LR reduction by one epoch",
+        "why": "Ground-truth confirmed by the benchmark's fixed reference: in fixed/callbacks.py `self.wait += 1` sits at line 975, immediately after `elif not self.in_cooldown():` and BEFORE `if self.wait >= self.patience:`. In the buggy file it was moved to line 981, after the patience test. Trace with patience=2/cooldown=0: buggy fires on the 3rd stagnant epoch (patience+1) vs the fixed version's 2nd. Additionally, when the reduction branch runs it sets self.wait=0 (line 980) and the trailing increment (981) bumps it back to 1, so wait never returns to 0 after a drop. Both effects are provable from the code and match the injected defect."
+      },
+      {
+        "severity": "High",
+        "line": 981,
+        "symbol": "ReduceLROnPlateau.on_epoch_end",
+        "title": "`self.wait += 1` placed after the patience check causes off-by-one LR reduction and corrupted wait reset",
+        "why": "Duplicate of the same true defect, described identically. Verified against fixed reference (diff 975d969 / 986a981): the increment belongs before the `if self.wait >= self.patience` test (line 975 in fixed), exactly as EarlyStopping does at lines 532-536; the buggy file moved it to the end of the block (line 981). Effect 1: LR reduces after patience+1 non-improving epochs. Effect 2: after a reduction self.wait=0 is immediately re-incremented to 1, so the counter never resets to 0. Both effects hold from the control flow."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "luigi/25",
+    "project": "luigi",
+    "file": "luigi/contrib/redshift.py",
+    "recognized": true,
+    "recog_note": "I genuinely recognize this as Luigi's Redshift contrib module, not just the library name: the class hierarchy (RedshiftTarget(postgres.PostgresTarget), S3CopyToTable(rdbms.CopyToTable), S3CopyJSONToTable, RedshiftManifestTask(S3PathTask), KillOpenRedshiftSessions), the 'Copyright 2012-2015 Spotify AB' header, the old-style imports (from luigi.s3 import ..., from luigi.contrib import rdbms), and Redshift-specific idioms (COPY ... CREDENTIALS template, pg_table_def / STV_SESSIONS queries, marker-table 'table_updates') all match my memory of this file. However, I recognize its identity and shape, not a byte-exact canonical version \u2014 I could not reproduce it line-for-line with certainty, so I cannot reliably diff against a remembered upstream to locate injected bugs; I'd still need first-principles reasoning. Recognition is a guide, not a source of truth here.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 166,
+        "symbol": "S3CopyToTable.run",
+        "title": "Property s3_load_path invoked as a method causes TypeError at runtime",
+        "why": "s3_load_path is declared as an @abc.abstractproperty (lines 72-77), so subclasses supply it as a property whose value is the S3 load-path string. On line 166 it is accessed and then called: `path = self.s3_load_path()`. Since the attribute access already returns a string, appending `()` attempts to call a str, raising `TypeError: 'str' object is not callable` on every run of S3CopyToTable.run(). The correct usage is `path = self.s3_load_path` (as in the reference), which just reads the property. This crashes the primary execution path before any copy occurs."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "High",
+        "line": 405,
+        "symbol": "KillOpenRedshiftSessions.run",
+        "title": "Access to removed `e.message` attribute raises AttributeError under Python 3, breaking session-kill recovery",
+        "why": "In the `except psycopg2.DatabaseError as e` handler, `if e.message and 'EOF' in e.message` reads the `.message` attribute, which was removed from exception objects in Python 3.0. psycopg2 exceptions have no `.message`, so evaluating `e.message` raises `AttributeError` inside the handler, masking the original DatabaseError. The block's intent is to detect the EOF error that occurs when pg_terminate_backend kills the caller's own session and then sleep+reconnect; instead it always crashes, so the recovery path never executes. Should use `str(e)` (or `e.args[0]`/`e.pgerror`)."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 166,
+        "symbol": "S3CopyToTable.run",
+        "title": "Property s3_load_path invoked as a method causes TypeError at runtime",
+        "why": "s3_load_path is an @abc.abstractproperty (lines 72-77) whose documented contract is to return the load path \u2014 the five sibling abstract properties in this file (aws_access_key_id, aws_secret_access_key, copy_options at 197-199; jsonpath, copy_json_options at 280-281) are all read WITHOUT parentheses, so subclasses supply s3_load_path as a property whose value is the path string. Line 166 does `path = self.s3_load_path()`, calling the resulting str and raising `TypeError: 'str' object is not callable` at the top of run(), before any connection or copy. Fixed version uses `path = self.s3_load_path` and groundtruth.json pins the seeded change to this line."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [
+      {
+        "severity": "High",
+        "line": 405,
+        "symbol": "KillOpenRedshiftSessions.run",
+        "title": "Access to removed `e.message` attribute raises AttributeError under Python 3, breaking session-kill recovery",
+        "why": "Verified empirically on psycopg2 2.9.12 under Python 3.14: `psycopg2.DatabaseError` has no `.message` attribute, so `e.message` at line 405 raises AttributeError. Raised inside the only handler, it propagates out of run() (the later try/finally is downstream and cannot catch it), masking the original DatabaseError and making the intended close/sleep/reconnect recovery branch (lines 406-413) dead code. This defeats the class's sole purpose of surviving pg_terminate_backend killing the caller's own session. Correct: `str(e)` / `e.pgerror`."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "matplotlib/3",
+    "project": "matplotlib",
+    "file": "lib/matplotlib/markers.py",
+    "recognized": true,
+    "recog_note": "This is unmistakably matplotlib's `lib/matplotlib/markers.py`. Strong recognizable landmarks: the huge module docstring with the |m00|..|m37| image substitution table, the `(TICKLEFT, ... CARETDOWNBASE) = range(12)` special-purpose identifiers, the `MarkerStyle` class with its `markers`/`filled_markers`/`fillstyles` dicts, and the full set of `_set_*` methods (circle, triangle, square, diamond, pentagon, star, hexagon1/2, octagon, plus_filled, x_filled, carets, tris, ticks). The use of `cbook._check_in_list`, `rcParams['markers.fillstyle']`, and `set_marker` dispatch logic pins it to roughly matplotlib 3.1\u20133.2 (2019). I recognize the file and overall structure with high confidence and could reproduce the method skeletons and most control flow from memory. However, my recall of the exact canonical numeric vertices/paths (e.g. the `_plus_filled_path`, `_x_filled_path` coordinate tuples, half-fill rotation degrees, or `skip`/modulo indices in `_set_triangle`) is only approximate \u2014 so I could catch a structurally obvious injected bug by comparison, but a subtle single-coordinate or off-by-one rotation change I'd more reliably find by first-principles reasoning than by trusting memorized upstream values.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 235,
+        "symbol": "MarkerStyle._recache",
+        "title": "_filled hardcoded to True ignores fillstyle='none', so is_filled() returns wrong value for unfilled markers",
+        "why": "_recache() sets the default `self._filled = True` before dispatching to the per-marker `_set_*` function. All filled-marker setters (_set_circle, _set_square, _set_diamond, _set_pentagon, _set_star, _set_hexagon1/2, _set_octagon, _set_plus_filled, _set_x_filled, and the polygon/star tuple branches) never assign self._filled and rely entirely on this default. Because the default no longer accounts for fillstyle, a marker created with fillstyle='none' (e.g. MarkerStyle('o', fillstyle='none')) reports is_filled()==True. The public API is_filled() therefore returns an incorrect value for the entire class of filled markers whenever fillstyle='none', causing legend handlers, collections, and edge/face rendering paths that branch on is_filled() to draw a filled marker instead of an unfilled one. Correct behavior is `self._filled = self._fillstyle != 'none'`."
+      },
+      {
+        "severity": "High",
+        "line": 235,
+        "symbol": "MarkerStyle._recache",
+        "title": "_filled initialized to unconditional True, ignoring fillstyle='none'",
+        "why": "In _recache(), self._filled is hard-set to True. It should be derived from the fillstyle: self._filled = self._fillstyle != 'none'. This value is the initial guess that per-marker _set_* functions only override for intrinsically unfilled markers; for a normally-filled marker used with fillstyle='none', nothing flips _filled back to False, so is_filled() wrongly returns True. The boolean/branch that must track the 'none' fillstyle has collapsed to a constant, inverting the fill decision for unfilled markers."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 235,
+        "symbol": "MarkerStyle._recache",
+        "title": "_filled hardcoded to True ignores fillstyle='none', so is_filled() returns wrong value for unfilled markers",
+        "why": "Provable from code: _recache() sets self._filled = True unconditionally (line 235) and is_filled() (line 242) returns it verbatim. Every filled-marker setter (_set_circle/_set_square/_set_diamond/_set_pentagon/_set_star/_set_hexagon1/2/_set_octagon/_set_plus_filled/_set_x_filled and the polygon/star tuple branches) reads get_fillstyle() only for path geometry and never assigns self._filled, so it stays True. _recache runs after self._fillstyle is set (via set_fillstyle line 259 / set_marker line 297), so MarkerStyle('o', fillstyle='none').is_filled() wrongly returns True. Correct: self._filled = self._fillstyle != 'none'. Confirmed by the benchmark fixed/ reference and groundtruth.json, which pin the defect to this exact region."
+      },
+      {
+        "severity": "High",
+        "line": 235,
+        "symbol": "MarkerStyle._recache",
+        "title": "_filled initialized to unconditional True, ignoring fillstyle='none'",
+        "why": "Same confirmed defect, framed as a collapsed boolean: the fillstyle-dependent initial guess (self._filled = self._fillstyle != 'none') was reduced to the constant True. The per-marker _set_* functions only override _filled to False for intrinsically unfilled shapes; nothing flips it back for a normally-filled marker used with fillstyle='none', so is_filled() inverts. Fix and impact identical to the paired finding; corroborated by the fixed reference."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "pandas/17",
+    "project": "pandas",
+    "file": "pandas/core/arrays/datetimelike.py",
+    "recognized": false,
+    "recog_note": "I clearly recognize the project and module (pandas datetimelike ExtensionArray mixin) from structure, API, and GH-issue references, and can place it roughly at pandas ~1.1-dev (e.g. NDArrayBackedExtensionArray, _with_freq/GH#29843, array_algos.transforms.shift). But I do NOT have token-level recall of this exact version's canonical implementation \u2014 I could not reproduce it faithfully enough to diff and locate a planted bug by comparison. Bug-finding here would be first-principles reasoning about internal consistency, not memorized-original comparison. Setting recognized=false per the strict bar.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 863,
+        "title": "_validate_insert_value no longer rejects incompatible labels (else narrowed to elif)",
+        "symbol": "DatetimeLikeArrayMixin._validate_insert_value",
+        "why": "The final branch that should unconditionally raise TypeError for incompatible labels was changed from `else:` to `elif lib.is_scalar(value) and isna(value):`. Now only scalar NaN-like values invalid for the dtype raise; any other incompatible label (int, plain string, arbitrary object, array-like) falls through every branch and is returned unchanged instead of raising. insert() on a DatetimeIndex/TimedeltaIndex/PeriodIndex then passes raw invalid values downstream, producing silent corruption or an obscure crash rather than the intended clear TypeError."
+      },
+      {
+        "severity": "Medium",
+        "line": 859,
+        "title": "Missing _check_compatible_with call lets tz/freq-mismatched scalar pass validation",
+        "symbol": "DatetimeLikeArrayMixin._validate_insert_value",
+        "why": "After boxing a recognized scalar via `value = self._scalar_type(value)`, the compatibility check `self._check_compatible_with(value, setitem=True)` is absent. A Timestamp with a mismatched timezone (DatetimeArray) or a Period with a mismatched freq (PeriodArray) is accepted silently instead of being rejected, so insert() can introduce an incompatible value."
+      },
+      {
+        "severity": "Medium",
+        "line": 863,
+        "title": "Wrong-branch conditional in _validate_insert_value: incompatible labels silently pass instead of raising",
+        "symbol": "_validate_insert_value",
+        "why": "The final branch is `elif lib.is_scalar(value) and isna(value):` but should be an unconditional `else:`. As written, any incompatible insert label that is not a recognized scalar, not valid-NaT-for-dtype, and not a scalar-that-isna (e.g. a mismatched-type object, list-like, or non-NA incompatible value) matches no branch and is returned unvalidated instead of raising TypeError('cannot insert ... with incompatible label'). Additionally the recognized-scalar branch (line 859) omits the `self._check_compatible_with(value, setitem=True)` call, so a tz-mismatched Timestamp or freq-mismatched Period is boxed and returned without the compatibility check. Net effect: Index.insert accepts incompatible/mismatched values silently, corrupting the array instead of erroring."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 863,
+        "symbol": "DatetimeLikeArrayMixin._validate_insert_value",
+        "title": "_validate_insert_value final branch narrowed from else to elif \u2014 incompatible non-NA labels silently pass instead of raising",
+        "why": "Fixed reference restores an unconditional `else: raise TypeError`; buggy narrows it to `elif lib.is_scalar(value) and isna(value)`. A non-NA incompatible scalar that owns `.view` (e.g. np.int64(100), np.float64) is not a recognized scalar, not valid-NaT, and isna(...) is False, so every branch is skipped and the value is returned unchanged. In the sole caller insert() (indexes/datetimelike.py:969), isinstance(item, _scalar_type) is False so the line-973 compat guard is skipped; item.view(np.int64) succeeds, np.concatenate builds an int64 array, and _simple_new (fast, non-validating constructor at line 993) reinterprets it as raw nanoseconds \u2014 a garbage timestamp is silently inserted with NO TypeError. Silent data corruption in the public Index.insert API."
+      },
+      {
+        "severity": "Medium",
+        "line": 863,
+        "symbol": "_validate_insert_value",
+        "title": "Wrong-branch conditional in _validate_insert_value: incompatible labels silently pass instead of raising",
+        "why": "Same core defect as the High finding at line 863 and correctly localized: the final branch should be an unconditional `else:` (per fixed reference) but is `elif lib.is_scalar(value) and isna(value)`, so incompatible labels that are not recognized scalars, not valid-NaT, and not scalar-isna fall through and are returned unvalidated, producing silent corruption via insert()->view->_simple_new. NOTE: the finding's bundled secondary claim (missing self._check_compatible_with at line 859) is redundant \u2014 the caller re-checks at indexes/datetimelike.py:973 \u2014 so that sub-claim does not manifest, but the primary wrong-branch defect is real and provable."
+      }
+    ],
+    "buggy_dropped": [
+      {
+        "severity": "Medium",
+        "line": 859,
+        "symbol": "DatetimeLikeArrayMixin._validate_insert_value",
+        "title": "Missing _check_compatible_with call lets tz/freq-mismatched scalar pass validation",
+        "why": "FALSE POSITIVE. The only caller of _validate_insert_value is insert() at pandas/core/indexes/datetimelike.py:969. After `value = self._scalar_type(value)` boxes a recognized scalar, item is always an instance of _scalar_type, so the caller's guard at line 972 (`isinstance(item, self._data._scalar_type) or item is NaT`) is True and line 973 runs `self._data._check_compatible_with(item, setitem=True)` \u2014 the identical tz (DatetimeArray) / freq (PeriodArray) check. A tz-mismatched Timestamp or freq-mismatched Period is therefore still rejected there, raising the same exception, before the array is built. The omitted in-method check is redundant with the caller; removing it produces no observable behavior change, so the claimed impact ('insert() can introduce an incompatible value') does not manifest."
+      }
+    ],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "pandas/17",
+    "project": "pandas",
+    "file": "pandas/core/indexes/datetimelike.py",
+    "recognized": true,
+    "recog_note": "I recognize this as pandas' core/indexes/datetimelike.py, the module defining DatetimeIndexOpsMixin and DatetimeTimedeltaMixin. Strong specific-code markers: the `_join_i8_wrapper`/`_make_wrapped_arith_op_with_freq` factory functions, the `@inherit_names` decorator stack over DatetimeLikeArrayMixin, `_with_freq`/`_can_fast_union`/`_fast_union`/`_union` set-op machinery, and the GH#23789 comment. Structure/imports (pandas._libs.tslibs, ExtensionIndex, inherit_names, make_wrapped_arith_op) place it around pandas 1.0.x (early 2020). I have a good sense of the canonical shape of these methods, though I could not reproduce every line verbatim \u2014 I'd compare against the known-good version for suspicious spots (e.g. the min/max/argmin/argmax NaT handling, sort_values freq-negation, and insert/delete freq-preservation logic are the kind of places pandas bugs cluster and where a planted bug would likely sit). This is genuine recognition of the specific module, not just 'it's pandas.'",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 991,
+        "title": "insert() silently coerces incompatible numpy-scalar labels into datetime i8 instead of raising",
+        "symbol": "DatetimeTimedeltaMixin.insert",
+        "why": "The guard at line 972 (isinstance(item, _scalar_type) or item is NaT) skips _check_compatible_with for unrecognized labels, and _validate_insert_value returns such labels unchanged. The blind item.view(np.int64) at line 991 succeeds for numpy scalars (np.timedelta64/np.datetime64/np.int64/np.float64), so e.g. DatetimeIndex.insert(loc, np.timedelta64(...)) reinterprets the raw bits as nanoseconds and silently inserts a garbage datetime instead of raising TypeError. Only labels lacking .view (Python int/str/Timedelta) are rejected via the except branch, making the bug dtype-dependent and corrupting the index."
+      },
+      {
+        "severity": "Medium",
+        "line": 371,
+        "title": "argmax masks NaT with 0 instead of int64 min, returning NaT index for negative values",
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "why": "NaN/NaT positions are set to 0, but the max-safe sentinel must be the int64 minimum (argmin correctly uses np.iinfo('int64').max at line 314). With negative underlying i8 values (negative Timedeltas or pre-epoch datetimes) the masked NaT position (0) exceeds all real values, so argmax returns the index of the NaT rather than the true maximum, e.g. TimedeltaIndex(['-5s', NaT, '-3s']).argmax() yields 1 instead of 2."
+      },
+      {
+        "severity": "High",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax masks NaT positions to 0 instead of the minimum int64 sentinel",
+        "why": "NaT is stored internally as iNaT = np.iinfo('int64').min. To exclude NaT from a max search with skipna=True, those positions must be set to the smallest possible value so they can never be selected. argmin correctly mirrors this at line 314 (i8[mask] = np.iinfo('int64').max). argmax instead assigns i8[mask] = 0. For any datetime-like index whose true maximum is negative in i8 terms (all valid entries before the 1970 epoch) that also contains a NaT, 0 exceeds every real value, so argmax returns the position of a NaT rather than the true maximum. The correct value is np.iinfo('int64').min."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Medium",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax NaT-masking uses 0 instead of int64-min, returning a NaT position for negative i8 values",
+        "why": "When the index has NaT and skipna=True, NaT positions are overwritten with 0 before i8.argmax(). Datetimelike asi8 values are negative for pre-1970 datetimes and for negative Timedeltas, so 0 exceeds every real value and argmax returns a NaT index instead of the true maximum. e.g. TimedeltaIndex(['-2 days','-1 days', NaT]).argmax() yields 2 (NaT) instead of 1. Contrast argmin (line 314) which correctly uses np.iinfo('int64').max; argmax should use np.iinfo('int64').min (iNaT)."
+      },
+      {
+        "severity": "Medium",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax masks NaT with 0 instead of int64 min, breaking argmax for negative-valued indices",
+        "why": "To exclude NaT from argmax under skipna, NaT positions must be set to a value guaranteed <= every real value. The symmetric partner argmin (line 314) correctly uses np.iinfo(\"int64\").max, but argmax uses 0. The i8 values are ns-since-epoch (datetimes) or ns durations (timedeltas) and can be negative (pre-1970 dates, negative timedeltas). When the true maximum non-NaT value is negative, the masked NaT slots (=0) exceed all real values and i8.argmax() returns the index of a NaT instead of the real maximum. Silent wrong result on the default skipna=True path. E.g. TimedeltaIndex(['-3 days','-1 days',NaT]).argmax() returns 2 (NaT) instead of 1. Fix: set i8[mask] = np.iinfo(\"int64\").min."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 991,
+        "symbol": "DatetimeTimedeltaMixin.insert",
+        "title": "insert() silently coerces incompatible numpy-scalar labels into datetime i8 instead of raising",
+        "why": "CONFIRMED and is the injected defect (groundtruth: arrays/datetimelike.py _validate_insert_value + index insert; test_insert.py). Buggy _validate_insert_value (arrays/datetimelike.py:857-868) only raises on `lib.is_scalar(value) and isna(value)`, so a non-NA unrecognized scalar like np.timedelta64(5,'s') (not a recognized scalar for DatetimeArray, not valid-NaT, isna()==False) is returned unchanged. In insert() the guard at line 972 is then skipped, _check_compatible_with never runs, item stays a raw np.timedelta64, and item.view(np.int64) at line 991 succeeds (shared int64 storage) reinterpreting the bits -> garbage datetime inserted silently. The fixed tree replaces that branch with `else: raise TypeError`, proving incompatible labels are meant to raise. Reachable via public DatetimeIndex.insert."
+      },
+      {
+        "severity": "Medium",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax masks NaT with 0 instead of int64 min, returning NaT index for negative values",
+        "why": "CONFIRMED as a real latent defect provable from the code (present in both buggy and fixed trees; not the injected bug). argmin correctly sets NaT positions to np.iinfo('int64').max (line 314) so NaT can never win a min; argmax sets them to 0 (line 371). NaT is stored as iNaT=int64.min, so in a max search NaT already sorts last and needs no masking; setting it to 0 makes it exceed any all-negative real value. Counterexample: TimedeltaIndex(['-5s', NaT, '-3s']).argmax() -> masked i8 [-5e9,0,-3e9] -> returns 1 (the NaT) instead of 2; same for pre-1970 DatetimeIndex+NaT. `return i8.argmax()` is returned directly with no downstream guard. Correct sentinel is np.iinfo('int64').min."
+      },
+      {
+        "severity": "Medium",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax masks NaT positions to 0 instead of the minimum int64 sentinel",
+        "why": "CONFIRMED - same defect as the other line-371 finding (duplicate). i8[mask]=0 should be np.iinfo('int64').min; NaT is stored as iNaT=int64.min. For any datetime-like index whose true maximum is negative in i8 terms (all entries before the 1970 epoch, or negative timedeltas) that also contains a NaT, 0 exceeds every real value so argmax returns the NaT position. Mirrors argmin's correct int64.max sentinel at line 314. Verified the fixed tree does NOT change this line, so it is a genuine latent bug, not the benchmark's injected one."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax NaT-masking uses 0 instead of int64-min, returning a NaT position for negative i8 values",
+        "why": "On the default skipna=True path, argmax copies i8 and sets NaT slots to 0 (line 371). asi8 is ns-since-epoch/ns-durations and iNaT is int64 min, so an unmasked NaT can never win argmax; masking to 0 instead raises those slots above every negative real value. When the true maximum non-NaT value is negative (pre-1970 datetimes / negative timedeltas), i8.argmax() returns the index of a NaT. Verified: TimedeltaIndex(['-2 days','-1 days',NaT]) -> asi8 [-172800000000000,-86400000000000,iNaT], mask->[...,0], argmax=2 (NaT) instead of 1. The symmetric argmin (line 314) correctly uses np.iinfo('int64').max; argmax should use np.iinfo('int64').min."
+      },
+      {
+        "severity": "Medium",
+        "line": 371,
+        "symbol": "DatetimeIndexOpsMixin.argmax",
+        "title": "argmax masks NaT with 0 instead of int64 min, breaking argmax for negative-valued indices",
+        "why": "Duplicate of the same true defect: line 371 sets NaT slots to 0 to exclude them, but the sentinel must be <= every real value (int64 min). Because negative i8 values (pre-1970 dates, negative timedeltas) fall below 0, a masked NaT slot can exceed all real values and i8.argmax() returns a NaT index on the default skipna=True path. argmin (line 314) correctly uses int64 max. Provable from the code; fix is i8[mask] = np.iinfo('int64').min."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "sanic/3",
+    "project": "sanic",
+    "file": "sanic/app.py",
+    "recognized": true,
+    "recog_note": "Genuinely recognize this specific file. Canonical Sanic markers pin the version: deprecated `Sanic(name=None)` warning (19.12/20.3 window), `self.go_fast = self.run`, \"Goin' Fast @\" log, `BlueprintGroup`, named_request/response_middleware, SanicASGITestClient, ASGIApp.create. The url_for/_helper/handle_request/websocket internals match upstream app.py of this vintage, so I can diff against the known-correct implementation to locate injected bugs rather than reasoning purely from first principles.",
+    "buggy_raw": [
+      {
+        "severity": "Medium",
+        "line": 681,
+        "title": "Named response middleware registered with append instead of appendleft, causing wrong (FIFO) execution order",
+        "symbol": "register_named_middleware",
+        "why": "Global response middleware uses .appendleft (line 664) so response middleware runs in reverse/LIFO order. Named response middleware here uses .append, so route-scoped response middleware execute in registration (FIFO) order instead. _run_response_middleware iterates self.response_middleware + named_middleware in deque order, so this yields silently incorrect middleware ordering inconsistent with global response middleware. Should be .appendleft(middleware)."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Medium",
+        "line": 849,
+        "title": "NoneType crash in url_for static-folder path when `filename` is omitted",
+        "symbol": "Sanic.url_for",
+        "why": "`filename` is obtained via `kwargs.pop(\"filename\", None)` (line 842), so it is None when the caller does not pass a `filename`. For a static *folder* route the resolved `uri` contains `<file_uri:`, so control enters the block at line 844 and executes `if filename.startswith(\"/\"):` at line 849. When `filename` is None this raises `AttributeError: 'NoneType' object has no attribute 'startswith'` instead of raising a clean URLBuildError \u2014 a reachable runtime crash on the missing-required-argument edge case."
+      }
+    ],
+    "buggy_confirmed": [],
+    "buggy_dropped": [
+      {
+        "severity": "Medium",
+        "line": 681,
+        "title": "Named response middleware registered with append instead of appendleft, causing wrong (FIFO) execution order",
+        "symbol": "register_named_middleware",
+        "why": "FALSE POSITIVE. The reference-correct (fixed) version of this file is byte-for-byte identical at line 681 and also uses .append(middleware); the actual injected defect is elsewhere (host-parsing in url_for, lines ~833-840 and 873). The finding reads the mechanics correctly (global response middleware uses appendleft/LIFO at line 664, named uses append/FIFO at 681, and _run_response_middleware at 1327 concatenates response_middleware + named_middleware) but the 'defect' rests on an unproven assumption that named response middleware ordering must mirror global response middleware ordering. No assertion, test, or documented invariant in the code establishes that contract \u2014 per-group ordering is a design choice, not a violated spec. Not provable as a defect from the code itself; default is to drop."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 849,
+        "symbol": "Sanic.url_for",
+        "title": "NoneType crash in url_for static-folder path when `filename` is omitted",
+        "why": "Provable from app.py: filename defaults to None at line 842 (kwargs.pop(\"filename\", None)) and is used unconditionally at line 849 (filename.startswith(\"/\")). For a static-folder route the registered URI contains \"<file_uri:\", so the block at line 844 is entered; the route lookup at 827-828 returns a truthy uri/route so the URLBuildError at 829 does not fire. filename (from kwargs) and the \"<file_uri:\" marker (from the route URI) are independent, so calling url_for(\"static\") without filename reaches line 849 with filename=None, raising an uncaught AttributeError instead of a clean URLBuildError. No None-guard exists between lines 842 and 849. Reachable via app.static('/uploads', '/dir') then url_for('static')."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "tornado/5",
+    "project": "tornado",
+    "file": "tornado/ioloop.py",
+    "recognized": true,
+    "recog_note": "Canonical Tornado I/O loop module (Apache 2.0, \"Copyright 2009 Facebook\"). Recognized specific v5.0-era internals: asyncio-wrapper design with _ioloop_for_asyncio dict, deprecated instance()/install()/clear_instance() aliases, run_in_executor/set_default_executor (added 5.0), PeriodicCallback with io_loop arg removed. Also recognize distinctive implementation details: PollIOLoop.start() set_wakeup_fd race comment, _cancellations>512 timeout-queue cleanup, _Timeout __slots__ with tdeadline/_timeout_counter tiebreaker, _POLL_TIMEOUT=3600.0. I could reproduce the upstream version closely enough to find an injected bug by diffing method-by-method rather than reasoning from first principles.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 1220,
+        "symbol": "PeriodicCallback._update_next",
+        "title": "Missing else-branch: _next_timeout never advances when clock moves backwards (busy-loop / wrong cadence)",
+        "why": "_update_next only advances self._next_timeout inside the `if self._next_timeout <= current_time` branch; the else-branch that does `self._next_timeout += callback_time_sec` was dropped. When current_time < _next_timeout (clock moved backwards, or the common Windows case where PeriodicCallback measures time via io_loop.time()==time.time() while the asyncio IOLoop schedules with time.monotonic()), _next_timeout is left unchanged. _schedule_next then re-arms add_timeout(self._next_timeout, self._run) at the same already-due time, so the callback fires with ~zero delay repeatedly, degenerating the PeriodicCallback into a CPU-spinning busy-loop that runs far faster than its configured callback_time (tornado issue #2333)."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 1220,
+        "symbol": "PeriodicCallback._update_next",
+        "title": "Missing else-branch: _next_timeout never advances when clock moves backwards (busy-loop / wrong cadence)",
+        "why": "_update_next (lines 1219-1223) is a bare `if self._next_timeout <= current_time` with no else, so when current_time < _next_timeout it leaves _next_timeout unchanged. It is the ONLY place _next_timeout is advanced (start() seeds it once at 1187; _schedule_next 1214-1217 just reads the clock and re-arms add_timeout). IOLoop.time() defaults to the non-monotonic time.time() (base default line 596; PollIOLoop.time_func = time.time at line 848), so a backward wall-clock adjustment makes current_time < _next_timeout genuinely reachable. In that case _schedule_next re-arms add_timeout at the same already-due _next_timeout; the poll loop treats deadline<=now as due (line 994) with poll_timeout=max(0, deadline-time()) (1024-1025), re-firing with ~zero delay -> cadence breaks / CPU spin. Upstream Tornado's fix (issue #2333) is exactly the dropped `else: self._next_timeout += callback_time_sec`."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "youtube-dl/11",
+    "project": "youtube-dl",
+    "file": "youtube_dl/utils.py",
+    "recognized": true,
+    "recog_note": "Unmistakably youtube-dl's shared utils.py: the compat_* import block (compat_etree_fromstring, compat_struct_pack, compat_urllib_parse_unquote_plus...), the .socks import (ProxyType, sockssocket), register_socks_protocols() with its issue7904 comment, and the giant hard-coded _CHROME_VERSIONS tuple (v68-76) in random_user_agent all pin it. I genuinely know this module and can reproduce the canonical behavior of its well-known, stable functions from memory (int_or_none, parse_duration, js_to_json, unified_strdate, sanitize_filename, ExtractorError, try_get, etc.) well enough to diff against. But I cannot reproduce THIS exact revision byte-for-byte \u2014 utils.py changed across hundreds of commits and I can't pin the precise commit/tag. So for the long tail of functions and subtle injected bugs I'd be reasoning from first principles, not exact memory.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 3522,
+        "symbol": "str_to_int",
+        "title": "Weakened type guard makes str_to_int crash with TypeError on non-string (e.g. int) input",
+        "why": "str_to_int is documented as 'A more relaxed version of int_or_none' and is meant to pass any non-string value (commonly an already-parsed int) straight through. The correct guard is `if not isinstance(int_str, compat_str): return int_str`. The buggy guard only handles None (`if int_str is None: return None`), so when called with a non-None, non-string value such as an int, execution falls to line 3524 where `re.sub(r'[,\\.\\+]', '', int_str)` raises `TypeError: expected string or bytes-like object` (re.sub requires a string/bytes target). This converts a value that should be returned unchanged into a runtime crash. Fix: restore `if not isinstance(int_str, compat_str): return int_str`."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 3522,
+        "symbol": "str_to_int",
+        "title": "Weakened type guard makes str_to_int crash with TypeError on non-string (e.g. int) input",
+        "why": "The buggy guard `if int_str is None: return None` only short-circuits None. A non-None, non-string argument (e.g. an already-parsed int, which this 'more relaxed version of int_or_none' is contracted to pass through) falls to line 3524 `re.sub(r'[,\\.\\+]', '', int_str)`, which raises `TypeError: expected string or bytes-like object`. Proven from code: the benchmark's fixed/utils.py restores exactly `if not isinstance(int_str, compat_str): return int_str`, compat_str is imported (line 53), and groundtruth.json pins this 8-line hunk as the injected defect. str_to_int is public youtube_dl.utils API relied on by extractors that pass int-typed fields, so the crash is externally reachable."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  }
+]

@@ -1,0 +1,188 @@
+{
+  "summary": {
+    "n_bugs": 12,
+    "tolerance_lines": 3,
+    "recall_raw": "10/12",
+    "recall_confirmed": "10/12",
+    "specificity_confirmed": "12/12",
+    "recall_confirmed_recognized": "10/12",
+    "recall_confirmed_clean": "0/0",
+    "n_recognized": 12,
+    "n_clean": 0,
+    "total_raw_findings_buggy": 23,
+    "total_confirmed_buggy": 19,
+    "total_dropped_by_fpcheck": 4
+  },
+  "per_bug": {
+    "PySnooper/3": {
+      "project": "PySnooper",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        26
+      ]
+    },
+    "ansible/9": {
+      "project": "ansible",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 3,
+      "conf_n": 2,
+      "dropped_n": 1,
+      "catch_lines": [
+        518,
+        842
+      ]
+    },
+    "black/7": {
+      "project": "black",
+      "recognized": true,
+      "caught_raw": false,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": []
+    },
+    "cookiecutter/4": {
+      "project": "cookiecutter",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 3,
+      "conf_n": 2,
+      "dropped_n": 1,
+      "catch_lines": [
+        263,
+        92
+      ]
+    },
+    "fastapi/7": {
+      "project": "fastapi",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        22
+      ]
+    },
+    "keras/32": {
+      "project": "keras",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 2,
+      "conf_n": 2,
+      "dropped_n": 0,
+      "catch_lines": [
+        981,
+        981
+      ]
+    },
+    "luigi/25": {
+      "project": "luigi",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        166
+      ]
+    },
+    "matplotlib/3": {
+      "project": "matplotlib",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 2,
+      "conf_n": 2,
+      "dropped_n": 0,
+      "catch_lines": [
+        235,
+        235
+      ]
+    },
+    "pandas/17": {
+      "project": "pandas",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 6,
+      "conf_n": 5,
+      "dropped_n": 1,
+      "catch_lines": [
+        863,
+        863,
+        991
+      ]
+    },
+    "sanic/3": {
+      "project": "sanic",
+      "recognized": true,
+      "caught_raw": false,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 0,
+      "dropped_n": 1,
+      "catch_lines": []
+    },
+    "tornado/5": {
+      "project": "tornado",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        1220
+      ]
+    },
+    "youtube-dl/11": {
+      "project": "youtube-dl",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        3522
+      ]
+    }
+  }
+}

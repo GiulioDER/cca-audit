@@ -1,0 +1,93 @@
+{
+  "seed": 1337,
+  "n": 12,
+  "rule": "seeded-shuffle 17 projects; first 12 distinct; within each, seeded-shuffle bugs, take first whose patch modifies >=1 non-test .py file",
+  "bugs": [
+    {
+      "project": "cookiecutter",
+      "bug_id": "4",
+      "source_files": [
+        "cookiecutter/exceptions.py",
+        "cookiecutter/generate.py",
+        "cookiecutter/hooks.py"
+      ]
+    },
+    {
+      "project": "matplotlib",
+      "bug_id": "3",
+      "source_files": [
+        "lib/matplotlib/markers.py"
+      ]
+    },
+    {
+      "project": "luigi",
+      "bug_id": "25",
+      "source_files": [
+        "luigi/contrib/redshift.py"
+      ]
+    },
+    {
+      "project": "PySnooper",
+      "bug_id": "3",
+      "source_files": [
+        "pysnooper/pysnooper.py"
+      ]
+    },
+    {
+      "project": "black",
+      "bug_id": "7",
+      "source_files": [
+        "black.py"
+      ]
+    },
+    {
+      "project": "ansible",
+      "bug_id": "9",
+      "source_files": [
+        "lib/ansible/modules/packaging/os/redhat_subscription.py"
+      ]
+    },
+    {
+      "project": "pandas",
+      "bug_id": "17",
+      "source_files": [
+        "pandas/core/arrays/datetimelike.py"
+      ]
+    },
+    {
+      "project": "youtube-dl",
+      "bug_id": "11",
+      "source_files": [
+        "youtube_dl/utils.py"
+      ]
+    },
+    {
+      "project": "fastapi",
+      "bug_id": "7",
+      "source_files": [
+        "fastapi/exception_handlers.py"
+      ]
+    },
+    {
+      "project": "tornado",
+      "bug_id": "5",
+      "source_files": [
+        "tornado/ioloop.py"
+      ]
+    },
+    {
+      "project": "sanic",
+      "bug_id": "3",
+      "source_files": [
+        "sanic/app.py"
+      ]
+    },
+    {
+      "project": "keras",
+      "bug_id": "32",
+      "source_files": [
+        "keras/callbacks.py"
+      ]
+    }
+  ]
+}

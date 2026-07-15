@@ -1,0 +1,149 @@
+{
+  "summary": {
+    "n_bugs": 10,
+    "tolerance_lines": 3,
+    "recall_raw": "6/10",
+    "recall_confirmed": "5/10",
+    "specificity_confirmed": "9/10",
+    "recall_confirmed_recognized": "2/3",
+    "recall_confirmed_clean": "3/7",
+    "n_recognized": 3,
+    "n_clean": 7,
+    "total_raw_findings_buggy": 19,
+    "total_confirmed_buggy": 10,
+    "total_dropped_by_fpcheck": 8
+  },
+  "per_bug": {
+    "aio-libs/aiohttp#12264": {
+      "project": "aio-libs",
+      "recognized": false,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        673
+      ]
+    },
+    "allaboutduncan/clu-comics#389": {
+      "project": "allaboutduncan",
+      "recognized": false,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": true,
+      "alarm_conf": true,
+      "raw_n": 3,
+      "conf_n": 1,
+      "dropped_n": 2,
+      "catch_lines": [
+        694
+      ]
+    },
+    "fossasia/eventyay#3789": {
+      "project": "fossasia",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": true,
+      "alarm_conf": false,
+      "raw_n": 2,
+      "conf_n": 2,
+      "dropped_n": 0,
+      "catch_lines": [
+        270,
+        275
+      ]
+    },
+    "inventree/InvenTree#12332": {
+      "project": "inventree",
+      "recognized": false,
+      "caught_raw": false,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 3,
+      "conf_n": 2,
+      "dropped_n": 1,
+      "catch_lines": []
+    },
+    "neuml/txtai#1125": {
+      "project": "neuml",
+      "recognized": false,
+      "caught_raw": false,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 0,
+      "dropped_n": 1,
+      "catch_lines": []
+    },
+    "pallets/click#3678": {
+      "project": "pallets",
+      "recognized": true,
+      "caught_raw": false,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 0,
+      "dropped_n": 1,
+      "catch_lines": []
+    },
+    "pyinfra-dev/pyinfra#1858": {
+      "project": "pyinfra-dev",
+      "recognized": false,
+      "caught_raw": false,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 2,
+      "conf_n": 1,
+      "dropped_n": 1,
+      "catch_lines": []
+    },
+    "pypa/pipx#1860": {
+      "project": "pypa",
+      "recognized": false,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 1,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        183
+      ]
+    },
+    "pytroll/satpy#3367": {
+      "project": "pytroll",
+      "recognized": false,
+      "caught_raw": true,
+      "caught_conf": false,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 3,
+      "conf_n": 1,
+      "dropped_n": 2,
+      "catch_lines": []
+    },
+    "sktime/pytorch-forecasting#2257": {
+      "project": "sktime",
+      "recognized": true,
+      "caught_raw": true,
+      "caught_conf": true,
+      "alarm_raw": false,
+      "alarm_conf": false,
+      "raw_n": 2,
+      "conf_n": 1,
+      "dropped_n": 0,
+      "catch_lines": [
+        145
+      ]
+    }
+  }
+}

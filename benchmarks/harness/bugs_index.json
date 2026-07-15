@@ -1,0 +1,360 @@
+{
+  "PySnooper/3": {
+    "project": "PySnooper",
+    "files": {
+      "pysnooper/pysnooper.py": {
+        "buggy_windows": [
+          [
+            23,
+            29
+          ]
+        ],
+        "fixed_windows": [
+          [
+            23,
+            29
+          ]
+        ]
+      }
+    }
+  },
+  "ansible/9": {
+    "project": "ansible",
+    "files": {
+      "lib/ansible/modules/packaging/os/redhat_subscription.py": {
+        "buggy_windows": [
+          [
+            515,
+            521
+          ],
+          [
+            839,
+            846
+          ]
+        ],
+        "fixed_windows": [
+          [
+            515,
+            523
+          ],
+          [
+            841,
+            848
+          ]
+        ]
+      }
+    }
+  },
+  "black/7": {
+    "project": "black",
+    "files": {
+      "black.py": {
+        "buggy_windows": [
+          [
+            2726,
+            2731
+          ],
+          [
+            2757,
+            2763
+          ]
+        ],
+        "fixed_windows": [
+          [
+            2726,
+            2739
+          ],
+          [
+            2765,
+            2775
+          ]
+        ]
+      }
+    }
+  },
+  "cookiecutter/4": {
+    "project": "cookiecutter",
+    "files": {
+      "cookiecutter/exceptions.py": {
+        "buggy_windows": [
+          [
+            81,
+            83
+          ]
+        ],
+        "fixed_windows": [
+          [
+            81,
+            89
+          ]
+        ]
+      },
+      "cookiecutter/generate.py": {
+        "buggy_windows": [
+          [
+            24,
+            34
+          ],
+          [
+            257,
+            263
+          ]
+        ],
+        "fixed_windows": [
+          [
+            24,
+            35
+          ],
+          [
+            258,
+            267
+          ]
+        ]
+      },
+      "cookiecutter/hooks.py": {
+        "buggy_windows": [
+          [
+            18,
+            23
+          ],
+          [
+            69,
+            75
+          ],
+          [
+            91,
+            97
+          ],
+          [
+            105,
+            109
+          ]
+        ],
+        "fixed_windows": [
+          [
+            18,
+            24
+          ],
+          [
+            70,
+            79
+          ],
+          [
+            95,
+            101
+          ],
+          [
+            109,
+            113
+          ]
+        ]
+      }
+    }
+  },
+  "fastapi/7": {
+    "project": "fastapi",
+    "files": {
+      "fastapi/exception_handlers.py": {
+        "buggy_windows": [
+          [
+            1,
+            3
+          ],
+          [
+            19,
+            23
+          ]
+        ],
+        "fixed_windows": [
+          [
+            1,
+            4
+          ],
+          [
+            20,
+            25
+          ]
+        ]
+      }
+    }
+  },
+  "keras/32": {
+    "project": "keras",
+    "files": {
+      "keras/callbacks.py": {
+        "buggy_windows": [
+          [
+            898,
+            921
+          ],
+          [
+            936,
+            945
+          ],
+          [
+            967,
+            972
+          ],
+          [
+            978,
+            984
+          ]
+        ],
+        "fixed_windows": [
+          [
+            898,
+            926
+          ],
+          [
+            941,
+            950
+          ],
+          [
+            972,
+            978
+          ],
+          [
+            984,
+            989
+          ]
+        ]
+      }
+    }
+  },
+  "luigi/25": {
+    "project": "luigi",
+    "files": {
+      "luigi/contrib/redshift.py": {
+        "buggy_windows": [
+          [
+            163,
+            169
+          ]
+        ],
+        "fixed_windows": [
+          [
+            163,
+            169
+          ]
+        ]
+      }
+    }
+  },
+  "matplotlib/3": {
+    "project": "matplotlib",
+    "files": {
+      "lib/matplotlib/markers.py": {
+        "buggy_windows": [
+          [
+            232,
+            238
+          ]
+        ],
+        "fixed_windows": [
+          [
+            232,
+            241
+          ]
+        ]
+      }
+    }
+  },
+  "pandas/17": {
+    "project": "pandas",
+    "files": {
+      "pandas/core/arrays/datetimelike.py": {
+        "buggy_windows": [
+          [
+            857,
+            866
+          ]
+        ],
+        "fixed_windows": [
+          [
+            857,
+            869
+          ]
+        ]
+      },
+      "pandas/core/indexes/datetimelike.py": {
+        "buggy_windows": [
+          [
+            966,
+            1002
+          ]
+        ],
+        "fixed_windows": [
+          [
+            966,
+            995
+          ]
+        ]
+      }
+    }
+  },
+  "sanic/3": {
+    "project": "sanic",
+    "files": {
+      "sanic/app.py": {
+        "buggy_windows": [
+          [
+            830,
+            835
+          ],
+          [
+            862,
+            868
+          ]
+        ],
+        "fixed_windows": [
+          [
+            830,
+            843
+          ],
+          [
+            870,
+            876
+          ]
+        ]
+      }
+    }
+  },
+  "tornado/5": {
+    "project": "tornado",
+    "files": {
+      "tornado/ioloop.py": {
+        "buggy_windows": [
+          [
+            1217,
+            1223
+          ]
+        ],
+        "fixed_windows": [
+          [
+            1217,
+            1243
+          ]
+        ]
+      }
+    }
+  },
+  "youtube-dl/11": {
+    "project": "youtube-dl",
+    "files": {
+      "youtube_dl/utils.py": {
+        "buggy_windows": [
+          [
+            3519,
+            3526
+          ]
+        ],
+        "fixed_windows": [
+          [
+            3519,
+            3526
+          ]
+        ]
+      }
+    }
+  }
+}

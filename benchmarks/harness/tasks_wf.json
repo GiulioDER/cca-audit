@@ -1,0 +1,122 @@
+[
+  {
+    "bug": "PySnooper/3",
+    "project": "PySnooper",
+    "file": "pysnooper/pysnooper.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/PySnooper__3/buggy/pysnooper/pysnooper.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/PySnooper__3/fixed/pysnooper/pysnooper.py"
+  },
+  {
+    "bug": "ansible/9",
+    "project": "ansible",
+    "file": "lib/ansible/modules/packaging/os/redhat_subscription.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/ansible__9/buggy/lib/ansible/modules/packaging/os/redhat_subscription.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/ansible__9/fixed/lib/ansible/modules/packaging/os/redhat_subscription.py"
+  },
+  {
+    "bug": "black/7",
+    "project": "black",
+    "file": "black.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/black__7/buggy/black.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/black__7/fixed/black.py"
+  },
+  {
+    "bug": "cookiecutter/4",
+    "project": "cookiecutter",
+    "file": "cookiecutter/exceptions.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/cookiecutter__4/buggy/cookiecutter/exceptions.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/cookiecutter__4/fixed/cookiecutter/exceptions.py"
+  },
+  {
+    "bug": "cookiecutter/4",
+    "project": "cookiecutter",
+    "file": "cookiecutter/generate.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/cookiecutter__4/buggy/cookiecutter/generate.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/cookiecutter__4/fixed/cookiecutter/generate.py"
+  },
+  {
+    "bug": "cookiecutter/4",
+    "project": "cookiecutter",
+    "file": "cookiecutter/hooks.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/cookiecutter__4/buggy/cookiecutter/hooks.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/cookiecutter__4/fixed/cookiecutter/hooks.py"
+  },
+  {
+    "bug": "fastapi/7",
+    "project": "fastapi",
+    "file": "fastapi/exception_handlers.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/fastapi__7/buggy/fastapi/exception_handlers.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/fastapi__7/fixed/fastapi/exception_handlers.py"
+  },
+  {
+    "bug": "keras/32",
+    "project": "keras",
+    "file": "keras/callbacks.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/keras__32/buggy/keras/callbacks.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/keras__32/fixed/keras/callbacks.py"
+  },
+  {
+    "bug": "luigi/25",
+    "project": "luigi",
+    "file": "luigi/contrib/redshift.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/luigi__25/buggy/luigi/contrib/redshift.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/luigi__25/fixed/luigi/contrib/redshift.py"
+  },
+  {
+    "bug": "matplotlib/3",
+    "project": "matplotlib",
+    "file": "lib/matplotlib/markers.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/matplotlib__3/buggy/lib/matplotlib/markers.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/matplotlib__3/fixed/lib/matplotlib/markers.py"
+  },
+  {
+    "bug": "pandas/17",
+    "project": "pandas",
+    "file": "pandas/core/arrays/datetimelike.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/pandas__17/buggy/pandas/core/arrays/datetimelike.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/pandas__17/fixed/pandas/core/arrays/datetimelike.py"
+  },
+  {
+    "bug": "pandas/17",
+    "project": "pandas",
+    "file": "pandas/core/indexes/datetimelike.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/pandas__17/buggy/pandas/core/indexes/datetimelike.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/pandas__17/fixed/pandas/core/indexes/datetimelike.py"
+  },
+  {
+    "bug": "sanic/3",
+    "project": "sanic",
+    "file": "sanic/app.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/sanic__3/buggy/sanic/app.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/sanic__3/fixed/sanic/app.py"
+  },
+  {
+    "bug": "tornado/5",
+    "project": "tornado",
+    "file": "tornado/ioloop.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/tornado__5/buggy/tornado/ioloop.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/tornado__5/fixed/tornado/ioloop.py"
+  },
+  {
+    "bug": "youtube-dl/11",
+    "project": "youtube-dl",
+    "file": "youtube_dl/utils.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data/youtube-dl__11/buggy/youtube_dl/utils.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data/youtube-dl__11/fixed/youtube_dl/utils.py"
+  }
+]
