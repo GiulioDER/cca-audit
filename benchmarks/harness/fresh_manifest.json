@@ -1,0 +1,125 @@
+[
+  {
+    "bug": "neuml/txtai#1125",
+    "org_repo": "neuml/txtai",
+    "pr": 1125,
+    "merge_commit_sha": "fc6f93828b6b8e03f3c0147e1d9e7ff9bdda7f04",
+    "stars": 12726,
+    "title": "Raise SQLError on unterminated bracket, function and similar clauses",
+    "closed": "2026-07-02",
+    "source_files": [
+      "src/python/txtai/database/sql/expression.py"
+    ]
+  },
+  {
+    "bug": "allaboutduncan/clu-comics#389",
+    "org_repo": "allaboutduncan/clu-comics",
+    "pr": 389,
+    "merge_commit_sha": "adce7573063257bf60f545333149ccd4afe45c5c",
+    "stars": 241,
+    "title": "Make Wanted Matching Month-agnostic",
+    "closed": "2026-07-09",
+    "source_files": [
+      "app.py",
+      "helpers/collection.py"
+    ]
+  },
+  {
+    "bug": "pallets/click#3678",
+    "org_repo": "pallets/click",
+    "pr": 3678,
+    "merge_commit_sha": "b67832c2167e5b0ff6764a8c04a0a9087e697b5a",
+    "stars": 17583,
+    "title": "Fix parsing when a parameter is named `help`",
+    "closed": "2026-07-10",
+    "source_files": [
+      "src/click/core.py"
+    ]
+  },
+  {
+    "bug": "sktime/pytorch-forecasting#2257",
+    "org_repo": "sktime/pytorch-forecasting",
+    "pr": 2257,
+    "merge_commit_sha": "818a84d7cc293de01fd1ad046ce668a5d98d44a9",
+    "stars": 4950,
+    "title": "[BUG] correct inverted condition for `n_plotting_samples` default in `DeepAR`",
+    "closed": "2026-04-14",
+    "source_files": [
+      "pytorch_forecasting/models/deepar/_deepar.py"
+    ]
+  },
+  {
+    "bug": "inventree/InvenTree#12332",
+    "org_repo": "inventree/InvenTree",
+    "pr": 12332,
+    "merge_commit_sha": "a616e7826c968a3a4535ef4e56d8931e9f1f16ac",
+    "stars": 7255,
+    "title": "Fix notes being dropped on part creation",
+    "closed": "2026-07-08",
+    "source_files": [
+      "src/backend/InvenTree/InvenTree/serializers.py"
+    ]
+  },
+  {
+    "bug": "pytroll/satpy#3367",
+    "org_repo": "pytroll/satpy",
+    "pr": 3367,
+    "merge_commit_sha": "7aac2670cee7d0172ff3809658beca8c5df61524",
+    "stars": 1200,
+    "title": "Fix projection handling for NWC GEO v2025 data",
+    "closed": "2026-04-14",
+    "source_files": [
+      "satpy/readers/nwcsaf_nc.py"
+    ]
+  },
+  {
+    "bug": "aio-libs/aiohttp#12264",
+    "org_repo": "aio-libs/aiohttp",
+    "pr": 12264,
+    "merge_commit_sha": "af05010f61ca9be00a98a0885c8ae213adf4cf45",
+    "stars": 16504,
+    "title": "Reject HTTP/1.1 requests without Host header",
+    "closed": "2026-04-13",
+    "source_files": [
+      "aiohttp/http_parser.py"
+    ]
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "org_repo": "pyinfra-dev/pyinfra",
+    "pr": 1858,
+    "merge_commit_sha": "556c0beb390ccd31cb1d0e7d04db233d7bff15b3",
+    "stars": 5893,
+    "title": "fix: allow SSH connections when an ED25519-SK (FIDO2) key is present in the agent",
+    "closed": "2026-07-08",
+    "source_files": [
+      "src/pyinfra/connectors/ssh.py",
+      "src/pyinfra/connectors/ssh_util.py",
+      "src/pyinfra/connectors/sshuserclient/client.py"
+    ]
+  },
+  {
+    "bug": "fossasia/eventyay#3789",
+    "org_repo": "fossasia/eventyay",
+    "pr": 3789,
+    "merge_commit_sha": "e6083de28c741a59de849499c38b1da20d8d93e1",
+    "stars": 1641,
+    "title": "fix: replace break with continue in notify_webhooks to prevent Dropping Webhook Notifications",
+    "closed": "2026-06-20",
+    "source_files": [
+      "app/eventyay/api/webhooks.py"
+    ]
+  },
+  {
+    "bug": "pypa/pipx#1860",
+    "org_repo": "pypa/pipx",
+    "pr": 1860,
+    "merge_commit_sha": "24a15a50e518bfd48020ea0d092d778f1214aa95",
+    "stars": 12882,
+    "title": "\ud83d\udc1b fix(install): resolve local find-links",
+    "closed": "2026-07-10",
+    "source_files": [
+      "src/pipx/package_specifier.py"
+    ]
+  }
+]

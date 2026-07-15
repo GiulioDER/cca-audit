@@ -1,0 +1,346 @@
+{
+  "neuml/txtai#1125": {
+    "project": "neuml/txtai",
+    "files": {
+      "src/python/txtai/database/sql/expression.py": {
+        "buggy_windows": [
+          [
+            202,
+            207
+          ],
+          [
+            224,
+            230
+          ],
+          [
+            263,
+            269
+          ],
+          [
+            291,
+            297
+          ]
+        ],
+        "fixed_windows": [
+          [
+            202,
+            232
+          ],
+          [
+            249,
+            255
+          ],
+          [
+            288,
+            294
+          ],
+          [
+            316,
+            322
+          ]
+        ]
+      }
+    }
+  },
+  "allaboutduncan/clu-comics#389": {
+    "project": "allaboutduncan/clu-comics",
+    "files": {
+      "app.py": {
+        "buggy_windows": [
+          [
+            687,
+            698
+          ],
+          [
+            2360,
+            2365
+          ]
+        ],
+        "fixed_windows": [
+          [
+            687,
+            701
+          ],
+          [
+            2363,
+            2370
+          ]
+        ]
+      },
+      "helpers/collection.py": {
+        "buggy_windows": [
+          [
+            46,
+            51
+          ],
+          [
+            115,
+            120
+          ]
+        ],
+        "fixed_windows": [
+          [
+            46,
+            87
+          ],
+          [
+            151,
+            162
+          ]
+        ]
+      }
+    }
+  },
+  "pallets/click#3678": {
+    "project": "pallets/click",
+    "files": {
+      "src/click/core.py": {
+        "buggy_windows": [
+          [
+            55,
+            60
+          ],
+          [
+            1119,
+            1124
+          ],
+          [
+            1153,
+            1158
+          ],
+          [
+            1169,
+            1176
+          ]
+        ],
+        "fixed_windows": [
+          [
+            55,
+            64
+          ],
+          [
+            1123,
+            1159
+          ],
+          [
+            1188,
+            1198
+          ],
+          [
+            1209,
+            1218
+          ]
+        ]
+      }
+    }
+  },
+  "sktime/pytorch-forecasting#2257": {
+    "project": "sktime/pytorch-forecasting",
+    "files": {
+      "pytorch_forecasting/models/deepar/_deepar.py": {
+        "buggy_windows": [
+          [
+            141,
+            150
+          ]
+        ],
+        "fixed_windows": [
+          [
+            141,
+            149
+          ]
+        ]
+      }
+    }
+  },
+  "inventree/InvenTree#12332": {
+    "project": "inventree/InvenTree",
+    "files": {
+      "src/backend/InvenTree/InvenTree/serializers.py": {
+        "buggy_windows": [
+          [
+            822,
+            830
+          ]
+        ],
+        "fixed_windows": [
+          [
+            822,
+            834
+          ]
+        ]
+      }
+    }
+  },
+  "pytroll/satpy#3367": {
+    "project": "pytroll/satpy",
+    "files": {
+      "satpy/readers/nwcsaf_nc.py": {
+        "buggy_windows": [
+          [
+            43,
+            48
+          ],
+          [
+            405,
+            429
+          ]
+        ],
+        "fixed_windows": [
+          [
+            43,
+            50
+          ],
+          [
+            407,
+            462
+          ]
+        ]
+      }
+    }
+  },
+  "aio-libs/aiohttp#12264": {
+    "project": "aio-libs/aiohttp",
+    "files": {
+      "aiohttp/http_parser.py": {
+        "buggy_windows": [
+          [
+            49,
+            55
+          ],
+          [
+            672,
+            677
+          ]
+        ],
+        "fixed_windows": [
+          [
+            49,
+            55
+          ],
+          [
+            672,
+            680
+          ]
+        ]
+      }
+    }
+  },
+  "pyinfra-dev/pyinfra#1858": {
+    "project": "pyinfra-dev/pyinfra",
+    "files": {
+      "src/pyinfra/connectors/ssh.py": {
+        "buggy_windows": [
+          [
+            20,
+            26
+          ],
+          [
+            216,
+            221
+          ]
+        ],
+        "fixed_windows": [
+          [
+            20,
+            26
+          ],
+          [
+            216,
+            223
+          ]
+        ]
+      },
+      "src/pyinfra/connectors/ssh_util.py": {
+        "buggy_windows": [
+          [
+            1,
+            6
+          ],
+          [
+            19,
+            24
+          ]
+        ],
+        "fixed_windows": [
+          [
+            1,
+            6
+          ],
+          [
+            19,
+            60
+          ]
+        ]
+      },
+      "src/pyinfra/connectors/sshuserclient/client.py": {
+        "buggy_windows": [
+          [
+            21,
+            27
+          ],
+          [
+            198,
+            203
+          ]
+        ],
+        "fixed_windows": [
+          [
+            21,
+            30
+          ],
+          [
+            201,
+            208
+          ]
+        ]
+      }
+    }
+  },
+  "fossasia/eventyay#3789": {
+    "project": "fossasia/eventyay",
+    "files": {
+      "app/eventyay/api/webhooks.py": {
+        "buggy_windows": [
+          [
+            267,
+            278
+          ]
+        ],
+        "fixed_windows": [
+          [
+            267,
+            288
+          ]
+        ]
+      }
+    }
+  },
+  "pypa/pipx#1860": {
+    "project": "pypa/pipx",
+    "files": {
+      "src/pipx/package_specifier.py": {
+        "buggy_windows": [
+          [
+            24,
+            29
+          ],
+          [
+            167,
+            186
+          ]
+        ],
+        "fixed_windows": [
+          [
+            24,
+            30
+          ],
+          [
+            168,
+            185
+          ]
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,106 @@
+[
+  {
+    "bug": "neuml/txtai#1125",
+    "project": "neuml/txtai",
+    "file": "src/python/txtai/database/sql/expression.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/neuml__txtai__1125/buggy/src/python/txtai/database/sql/expression.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/neuml__txtai__1125/fixed/src/python/txtai/database/sql/expression.py"
+  },
+  {
+    "bug": "allaboutduncan/clu-comics#389",
+    "project": "allaboutduncan/clu-comics",
+    "file": "app.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/buggy/app.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/fixed/app.py"
+  },
+  {
+    "bug": "allaboutduncan/clu-comics#389",
+    "project": "allaboutduncan/clu-comics",
+    "file": "helpers/collection.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/buggy/helpers/collection.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/fixed/helpers/collection.py"
+  },
+  {
+    "bug": "pallets/click#3678",
+    "project": "pallets/click",
+    "file": "src/click/core.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pallets__click__3678/buggy/src/click/core.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pallets__click__3678/fixed/src/click/core.py"
+  },
+  {
+    "bug": "sktime/pytorch-forecasting#2257",
+    "project": "sktime/pytorch-forecasting",
+    "file": "pytorch_forecasting/models/deepar/_deepar.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/sktime__pytorch-forecasting__2257/buggy/pytorch_forecasting/models/deepar/_deepar.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/sktime__pytorch-forecasting__2257/fixed/pytorch_forecasting/models/deepar/_deepar.py"
+  },
+  {
+    "bug": "inventree/InvenTree#12332",
+    "project": "inventree/InvenTree",
+    "file": "src/backend/InvenTree/InvenTree/serializers.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/inventree__InvenTree__12332/buggy/src/backend/InvenTree/InvenTree/serializers.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/inventree__InvenTree__12332/fixed/src/backend/InvenTree/InvenTree/serializers.py"
+  },
+  {
+    "bug": "pytroll/satpy#3367",
+    "project": "pytroll/satpy",
+    "file": "satpy/readers/nwcsaf_nc.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pytroll__satpy__3367/buggy/satpy/readers/nwcsaf_nc.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pytroll__satpy__3367/fixed/satpy/readers/nwcsaf_nc.py"
+  },
+  {
+    "bug": "aio-libs/aiohttp#12264",
+    "project": "aio-libs/aiohttp",
+    "file": "aiohttp/http_parser.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/aio-libs__aiohttp__12264/buggy/aiohttp/http_parser.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/aio-libs__aiohttp__12264/fixed/aiohttp/http_parser.py"
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "project": "pyinfra-dev/pyinfra",
+    "file": "src/pyinfra/connectors/ssh.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/buggy/src/pyinfra/connectors/ssh.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/fixed/src/pyinfra/connectors/ssh.py"
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "project": "pyinfra-dev/pyinfra",
+    "file": "src/pyinfra/connectors/ssh_util.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/buggy/src/pyinfra/connectors/ssh_util.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/fixed/src/pyinfra/connectors/ssh_util.py"
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "project": "pyinfra-dev/pyinfra",
+    "file": "src/pyinfra/connectors/sshuserclient/client.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/buggy/src/pyinfra/connectors/sshuserclient/client.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/fixed/src/pyinfra/connectors/sshuserclient/client.py"
+  },
+  {
+    "bug": "fossasia/eventyay#3789",
+    "project": "fossasia/eventyay",
+    "file": "app/eventyay/api/webhooks.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/fossasia__eventyay__3789/buggy/app/eventyay/api/webhooks.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/fossasia__eventyay__3789/fixed/app/eventyay/api/webhooks.py"
+  },
+  {
+    "bug": "pypa/pipx#1860",
+    "project": "pypa/pipx",
+    "file": "src/pipx/package_specifier.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pypa__pipx__1860/buggy/src/pipx/package_specifier.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pypa__pipx__1860/fixed/src/pipx/package_specifier.py"
+  }
+]

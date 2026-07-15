@@ -1,0 +1,752 @@
+[
+  {
+    "bug": "neuml/txtai#1125",
+    "project": "neuml/txtai",
+    "file": "src/python/txtai/database/sql/expression.py",
+    "recognized": false,
+    "recog_note": "I recognize the project (txtai) and this file's role (rewrites txtai's SQL-like dialect into backend SQL, resolving columns and substituting similar() with placeholders), but I do NOT have a line-level memory of this specific implementation. I could not reproduce the canonical upstream version of methods like bracket/buildalias/compound/alias from memory, so I could not find bugs by diffing against a known-correct copy \u2014 only by first-principles reasoning. Familiarity is with the API surface/concept, not the concrete token-handling code (no memorized variable names, comment wording, or control flow I can confirm match upstream).",
+    "buggy_raw": [
+      {
+        "severity": "Medium",
+        "line": 189,
+        "symbol": "Expression.buildalias",
+        "title": "Alias bracket-stripping guard iterates string characters instead of whitespace-split words",
+        "why": "`alias` is a string (from buildlist). `not any(Token.isoperator(t) for t in alias)` iterates characters, so any operator character embedded in a bracket-quoted column name (e.g. `[gross-profit]`, `[a/b]`, `[q1+q2]`) makes the guard treat the name as a compound expression and skips stripping the surrounding brackets. The generated alias then keeps the literal brackets, yielding a wrong alias / incorrect column resolution. Correct code iterates `alias.split()` (words), so a hyphenated name is one non-operator word (stripped) while a genuine compound like `(a + b)` contains the word `+` (not stripped)."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [],
+    "buggy_dropped": [
+      {
+        "severity": "Medium",
+        "line": 189,
+        "symbol": "Expression.buildalias",
+        "title": "Alias bracket-stripping guard iterates string characters instead of whitespace-split words",
+        "why": "FALSE POSITIVE. The mechanical description is accurate (for t in alias iterates characters; Token.isoperator matches single-char ops like '-','+','/', so a bracketed name such as [gross-profit] skips bracket-stripping), but it is not a provable defect. (1) The finding's premise that 'correct code iterates alias.split()' is factually false: the paired fixed commit leaves line 189 byte-identical (its only change adds an advance()/SQLError method for unterminated clauses), and current txtai master also still uses 'for t in alias' \u2014 character iteration is the maintainer's deliberate, stable design, never a word-split. (2) Character iteration handles the realistic input space correctly: [entry date] strips fine, (a + b) keeps parens. Divergence only occurs for exotic bracket-quoted names embedding a single-char operator symbol, and whether those are even intended to be stripped is unknowable from the code. (3) Impact is overstated: the column value is resolved via the transformed token through process()/self.bracket(), not via alias; alias only labels the output, so worst case is a cosmetic output-key difference, not incorrect column resolution. No crash, corruption, or security impact. Cannot prove a defect from the code, so DROP."
+      }
+    ],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "allaboutduncan/clu-comics#389",
+    "project": "allaboutduncan/clu-comics",
+    "file": "app.py",
+    "recognized": false,
+    "recog_note": "I recognize the project by name/shape (self-hosted Flask comic library manager, CBZ/CBR handling, gcd/metron metadata providers, many project-local core.* / routes.* imports) but not the specific code. This is a large (~318KB), niche, application-specific module whose exact per-line implementation I cannot recall or reproduce from memory. I could not audit it by diffing against a known-correct upstream version \u2014 bug-finding here would require reasoning from first principles, not memory recall.",
+    "buggy_raw": [
+      {
+        "severity": "Medium",
+        "line": 694,
+        "symbol": "process_incoming_wanted_issues",
+        "title": "Wanted-issue match pattern omits month-token and empty-group stripping, silently breaking file matching",
+        "why": "When building match_pattern for matching TARGET-folder files against wanted issues, only strip_year_token (line 693) and strip_title_token (line 694) are applied. Month tokens ({issue_month_m}/{issue_month_M}) and leftover empty parenthetical debris are never removed. If the configured rename pattern contains a month token, the generated regex retains a literal month requirement, so real downloads named with only a year (e.g. 'Black Cat - 012 (2026).cbz') never match and genuinely-missing issues are never detected or moved into the collection. If year and month share a parenthetical (e.g. '({issue_month_M}, {issue_year})'), stripping only the year leaves debris like '(, )' that compiles into an unmatchable literal, blocking matching even without a standalone month token. This is a silent logic failure (no exception) that causes the wanted-issue auto-move feature to stop working for affected patterns."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Medium",
+        "line": 1463,
+        "title": "Empty IN () clause crashes scrape-index build when no URLs are indexed yet",
+        "symbol": "scheduled_scrape_index_build",
+        "why": "When partially_indexed is empty, ','.join('?' * 0) yields '', so the SQL text becomes `... series_norm IN () ...`, which is a SQLite syntax error. The query raises and the whole scheduled build aborts. On a fresh install (no rows with scrape_status='success') this fails on every run, so the scrape index can never bootstrap through the scheduled path. Should special-case the empty set (drop the CASE/ORDER-BY term when partially_indexed is empty)."
+      },
+      {
+        "severity": "Low",
+        "line": 431,
+        "title": "Scheduler jitter silently ignored because a trigger instance is passed to add_job",
+        "symbol": "configure_schedule",
+        "why": "jitter is passed via **jitter_kwargs to app_state.scheduler.add_job() while a pre-built CronTrigger instance is also passed as trigger=. APScheduler returns the trigger instance unchanged and ignores any trigger_args when an instance is supplied, so the intended 30-minute jitter for 'sync'/'getcomics' is never applied. jitter must be passed to the CronTrigger(...) constructor instead."
+      },
+      {
+        "severity": "Low",
+        "line": 8602,
+        "title": "has_more pagination flag is always true for a non-empty page",
+        "symbol": "api_timeline",
+        "why": "\"has_more\": len(data['timeline']) > 0 reports that more data exists whenever the current page returned any groups, including the last full page. End-of-list is therefore never signaled correctly, causing an extra empty fetch and incorrect client-side pagination termination."
+      },
+      {
+        "severity": "Low",
+        "line": 1830,
+        "title": "Komga path prefix match ignores separator boundary",
+        "symbol": "map_komga_path",
+        "why": "komga_path.startswith(komga_prefix) matches sibling directories that merely share the prefix string (e.g. prefix '/comics' also matches '/comics-extra/Foo.cbz'), producing a malformed mapped CLU path like '/data-extra/Foo.cbz'. The prefix comparison should require an exact match or a trailing path separator."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 694,
+        "symbol": "process_incoming_wanted_issues",
+        "title": "Wanted-issue match pattern omits month-token and empty-group stripping, silently breaking file matching",
+        "why": "match_pattern is built with only strip_year_token (line 693) and strip_title_token (line 694); no strip_month_token / empty-group cleanup exists in the buggy tree. Any surviving month token is a RECOGNIZED placeholder that generate_filename_pattern (helpers/collection.py:168-169,218-219) substitutes into a required regex atom (\\d{2} or [A-Za-z]+) BEFORE the defensive unrecognized-token stripper at lines 232-234 runs, so that stripper cannot remove it. Traced example: pattern '{series_name} {issue_number} ({issue_month_m}-{volume_year})' -> after year-strip '... ({issue_month_m}-)' -> compiled '... \\(\\d{2}-\\).*\\.(?:cbz|cbr|zip|rar)$'; a real download 'Black Cat 012 (2026).cbz' cannot match, so the missing issue is never detected or moved. No exception is raised (silent logic failure). Shared-parenthetical patterns like '({issue_month_M}, {issue_year})' compile to unmatchable literals such as \\([A-Za-z]+,\\). Independently confirmed by the fixed tree, which adds strip_month_token + strip_empty_groups at app.py:696-697 with docstrings citing the exact 'Black Cat - 012 (2026).cbz' download-named-with-only-a-year case. Conditional on a user configuring a month token in the rename pattern (a supported, documented placeholder); default pattern is unaffected, hence Medium."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [
+      {
+        "severity": "Low",
+        "line": 431,
+        "symbol": "configure_schedule",
+        "title": "Scheduler jitter silently ignored because a trigger instance is passed to add_job",
+        "why": "APScheduler v3: add_job has no explicit `jitter` param, so `**jitter_kwargs` falls into **trigger_args. _create_trigger returns the pre-built CronTrigger instance unchanged (isinstance BaseTrigger) and discards trigger_args, so the 1800s jitter for sync/getcomics is never applied. Jitter must be passed to CronTrigger(...) instead. Verified against APScheduler v3 add_job/_create_trigger semantics."
+      },
+      {
+        "severity": "Low",
+        "line": 8602,
+        "symbol": "api_timeline",
+        "title": "has_more pagination flag is always true for a non-empty page",
+        "why": "`has_more`: len(data['timeline']) > 0 is True for any non-empty page, including the final page of data. End-of-list is only detected after one extra fetch returns an empty page, so the last data page wrongly reports more exists. Provable from the code; low impact (one superfluous empty request)."
+      },
+      {
+        "severity": "Low",
+        "line": 1830,
+        "symbol": "map_komga_path",
+        "title": "Komga path prefix match ignores separator boundary",
+        "why": "komga_path.startswith(komga_prefix) matches sibling directories sharing the prefix string. Traced: prefix '/comics', path '/comics-extra/Foo.cbz' -> relative = komga_path[len('/comics'):] = '-extra/Foo.cbz' -> returns '/data-extra/Foo.cbz', a corrupted mapping. Guard should require exact match or komga_prefix + '/'. map_komga_path_multi only mitigates when the sibling is itself a configured mapping."
+      }
+    ],
+    "fixed_dropped": [
+      {
+        "severity": "Medium",
+        "line": 1463,
+        "symbol": "scheduled_scrape_index_build",
+        "title": "Empty IN () clause crashes scrape-index build when no URLs are indexed yet",
+        "why": "FALSE POSITIVE. Backend is SQLite (qmark '?' placeholders, '.db' files, strftime() SQL; Postgres would use %s). SQLite's grammar permits an empty expression list, so `x IN ()` is legal and evaluates to false. Ran the exact `ORDER BY CASE WHEN series_norm IN () THEN 0 ELSE 1 END ... LIMIT ?` query with an empty partially_indexed on SQLite 3.50.4 -> executes cleanly, no syntax error. Empty set merely makes the CASE fall to ELSE 1 (no prioritization); the scheduled build does not abort."
+      }
+    ]
+  },
+  {
+    "bug": "allaboutduncan/clu-comics#389",
+    "project": "allaboutduncan/clu-comics",
+    "file": "helpers/collection.py",
+    "recognized": false,
+    "recog_note": "I do not genuinely recognize this specific file from training data. I can infer the project identity from the path (allaboutduncan/clu-comics) and from internal references (core.config, core.database, Metron/GetComics/ComicInfo.xml, cbz_ops/rename.py), which point to a niche self-hosted comic-collection manager. But I have no memory of this file's canonical contents \u2014 the function bodies (strip_year_token, generate_filename_pattern, match_issues_to_collection, the regex construction logic) are not something I could reproduce from memory, and I cannot recall a known-correct upstream version to diff against. Any bug-finding here would have to be from first-principles reasoning about the regex/matching logic, not from comparison to a remembered original.",
+    "buggy_raw": [
+      {
+        "severity": "Medium",
+        "line": 165,
+        "symbol": "generate_filename_pattern",
+        "title": "{cover_year}/{store_year} not normalized to a year matcher, breaking matches for patterns using them",
+        "why": "The year-token loop only replaces {volume_year}/{issue_year}/{year}, but the module (_YEAR_TOKEN lines 7-9, strip_year_token) treats {cover_year} and {store_year} as valid year tokens. For a rename pattern like '{series_name}_{cover_year}_{issue_number}', the unhandled token is deleted by the defensive stripper (lines 233-234), collapsing the two surrounding separators into '(?:series)__(issue)'. That regex now requires the year to be ABSENT, so real files containing the year (e.g. Thor_2024_001.cbz) fail to match and issues are wrongly reported as missing from the collection."
+      },
+      {
+        "severity": "Low",
+        "line": 119,
+        "symbol": "get_series_name_from_files",
+        "title": "Truthiness of name checked before strip() can return an empty series name instead of DB fallback",
+        "why": "'if name:' is evaluated before '.strip()'. A filename made only of parenthetical groups plus residual whitespace (e.g. '(2024) (digital) .cbz') yields a non-empty whitespace 'name' that passes the guard, then extracted = name.strip() becomes '', and the function returns '' as the series name rather than falling back to db_series_name. The check should be on the stripped value."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Medium",
+        "line": 158,
+        "symbol": "get_series_name_from_files",
+        "title": "Separator/whitespace-only extracted name is returned instead of falling back to db_series_name",
+        "why": "The `if stripped:` guard (line 158) leaves `name` as the original separator-only string when stripping trailing separators yields ''. The subsequent `if name:` (line 161) then treats e.g. '-' as truthy and returns it (extracted via .strip(), which only trims whitespace). So a file like '- 001.cbz' returns '-' and '   .cbz' returns '' instead of db_series_name, contradicting the code's own documented fallback (lines 154-156). Removing the guard (unconditional `name = stripped`) would correctly fall back. Downstream this garbage name breaks series matching."
+      },
+      {
+        "severity": "Medium",
+        "line": 361,
+        "symbol": "match_issues_to_collection",
+        "title": "Cache validation cannot detect newly-added files for previously not-found issues",
+        "why": "Cache validity (lines 361-376) only checks existence/mtime of entries that already have a file_path. Entries cached as not-found (file_path=None) are skipped, so adding a new file for a wanted issue does not change any existing entry's mtime, the cache stays 'valid', and match_issues_to_collection returns found=False for the now-owned issue until an unrelated file change forces a rescan. This defeats the function's core purpose of reporting owned issues."
+      },
+      {
+        "severity": "Low",
+        "line": 420,
+        "symbol": "match_issues_to_collection",
+        "title": "Valid issue #0 (integer) is silently dropped for attribute-style issue objects",
+        "why": "`str(getattr(issue,'number','') or (issue.get('number','') if isinstance(issue,dict) else ''))` collapses an integer `0` to '' via the `or` (0 is falsy, and the non-dict branch yields ''). Then `if not issue_num: continue` (line 423) skips it. Comic issue #0 is valid; dict-style issues and string '0' work, but an object with .number==0 (int) is silently omitted from results."
+      }
+    ],
+    "buggy_confirmed": [],
+    "buggy_dropped": [
+      {
+        "severity": "Medium",
+        "line": 165,
+        "symbol": "generate_filename_pattern",
+        "title": "{cover_year}/{store_year} not normalized to a year matcher, breaking matches for patterns using them",
+        "why": "FALSE POSITIVE. generate_filename_pattern is byte-identical in the reference (fixed) code, which also omits {cover_year}/{store_year} from the line-165 loop, so this is not behavior the codebase treats as wrong. It is also functionally near-unreachable: for the idiomatic bracketed pattern '{series_name} {issue_number} ({cover_year})' the defensive stripper at line 233 removes the entire ' \\({cover_year}\\)' group and the trailing '.*' absorbs the real '(2024)', so files WITH the year still match (verified by tracing). Only a bare-separator pattern like '{series_name}_{cover_year}_{issue_number}' collapses to '(?:series)__(issue)', and even then the step-4c generic fallback ('[\\s\\-_]0*N(?:[\\s\\-_\\.\\(]|$)', line 425) matches e.g. 'Thor_2024_001.cbz' on the '_001.' delimiter. The 'reported missing from the collection' claim requires all three match layers (pattern, ComicInfo, generic filename) to fail simultaneously, which is not demonstrated."
+      },
+      {
+        "severity": "Low",
+        "line": 119,
+        "symbol": "get_series_name_from_files",
+        "title": "Truthiness of name checked before strip() can return an empty series name instead of DB fallback",
+        "why": "FALSE POSITIVE. The described behavior is identical in the reference (fixed) version: tracing '(2024) (digital) .cbz' through fixed code, the newly added trailing-separator guard leaves name=' ', 'if name:' still passes, and it returns '' as well \u2014 so returning '' for an all-parenthetical basename is not treated as a defect. The trigger is degenerate and hinges on a stray space before the extension; '(2024) (digital).cbz' (no stray space) yields name='' and correctly falls back to db_series_name. It also misidentifies the region's real concern: the actual logic gap the fixed version closes is a retained trailing SEPARATOR in a valid name (e.g. 'Black Cat -' derived from 'Black Cat - 012 (2026).cbz'), and the proposed fix ('check the stripped value' / 'if name.strip():') would not change that name at all. Not the injected defect and not provably harmful on realistic input."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 158,
+        "symbol": "get_series_name_from_files",
+        "title": "Separator/whitespace-only extracted name is returned instead of falling back to db_series_name",
+        "why": "Verified by tracing. '- 001.cbz': splitext->'- 001', issue-number strip->'-', stripped=''. Line 158 `if stripped:` is falsy so name stays '-', then line 161 `if name:` sees truthy '-' and returns it. '   .cbz': splitext->'   ', stripped='', name stays '   ', extracted=''.strip()->'' returned. Both bypass the DB fallback. Lines 154-156 comment explicitly documents the opposite intent ('a name that is *only* separators falls back to the DB name'); an unconditional `name = stripped` would satisfy it. Implementation contradicts its own contract."
+      },
+      {
+        "severity": "Medium",
+        "line": 361,
+        "symbol": "match_issues_to_collection",
+        "title": "Cache validation cannot detect newly-added files for previously not-found issues",
+        "why": "Verified. The 361-376 loop only checks entries where entry['file_path'] is truthy; not-found entries (file_path=None, saved at 494 with found=0 at 493) are skipped. No directory-mtime or file-count check exists, so adding a new file changes nothing the loop inspects. The `if entry['file_path']:` guard itself proves cached contains null-path rows. Clean demonstration: an all-not-found series caches every issue with file_path=None; the loop then skips all entries, valid_cache stays True, and found=False is returned indefinitely even after the files are downloaded \u2014 nothing can ever invalidate it. Defeats the function's core purpose."
+      },
+      {
+        "severity": "Low",
+        "line": 420,
+        "symbol": "match_issues_to_collection",
+        "title": "Valid issue #0 (integer) is silently dropped for attribute-style issue objects",
+        "why": "Verified. For a non-dict object with .number==0 (int): getattr->0; `0 or (else '')` yields '' because 0 is falsy and the non-dict branch returns ''; str('')=''; line 423 `if not issue_num: continue` drops it. Dict-style ('' or 0 -> 0 -> '0') and string '0' both survive, exactly as claimed. Comic issue #0 is legitimate; classic falsy-value-swallowed-by-`or` defect. Narrow (requires attribute object with integer 0) but provable from the code."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "pallets/click#3678",
+    "project": "pallets/click",
+    "file": "src/click/core.py",
+    "recognized": true,
+    "recog_note": "Clearly recognize this as click's core.py: Context/Command/Group hierarchy, iter_params_for_processing, augment_usage_errors, ParameterSource, main() exception ladder, _FakeSubclassCheck/_BaseCommand shim, make_context/parse_args/invoke all match my training knowledge of classic click 8.x, which I could largely reproduce. HOWEVER this is a newer/divergent variant containing code NOT in any release I have memorized: a UNSET sentinel threaded through invoke/parse_args/lookup_default, ParameterSource converted to enum.IntEnum with a '.. versionchanged:: 8.3.3' note and reordered members, _param_default_explicit tracking (issue #3403), a distinct format_arguments 'Positional arguments' section, and references to issues #3066/#3071/#3079. I could reproduce canonical 8.x core.py but NOT this exact file verbatim, so canonical-diffing is only partially reliable here \u2014 the unfamiliar additions could themselves be where the injected bug lives. Read only first 1676 of 3682 lines.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 2970,
+        "title": "Inverted default check in Option._flag_needs_value detection (missing `not`)",
+        "symbol": "Option.__init__",
+        "why": "Line 2970 computes `self._flag_needs_value = flag_value is not UNSET or self.default is UNSET`, but the immediately preceding comment (lines 2965-2968, referencing issue #3084) states the intent is to enable flag-needs-value when `flag_value` OR `default` **was set**. `self.default is UNSET` means the default was NOT provided, so the condition is inverted; it should be `self.default is not UNSET`. Consequence: for an explicit `is_flag=False` option WITH a default (e.g. `Option(['--foo'], is_flag=False, default='bar')`), `_flag_needs_value` becomes False when it should be True, so `--foo` used as a bare flag wrongly errors with 'requires an argument' instead of using its value/prompt. Conversely, for an `is_flag=False` option with NO default and no `flag_value`, `_flag_needs_value` becomes True, so a bare `--foo` is wrongly accepted and yields `flag_value` (None) instead of raising the missing-argument error. This corrupts command-line parsing for these options."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [],
+    "buggy_dropped": [
+      {
+        "severity": "High",
+        "line": 2970,
+        "symbol": "Option.__init__",
+        "title": "Inverted default check in Option._flag_needs_value detection (missing `not`)",
+        "why": "FALSE POSITIVE. (1) Not a defect: this exact line is byte-identical in the benchmark's fixed/ tree (line 3012) and is unchanged upstream click code; the real injected bug per groundtruth.json is the `help`-parameter parsing at lines 55/1119/1153/1169. (2) The branch at line 2969 hangs off `if is_flag is None` (line 2954), so line 2970 fires ONLY for an explicit `is_flag=False`; a normal `@click.option('--foo', default='bar')` (is_flag=None) never reaches it. (3) The finding's own Case C \u2014 `Option(['--foo'], is_flag=False, default='bar')` yielding `_flag_needs_value=False` so bare `--foo` errors 'requires an argument' \u2014 is the standard, correct click convention (an option with a default still requires an argument when its flag is present), not corruption. (4) Case B enabling optional-value behavior is click's intentional 'optional value' feature, a design choice, not a provable bug. The finding relies solely on a loose comment-vs-code wording mismatch and never demonstrates wrong runtime behavior; its behavioral predictions actually match correct semantics. Cannot prove a defect from the code \u2014 drop."
+      }
+    ],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "sktime/pytorch-forecasting#2257",
+    "project": "sktime/pytorch-forecasting",
+    "file": "pytorch_forecasting/models/deepar/_deepar.py",
+    "recognized": true,
+    "recog_note": "Genuinely recognize the specific code, not just the library name: distinctive method set (construct_input_vector, encode, decode_all, decode with nested decode_one + decode_autoregressive, forward's one_off_target gather using encoder_lengths-1, the n_samples repeat_interleave/reshape-permute sampling machinery, DeepVAR MultivariateDistributionLoss handling). I could reproduce the canonical LOGIC of most methods and compare against it, but this copy is modernized (PEP 604 str|None hints, numpydoc docstrings) vs the older Optional/Google-style version I recall best, so I could not reproduce it token-for-token. Recognition is strong enough to find bugs by comparison to the known-correct logic (e.g. the n_plotting_samples defaulting block reads as inverted from canonical).",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 145,
+        "symbol": "DeepAR.__init__",
+        "title": "Swapped n_plotting_samples default logic contradicts docstring and breaks plotting-sample default",
+        "why": "In `if n_plotting_samples is None:` the inner branches are inverted. When `n_validation_samples is None` (the default), it sets `n_plotting_samples = n_validation_samples` (=None) instead of 100; when `n_validation_samples` is set, it sets 100 instead of matching `n_validation_samples`. The docstring (lines 123-125) specifies the opposite. Consequently `create_log` (lines 476-480) passes `n_samples=None` into `decode` during training with default config, so the plotting path uses the distribution mean instead of drawing the intended 100 samples. Correct code: set 100 when validation samples is None, else use n_validation_samples."
+      },
+      {
+        "severity": "High",
+        "line": 145,
+        "symbol": "DeepAR.__init__",
+        "title": "Inverted branches in n_plotting_samples defaulting logic",
+        "why": "The two branch assignments are swapped relative to the documented contract (\"Defaults to n_validation_samples if not None or 100 otherwise\", lines 123-125). When n_validation_samples is None, line 145 sets n_plotting_samples = n_validation_samples (None) instead of 100; when n_validation_samples is not None, line 147 sets n_plotting_samples = 100 instead of n_validation_samples. Consequence: create_log (lines 477-480) picks n_plotting_samples during training, so with no validation samples configured plotting gets n_samples=None (no sampling / mean only) instead of 100, and with validation samples configured it uses 100 instead of the requested count. Fix: swap the assignments so line 145 = 100 and line 147 = n_validation_samples."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 145,
+        "symbol": "DeepAR.__init__",
+        "title": "Inverted branches in n_plotting_samples defaulting logic contradict documented contract",
+        "why": "Lines 143-147 swap the two assignments relative to the docstring (lines 123-125: 'Defaults to n_validation_samples if not None or 100 otherwise'). When n_validation_samples is None, line 145 sets n_plotting_samples = n_validation_samples (None) instead of 100; when n_validation_samples is set, line 147 sets 100 instead of n_validation_samples. Confirmed downstream: create_log (lines 476-480) selects n_plotting_samples during training, so with the default config the plotting path passes n_samples=None (mean only) instead of drawing 100 samples. Correct code assigns 100 in the is-None branch and n_validation_samples in the else branch. Impact limited to plotting/logging sample fidelity, not model correctness."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "inventree/InvenTree#12332",
+    "project": "inventree/InvenTree",
+    "file": "src/backend/InvenTree/InvenTree/serializers.py",
+    "recognized": false,
+    "recog_note": "Clearly identifiable as InvenTree's core serializers.py from distinctive longstanding classes (InvenTreeModelSerializer.run_validation with full_clean, InvenTreeMoneySerializer, InvenTreeCurrencySerializer, InvenTreeDecimalField, taggit/attachment mixins). But I do NOT recall this exact revision verbatim \u2014 several constructs (OptionalField/FilterableSerializerMixin dynamic-field machinery, TreePathSerializer, CustomStatusSerializerMixin, DuplicateOptionsSerializer re-classing, ContentTypeField mixin restriction) are recent refactors I cannot reproduce canonically from memory. I could not find a planted bug by diffing against a remembered upstream version; bug-finding here would be first-principles reasoning, not memory comparison.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 677,
+        "symbol": "InvenTreeModelSerializer.run_validation",
+        "title": "hasattr(data, '__all__') on a dict is always False, so the '__all__'->'non_field_errors' rename never runs",
+        "why": "`data` is a plain dict built from `exc.message_dict`. `hasattr(dict, '__all__')` is always False (a dict has no such attribute); the intended check is `'__all__' in data`. Django full_clean() puts non-field validation errors under the '__all__' key, so those errors are returned to API clients under '__all__' instead of the DRF-standard 'non_field_errors', breaking frontend display of all model-level validation errors."
+      },
+      {
+        "severity": "Medium",
+        "line": 241,
+        "symbol": "FilterableSerializerMixin.build_optional_field",
+        "title": "{**field.serializer_kwargs} raises TypeError when serializer_kwargs is None",
+        "why": "OptionalField.serializer_kwargs defaults to None. `{**field.serializer_kwargs} or {}` unpacks the dict before the `or {}` fallback, so a None value raises `TypeError: 'NoneType' object is not a mapping`. Correct guard (`field.serializer_kwargs or {}`) is used at line 150. Any OptionalField declared without serializer_kwargs that is lazily built crashes."
+      },
+      {
+        "severity": "Low",
+        "line": 140,
+        "symbol": "FilterableSerializerMixin.is_field_included",
+        "title": "Field value popped from kwargs before the schema-generation check, contradicting the code's own comment",
+        "why": "Line 140 does `kwargs.pop(field_ref, None)` before the `isGeneratingSchema()` check on line 143, yet the comment on line 142 states fields must not be popped during schema generation. The pop happens even while generating the schema, contradicting the documented contract (low real-world impact because the kwarg is usually absent during schema generation)."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Medium",
+        "line": 677,
+        "symbol": "InvenTreeModelSerializer.run_validation",
+        "title": "hasattr(data, '__all__') is always False for a dict \u2014 Django '__all__' error key never renamed to 'non_field_errors'",
+        "why": "`data` is a plain dict built at lines 670/672/674. `hasattr(data, '__all__')` tests for an ATTRIBUTE named `__all__` on the dict object, which never exists, so the branch is dead code. The intended membership test is `'__all__' in data`. When Django raises a ValidationError whose message_dict is keyed under '__all__' (non-field errors), the key is never converted to DRF's 'non_field_errors', so the API returns a malformed/inconsistent error payload (`{'__all__': [...]}`) that clients expecting `non_field_errors` won't handle."
+      },
+      {
+        "severity": "Medium",
+        "line": 241,
+        "symbol": "FilterableSerializerMixin.build_optional_field",
+        "title": "{**field.serializer_kwargs} raises TypeError when serializer_kwargs is None",
+        "why": "OptionalField.serializer_kwargs defaults to None (line 68). The expression `{**field.serializer_kwargs} or {}` evaluates the dict-unpacking first; `{**None}` raises `TypeError: argument of type 'NoneType' is not a mapping`, so the trailing `or {}` never protects against None. Any OptionalField declared without serializer_kwargs that is materialized through build_relational_field/build_property_field/build_unknown_field will crash. Line 150 handles the same case correctly (`field.serializer_kwargs or {}`), confirming intent."
+      },
+      {
+        "severity": "Low",
+        "line": 140,
+        "symbol": "FilterableSerializerMixin.is_field_included",
+        "title": "kwargs popped before the schema-generation guard, contradicting the 'do not pop during schema' comment",
+        "why": "Line 140 executes `kwargs.pop(field_ref, None)` unconditionally, then line 143 checks `isGeneratingSchema()` and returns True. The comment at line 142 states 'We do not want to pop fields while generating the schema', but the pop has already mutated kwargs before that guard runs. During schema generation the filter kwarg is therefore removed regardless, violating the stated invariant; the schema-generation check should precede the pop."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 677,
+        "symbol": "InvenTreeModelSerializer.run_validation",
+        "title": "hasattr(data, '__all__') on a dict is always False, so the '__all__'->'non_field_errors' rename never runs",
+        "why": "Confirmed. In the except block (lines 668-680), `data` is reassigned in every branch to a plain dict: `{**exc.message_dict}` (670), or `{'non_field_errors': [...]}` (672/674). `hasattr(dict_instance, '__all__')` tests for an ATTRIBUTE, which a dict never has, so line 677 is always False and the rename on line 678 never executes. Only the `{**exc.message_dict}` branch can contain an `'__all__'` KEY \u2014 Django's full_clean() stores model-level/non-field errors there \u2014 so those errors are returned to API clients under `'__all__'` instead of DRF's `'non_field_errors'`. The correct check is `'__all__' in data`; the line-676 comment confirms the rename is intended to run. This is the base serializer for all InvenTree model serializers, so model-level validation errors silently surface under the wrong key app-wide, breaking frontend error display."
+      },
+      {
+        "severity": "Medium",
+        "line": 241,
+        "symbol": "FilterableSerializerMixin.build_optional_field",
+        "title": "{**field.serializer_kwargs} raises TypeError when serializer_kwargs is None",
+        "why": "Confirmed latent crash. OptionalField.serializer_kwargs defaults to None (line 68) and the dataclass has no __post_init__ to change it. In `{**field.serializer_kwargs} or {}` the dict-unpacking is evaluated before `or`, so a None value raises TypeError: 'NoneType' object is not a mapping before `or {}` can apply \u2014 the guard is ineffective. The same attribute is correctly guarded at line 150 (`field.serializer_kwargs or {}`), proving None is an expected value. build_optional_field is reached for any included OptionalField via build_unknown_field (line 265, unguarded), build_relational_field, or build_property_field, so declaring an OptionalField without serializer_kwargs (a valid, documented-optional construction) and having it built produces a 500. The defect is provable within this file; triggering requires such a declaration."
+      }
+    ],
+    "buggy_dropped": [
+      {
+        "severity": "Low",
+        "line": 140,
+        "symbol": "FilterableSerializerMixin.is_field_included",
+        "title": "Field value popped from kwargs before the schema-generation check, contradicting the code's own comment",
+        "why": "Dropped \u2014 no provable wrong behavior. Line 140 pops field_ref before the isGeneratingSchema() check on line 143, which does contradict the line-142 comment, but produces no incorrect outcome. During schema generation field_ref is normally absent, so the pop is a no-op. If it were present, popping (a) does not change the return value \u2014 the function returns True and the field is included either way \u2014 and (b) is actually beneficial, since these filter kwargs (e.g. include_x) are not valid DRF field kwargs and must be stripped before super().__init__ to avoid an unexpected-keyword error. kwargs is per-__init__ and not shared, and the optional_filters cache is never reached during schema gen due to the early True return, so there is no cross-field or cross-instance side effect. This is a comment/code-ordering nit, not a defect."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 677,
+        "symbol": "InvenTreeModelSerializer.run_validation",
+        "title": "hasattr(data, '__all__') is always False for a dict \u2014 Django '__all__' error key never renamed to 'non_field_errors'",
+        "why": "data is unconditionally a plain dict (lines 670/672/674). hasattr(data,'__all__') tests for an attribute, which a dict never has (verified: hasattr({'__all__':[...]},'__all__')==False; intended test is '__all__' in data). Django full_clean() raises DjangoValidationError whose message_dict keys non-field errors under '__all__' (NON_FIELD_ERRORS='__all__'), so data={**exc.message_dict} yields {'__all__':[...]} and the rename at 677-678 is dead code \u2014 the API returns a Django-style {'__all__':[...]} payload instead of DRF's non_field_errors."
+      },
+      {
+        "severity": "Medium",
+        "line": 241,
+        "symbol": "FilterableSerializerMixin.build_optional_field",
+        "title": "{**field.serializer_kwargs} raises TypeError when serializer_kwargs is None",
+        "why": "serializer_kwargs defaults to None (line 68). In `{**field.serializer_kwargs} or {}` the unpacking runs first; {**None} raises TypeError (verified) before `or {}` can guard, unlike the correct `field.serializer_kwargs or {}` at line 150 which proves None is an expected value. Any included OptionalField declared without serializer_kwargs crashes when materialized via build_relational_field/build_property_field/build_unknown_field."
+      }
+    ],
+    "fixed_dropped": [
+      {
+        "severity": "Low",
+        "line": 140,
+        "symbol": "FilterableSerializerMixin.is_field_included",
+        "title": "kwargs popped before the schema-generation guard, contradicting the 'do not pop during schema' comment",
+        "why": "Misreads the comment. 'We do not want to pop fields while generating the schema' refers to removing OptionalFields from the serializer field set (self.fields.pop at line 102 via fields_to_remove), which the early `return True` at line 144 correctly prevents \u2014 not to kwargs.pop at line 140. That kwargs.pop targets a per-instance filter kwarg; during schema generation drf-spectacular does not pass filter kwargs, so pop is a no-op; if present, popping it is harmless/beneficial (avoids leaking an unexpected kwarg to super().__init__). No provable harmful behavior, and reordering the guard fixes nothing."
+      }
+    ]
+  },
+  {
+    "bug": "pytroll/satpy#3367",
+    "project": "pytroll/satpy",
+    "file": "satpy/readers/nwcsaf_nc.py",
+    "recognized": false,
+    "recog_note": "I recognize the project and file identity with high confidence: this is the Nowcasting SAF (NWCSAF) common PPS/MSG NetCDF reader from pytroll/satpy (satpy/readers/nwcsaf_nc.py), class NcNWCSAF. The import path satpy.readers.core.file_handlers indicates a fairly recent Satpy version (post the readers/core reorg, ~2024+). However, I do NOT recognize this exact code at a level that would let me reproduce the canonical upstream implementation from memory. I cannot recall the precise bodies of methods like scale_dataset, _prepare_variable_for_palette, _mask_variable, _upsample_geolocation_uncached, or _get_projection well enough to diff line-by-line against a known-correct version. Any bug-finding here would have to come from first-principles reasoning about the code, not from comparison to a memorized upstream. Setting recognized=false accordingly.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 113,
+        "symbol": "NcNWCSAF.__init__",
+        "title": "Inverted try/except for satellite_identifier makes .astype(str) unreachable",
+        "why": "The inner block reads self.nc.attrs['satellite_identifier'] raw first (line 112) and only falls back to .astype(str) on KeyError (lines 113-114). A KeyError means the key is absent, so re-accessing it in the except re-raises KeyError, propagating to the outer handler (PPS path). Thus the .astype(str) normalization is dead code for its intended purpose. When the Geo attribute is present as a numpy bytes/scalar value it is used un-normalized: PLATFORM_NAMES.get(kwargs['sat_id'], ...) at line 129 fails to match the string keys, yielding a wrong platform_name/sensor, and if the attr is a 0-d ndarray (unhashable) the .get() raises TypeError. Correct form tries .astype(str) first with an except AttributeError fallback."
+      },
+      {
+        "severity": "Medium",
+        "line": 434,
+        "symbol": "remove_empties",
+        "title": "Dict mutated during iteration (attrs.pop while iterating attrs.items())",
+        "why": "remove_empties iterates variable.attrs.items() (line 432) and calls variable.attrs.pop(key) (line 434) inside the loop. When an Empty h5py attribute is actually present\u2014the exact case this function is meant to handle\u2014popping changes the dict size and CPython raises RuntimeError: dictionary changed size during iteration on the next iterator step. Since remove_empties runs for every variable via scale_dataset (line 210), any file containing an Empty attr crashes dataset loading. Must iterate over a snapshot (list(...) or attrs.copy())."
+      },
+      {
+        "severity": "Medium",
+        "line": 420,
+        "title": "km-unit projection: GDAL geotransform corners divided by `scale`, making area extent 1000x too small",
+        "symbol": "_get_projection",
+        "why": "In `_get_projection` (lines 420-423) the corner coordinates `gdal_xgeo_up_left`, `gdal_ygeo_low_right`, `gdal_xgeo_low_right`, `gdal_ygeo_up_left` are each divided by `scale` (=1e3 when `radius_a < 10e3`, i.e. a km-unit projection). Those corners come from the GDAL geotransform and are already expressed in the projection's own units (km for a km-unit CRS), so dividing them by `scale` under-scales the extent by 1000x. `get_area_def` then also calls `_ensure_crs_extents_in_meters` (line 340), which already converts km->m (x1000). Tracing a km-unit file: -5568 km -> /1000 = -5.568 -> x1000 = -5568 m, while the true value is -5568000 m => area extent 1000x too small and geolocation is broken for km-unit NWCSAF products. The meters-unit path (the common case) is unaffected because scale=1.0 makes the division a no-op, so the defect is latent. Correct behavior: do not divide the geotransform corners by `scale`; let `_ensure_crs_extents_in_meters` perform the km->m normalization."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "High",
+        "line": 467,
+        "title": "remove_empties() mutates attrs dict while iterating -> RuntimeError",
+        "symbol": "remove_empties",
+        "why": "The loop iterates `variable.attrs.items()` and calls `variable.attrs.pop(key)` inside it. Confirmed via test that CPython raises `RuntimeError: dictionary changed size during iteration` on the very first pop (even for a single-item dict). This runs at the top of scale_dataset for every dataset, so any variable with an h5py Empty attr (the exact case the function targets) crashes the reader. Fix: iterate over list(variable.attrs.items()) or collect keys first."
+      },
+      {
+        "severity": "Medium",
+        "line": 116,
+        "title": "satellite_identifier .astype(str) normalization is unreachable dead code",
+        "symbol": "NcNWCSAF.__init__",
+        "why": "The inner try accesses attrs['satellite_identifier'] plainly (line 114); the except KeyError branch (line 116) accesses the SAME key with .astype(str). If the key exists the plain access always succeeds so astype never runs; if it is missing both lines raise KeyError and control jumps to the outer PPS handler. Thus a numpy/bytes-typed identifier is passed raw and never converted to str, so PLATFORM_NAMES.get / SENSOR.get can miss and produce wrong platform_name/sensor. Correct pattern: attempt .astype(str) first, fall back to plain value on AttributeError."
+      },
+      {
+        "severity": "Low",
+        "line": 482,
+        "title": "read_nwcsaf_time PPS fallback passes non-str numpy value to strptime",
+        "symbol": "read_nwcsaf_time",
+        "why": "The outer `except ValueError` PPS branch calls strptime(time_value, ...) with the original time_value instead of time_value.astype(str). The inner block only converts numpy scalars for the MSG format path. A numpy/bytes-typed PPS timestamp therefore raises an uncaught TypeError instead of parsing (strptime requires str)."
+      },
+      {
+        "severity": "Low",
+        "line": 198,
+        "title": "_get_varname_in_file returns str+list (TypeError) when no list key matches",
+        "symbol": "_get_varname_in_file",
+        "why": "When info['file_key'] is a list and none of its entries exist in self.nc, the function falls through to `return self.file_key_prefix + info[info_type]`, concatenating a str with a list -> TypeError. _get_filekeys only catches KeyError, so the intended graceful fallback to dsid_name is bypassed and the read crashes."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 434,
+        "symbol": "remove_empties",
+        "title": "Dict mutated during iteration (attrs.pop while iterating attrs.items()) crashes on any h5py.Empty attr",
+        "why": "Empirically verified against the real logic with live xarray/h5py: variable.attrs is the same mutable dict object each access, and iterating variable.attrs.items() while calling variable.attrs.pop(key) raises RuntimeError: dictionary changed size during iteration whenever an h5py._hl.base.Empty attr is present \u2014 even for a single Empty attr. That is exactly the condition the function exists to handle, and it runs for every variable via scale_dataset (line 210), so any NWCSAF file with a null-dataspace attribute crashes get_dataset. Fix: iterate a snapshot, e.g. for key,val in list(variable.attrs.items())."
+      }
+    ],
+    "buggy_dropped": [
+      {
+        "severity": "High",
+        "line": 113,
+        "symbol": "NcNWCSAF.__init__",
+        "title": "Inverted try/except makes .astype(str) unreachable \u2014 vestigial, not a provable defect",
+        "why": "The observation that the inner 'except KeyError' branch re-accesses the same missing key and can never run .astype(str) is technically true, but no functional defect is provable. In supported configs a scalar string global attr (satellite_identifier like 'MSG4') is a plain Python str, so line 112's raw access returns a usable value and PLATFORM_NAMES.get matches correctly \u2014 no wrong platform, no TypeError. The numpy-bytes/0-d-array precondition only occurred with h5netcdf < 0.14, which the module itself flags as obsolete ('not needed since h5netcdf 0.14'). Decisively, this byte-identical code ships in the PR #3367 fixed reference, so upstream does not treat it as a bug. Vestigial defensive code."
+      },
+      {
+        "severity": "Medium",
+        "line": 420,
+        "symbol": "_get_projection",
+        "title": "km-unit extent 1000x too small \u2014 wrong root cause, km arithmetic is correct and unchanged by the fix",
+        "why": "False positive. The buggy km-path 'corner / 1e3' is numerically identical to the fixed version's 'corner * 1e-3' (fixed _check_units sets scale *= 1e-3), and PR #3367 preserved this km-path arithmetic untouched \u2014 proving it is not a 1000x error. The gdal_xgeo_* corners are in meters; dividing by scale converts them to the km-CRS's native units, and _ensure_crs_extents_in_meters converts back to meters \u2014 self-consistent. The real bug the PR fixed was v2025 perspective-point-height scaling (new V2025_PERSPECTIVE_POINT_HEIGHT branch), unrelated to this finding's km-vs-m claim."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "High",
+        "line": 467,
+        "symbol": "remove_empties",
+        "title": "remove_empties() mutates attrs dict while iterating -> RuntimeError",
+        "why": "Reproduced with real xarray 2026.7.0: DataArray.attrs returns the live _attrs dict (da.attrs is da.attrs == True; mutations persist), so variable.attrs.pop(key) inside `for key,val in variable.attrs.items()` mutates the iterated dict and raises RuntimeError: dictionary changed size during iteration \u2014 confirmed even for a single-item dict (CPython checks di_used!=ma_used before the exhaustion check). The function's only job is to pop h5py Empty attrs, so any variable carrying one crashes scale_dataset in the main get_dataset read path. Conditional on the h5netcdf engine producing an Empty attr, but a hard crash whenever it does. Fix: iterate list(variable.attrs.items())."
+      },
+      {
+        "severity": "Low",
+        "line": 116,
+        "symbol": "NcNWCSAF.__init__",
+        "title": "satellite_identifier .astype(str) normalization is unreachable dead code",
+        "why": "Control flow proven: self.nc.attrs is a plain dict, so line 114 raises only KeyError. If the key exists, line 114 succeeds and 116 is skipped; if it is missing, line 116's OWN lookup self.nc.attrs['satellite_identifier'] re-raises KeyError before .astype runs, propagating to the outer except -> PPS handler. Thus .astype(str) never executes under any input. Demonstrated: PLATFORM_NAMES.get(numpy.bytes_('MSG1')) misses -> platform_name becomes b'MSG1' (wrong). Impact is bytes-specific (numpy.str_ subclasses str and coincidentally resolves) and legacy-backend-conditional, hence Low rather than Medium, but the intended numpy->str conversion is genuinely broken. Correct pattern: attempt .astype(str) first, fall back on AttributeError."
+      },
+      {
+        "severity": "Low",
+        "line": 482,
+        "symbol": "read_nwcsaf_time",
+        "title": "read_nwcsaf_time PPS fallback passes non-str numpy value to strptime",
+        "why": "Reproduced: read_nwcsaf_time(np.bytes_('20230101T120000000000Z')) raises an uncaught TypeError (strptime() argument 1 must be str, not numpy.bytes_). Trace: line 477 TypeError -> line 479 astype(str) yields a str that ValueErrors against the MSG format -> outer except ValueError -> line 482 calls strptime(time_value, PPS_fmt) with the ORIGINAL numpy/bytes value (never .astype(str)) -> TypeError, uncaught. The MSG path converts numpy scalars but the PPS path does not. The code's own '# Remove this in summer 2024' comment confirms numpy/bytes attrs are a real anticipated input, so the missing PPS conversion is a genuine defect."
+      },
+      {
+        "severity": "Low",
+        "line": 198,
+        "symbol": "_get_varname_in_file",
+        "title": "_get_varname_in_file returns str+list (TypeError) when no list key matches",
+        "why": "When info['file_key'] is a list and none of its entries are in self.nc, the loop returns nothing and execution falls through to `return self.file_key_prefix + info[info_type]`, i.e. str + list -> TypeError. _get_filekeys wraps the call in `except KeyError` only, so the TypeError propagates and the intended graceful fallback to dsid_name is bypassed, crashing get_dataset. There is no interpretation where str+list is intended; the per-alternative `if file_key in self.nc` check shows absent alternatives are expected. Edge-case trigger (list file_key with all alternatives missing) -> Low, but a definite uncaught crash on that path (same flaw also reachable via the scale_offset_dataset caller at line 272)."
+      }
+    ],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "aio-libs/aiohttp#12264",
+    "project": "aio-libs/aiohttp",
+    "file": "aiohttp/http_parser.py",
+    "recognized": false,
+    "recog_note": "Strongly recognize this as aiohttp's http_parser.py by architecture and idioms (HttpParser/HttpRequestParser/HttpResponseParser, HttpPayloadParser, DeflateBuffer, Raw*Message NamedTuples, ParseState/ChunkState enums, lax SEP=b'\\n' response mode, URL.build(encoded=True), surrogateescape, TOKENRE/VERSRE/HEXDIGITS, the Cython _http_parser fallback import). But I cannot reproduce THIS specific version from memory: the PayloadState pause/resume back-pressure state machine (_more_data_available/_eof_pending/PAYLOAD_HAS_PENDING_INPUT), the trailer-parsing path with max_trailers, SINGLETON_HEADERS dup rejection, and ZSTD support are recent/evolving. So I could not reliably diff against a memorized canonical to locate an injected bug \u2014 I'd be reasoning from RFC/control-flow first principles, not recall. Setting recognized=false per the strict criterion.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 673,
+        "title": "Missing mandatory Host header validation for HTTP/1.1 requests",
+        "symbol": "HttpRequestParser.parse_message",
+        "why": "After parse_headers() returns (line 673), parse_message never checks that an HTTP/1.1 request contains a Host header. RFC 9112 section 3.2 requires every HTTP/1.1 request to include exactly one Host header and a server MUST reject a request that lacks one. The correct code raises BadHttpMessage('Missing \\'Host\\' header in request.') when version_o == HttpVersion11 and hdrs.HOST not in headers (and imports HttpVersion11 for that check). Both the guard and the import are absent, so HTTP/1.1 requests with no Host header are accepted as valid instead of being rejected, allowing malformed/ambiguous requests through the parser (protocol violation and request-smuggling/host-ambiguity exposure)."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 673,
+        "symbol": "HttpRequestParser.parse_message",
+        "title": "Missing mandatory Host header validation for HTTP/1.1 requests",
+        "why": "Proven by direct comparison with the reference (fixed) version. In the buggy file, line 52 imports only `HttpVersion, HttpVersion10` (no `HttpVersion11`), and parse_message flows from the parse_headers() return at line 673 straight to `if close is None` and `return RawRequestMessage(...)` with no Host check. Neither HttpParser.parse_headers (lines 544-596, inspects only Connection/Content-Encoding/Transfer-Encoding/Content-Length) nor HeadersParser.parse_headers (lines 163-239, only rejects DUPLICATE host, never absence) rejects a Host-less request, so an HTTP/1.1 request with no Host header parses cleanly into a valid RawRequestMessage. The fixed version adds exactly the missing guard at lines 675-676: `if version_o == HttpVersion11 and hdrs.HOST not in headers: raise BadHttpMessage(\"Missing 'Host' header in request.\")`, plus the HttpVersion11 import. RFC 9112 section 3.2 requires a server to reject such requests; accepting them is a protocol violation with request-smuggling/host-ambiguity exposure. The buggy code does not raise NameError because no HttpVersion11 reference remains \u2014 it silently accepts the malformed request."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "project": "pyinfra-dev/pyinfra",
+    "file": "src/pyinfra/connectors/ssh.py",
+    "recognized": false,
+    "recog_note": "Recognize the project as pyinfra and the general structure of its SSH connector (SSHConnector/BaseConnector, make_paramiko_kwargs, connect/_connect, run_shell_command, get_file/put_file sudo-temp dance, rsync). But I cannot reproduce the canonical upstream revision token-for-token. The load-bearing method _retry_paramiko_agent_keys (paramiko #1390 multi-key workaround) and exact pyinfra API details (_pyinfra_ssh_* kwargs, execute_command_with_sudo_retry) I don't recall precisely enough to diff a planted bug against a known-correct version. Bug-finding here would be first-principles reasoning, not recall \u2014 so recognized=false per the strict standard.",
+    "buggy_raw": [
+      {
+        "severity": "Low",
+        "line": 259,
+        "symbol": "SSHConnector._connect",
+        "title": "Missing comma: `key in (\"username\")` is a substring test, not tuple membership",
+        "why": "`(\"username\")` is a string, not a 1-tuple (missing trailing comma). `key in (\"username\")` therefore tests whether `key` is a substring of the string \"username\" rather than equality against a tuple of expected keys. The intent (building the AuthenticationException diagnostic) was `key in (\"username\",)` / `key == \"username\"`. Currently latent because no other kwargs key ('pkey','port','timeout','password','allow_agent','look_for_keys', the '_pyinfra_*' keys) is a substring of \"username\", but it is a genuine incorrect-conditional bug: any future key name that is a substring of \"username\" (e.g. 'name', 'user') would be wrongly included in the auth-error message."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "Medium",
+        "line": 494,
+        "symbol": "SSHConnector.get_file",
+        "title": "get_file ignores _doas/_dzdo privilege escalation (inconsistent with put_file)",
+        "why": "The sudo-workaround branch is gated on `if _sudo or _su_user:`, but put_file (line 593) uses `if _sudo or _doas or _dzdo or _su_user:`. Downloading a permission-restricted/root-owned file with `_doas` or `_dzdo` therefore skips the temp-copy+chmod workaround and falls through to a direct SFTP getfo as the plain SSH user, which fails to read the file."
+      },
+      {
+        "severity": "Low",
+        "line": 261,
+        "symbol": "SSHConnector._connect",
+        "title": "`if key in (\"username\")` is a substring test, not tuple membership",
+        "why": "`(\"username\")` is a parenthesized string (no trailing comma), so this evaluates `key in \"username\"` (substring check) rather than the intended equality/tuple-membership. It is masked only because no current paramiko kwarg key is a substring of 'username'; it is an incorrect conditional that misclassifies any future key like 'user' or 'name'."
+      },
+      {
+        "severity": "Low",
+        "line": 325,
+        "symbol": "SSHConnector._retry_paramiko_agent_keys",
+        "title": "Empty-string identity_agent leaves SSH_AUTH_SOCK corrupted (not restored)",
+        "why": "If `identity_agent` is an empty string, `isinstance(identity_agent, str)` is True so `os.environ['SSH_AUTH_SOCK']` is overwritten with '', but the finally restore guard `if identity_agent:` is falsy for '' and never restores the original value, leaking an empty SSH_AUTH_SOCK into the rest of the process."
+      }
+    ],
+    "buggy_confirmed": [],
+    "buggy_dropped": [
+      {
+        "severity": "Low",
+        "line": 259,
+        "symbol": "SSHConnector._connect",
+        "title": "Missing comma: `key in (\"username\")` is a substring test, not tuple membership",
+        "why": "The syntactic observation is accurate \u2014 `(\"username\")` is a bare string (no trailing comma), so `key in (\"username\")` is a substring containment test rather than tuple membership. But this produces NO incorrect behavior. The `kwargs` dict iterated at line 258 is a closed, internally-constructed set built entirely by `make_paramiko_kwargs()` (lines 174-215, with `hostname` popped at line 248). The complete reachable keyset is: allow_agent, look_for_keys, the five `_pyinfra_ssh_*` keys, username, port, timeout, password, pkey. Checking each against the intended `key == \"username\"`: `\"username\" in \"username\"` is True (correct \u2014 the single key it must match), and NONE of the other keys is a substring of \"username\" (all correctly False). So the buggy conditional yields identical results to the intended one for every reachable input. The finding concedes it is latent and rests entirely on hypothetical future keys ('name', 'user') that do not exist and cannot be injected \u2014 the keyset is a fixed literal enumeration in the same file, not derived from external/user data. No reachable input produces wrong output; the defect is not provable from the code. Latent style nit, not a behavioral bug \u2014 dropped per default-to-drop."
+      }
+    ],
+    "fixed_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 494,
+        "symbol": "SSHConnector.get_file",
+        "title": "get_file ignores _doas/_dzdo privilege escalation (inconsistent with put_file)",
+        "why": "get_file gates its temp-copy+chmod workaround on `if _sudo or _su_user:` (line 494), whereas put_file uses `if _sudo or _doas or _dzdo or _su_user:` (line 593). _doas/_dzdo are real pyinfra escalation args, proven in this same file by put_file popping _doas/_doas_user/_dzdo/_dzdo_user (lines 581-584). A download invoked with _doas=True (no _sudo/_su_user) therefore takes the else branch and does a direct sftp.getfo as the plain SSH user; a root-only-readable file fails because SFTP performs no escalation. Since get_file reads arguments with .get() (not .pop()), the escalation args are still present, so the cp/chmod would escalate correctly if the branch were entered \u2014 the only defect is the branch condition. Real, reachable functional inconsistency."
+      }
+    ],
+    "fixed_dropped": [
+      {
+        "severity": "Low",
+        "line": 261,
+        "symbol": "SSHConnector._connect",
+        "title": "`if key in (\"username\")` is a substring test, not tuple membership",
+        "why": "Correct observation that `(\"username\")` is a string so this is a substring test, but it produces no wrong behavior. The only keys reachable in this AuthenticationException loop are allow_agent, look_for_keys, the _pyinfra_ssh_* keys, username, port, timeout, password, pkey \u2014 and none except `username` is a substring of \"username\" (port, pkey, password, etc. all fail the substring test). Result is identical to `key == \"username\"`. The finding itself concedes it is masked; no reachable input yields a defect. Latent fragility, not a bug in the current code."
+      },
+      {
+        "severity": "Low",
+        "line": 325,
+        "symbol": "SSHConnector._retry_paramiko_agent_keys",
+        "title": "Empty-string identity_agent leaves SSH_AUTH_SOCK corrupted (not restored)",
+        "why": "The set/restore asymmetry is real (isinstance at line 316 vs truthy `if identity_agent:` at line 325) and would misbehave only when identity_agent == \"\". That input is not reachable: identity_agent comes solely from parse_config (client.py), which yields None or path.expanduser(agent_path); path.expanduser never returns \"\" from a non-empty input, and agent_path = host_config['identityagent'] comes from paramiko's parser whose value token is non-empty, with the only guard excluding 'none'. Nothing produces \"\". The parent client.py (lines 241-250) handles the same value with a symmetric truthy check that no-ops harmlessly on falsy values. Cannot prove the triggering input from the code; default to dropping."
+      }
+    ]
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "project": "pyinfra-dev/pyinfra",
+    "file": "src/pyinfra/connectors/ssh_util.py",
+    "recognized": false,
+    "recog_note": "I recognize the project as pyinfra and the general shape of its paramiko key-loading code (get_private_key, the RSA/ECDSA/Ed25519 try-loop, the pyinfra.is_cli getpass prompt). But I do NOT recognize this exact version: load_key_with_certificate(), _resolve_key_paths(), the OpenSSH certificate-attachment path, the allow_prompt parameter, and the explicit issue #1852 references are patch-specific refactors I cannot map to a memorized canonical upstream. I could not reproduce this file's correct version from memory, so I'd be reasoning from first principles rather than diffing against a known-good baseline. This is library-name-level recognition only, below the bar for recognized=true.",
+    "buggy_raw": [],
+    "fixed_raw": [],
+    "buggy_confirmed": [],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "pyinfra-dev/pyinfra#1858",
+    "project": "pyinfra-dev/pyinfra",
+    "file": "src/pyinfra/connectors/sshuserclient/client.py",
+    "recognized": false,
+    "recog_note": "I recognize the project unmistakably (pyinfra's vendored sshuserclient: 'tobald/sshuserclient' docstring, _pyinfra_ssh_* kwargs, proxyjump SSHClient crediting bitprophet.org). But I do NOT recognize this exact file well enough to reproduce its canonical upstream line-for-line. It's a recent, feature-laden version tied to specific issues (#1569, #1852, #971, IdentityAgent handling) and I only hold a fuzzy memory of the older, simpler form. I could not reliably distinguish upstream-correct code from benchmark-injected changes, so bug-finding here would be first-principles reasoning, not comparison to a memorized correct version.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 422,
+        "symbol": "derive_shorthand",
+        "title": "ProxyJump hop/target port left as a string (missing int() coercion) crashes the direct-tcpip channel",
+        "why": "config[\"port\"] is set to base_config.get(\"port\", 22) without int(), unlike the shorthand :port branch on line 417 which coerces with int(). ssh_config lookup() returns port as a string, so a hop/target whose Port is defined in ssh_config yields config[\"port\"] == \"2222\" (str). That value flows via target_config[\"port\"]/hop_config[\"port\"] into c.gateway(...) -> transport.open_channel(\"direct-tcpip\", (target, target_port), ...), where paramiko serializes the port with Message.add_int() and raises TypeError/struct.error on a non-integer. Result: multi-hop ProxyJump connections fail whenever a hop or target port comes from an ssh_config Port directive (the default 22 stays an int, masking the bug in the common case)."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 422,
+        "symbol": "derive_shorthand",
+        "title": "ProxyJump hop/target port left as a string (missing int() coercion) crashes the direct-tcpip channel",
+        "why": "Confirmed from the code. base_config.get(\"port\", 22) at line 422 omits the int() coercion used everywhere else on ssh_config.lookup() values (line 417 for inline :port, and lines 329/335/338/426). Proven internally: line 329 does int(host_config[\"port\"]) on the exact same ssh_config.lookup() return, so lookup() yields a string. When a hop has a Port directive in ssh_config but no inline :port, config[\"port\"] stays a str (config.update(shorthand_config) at line 427 only overrides it for inline ports). For a multi-hop ProxyJump (2+ hops), the non-last iteration takes target_config = derive_shorthand(ssh_config, hops[i+1]) (line 377), and target_config[\"port\"] flows into c.gateway(...) -> transport.open_channel(\"direct-tcpip\", (target, target_port), ...) where paramiko's Message.add_int() runs struct.pack(\">I\", \"2222\") and raises struct.error/TypeError. Single-hop (last-hop uses int-coerced cfg[\"port\"]) and default-22 cases are safe, which narrows the trigger; the hop-connect path tolerates a str port and is re-coerced, so only the gateway/open_channel path actually crashes."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  },
+  {
+    "bug": "fossasia/eventyay#3789",
+    "project": "fossasia/eventyay",
+    "file": "app/eventyay/api/webhooks.py",
+    "recognized": true,
+    "recog_note": "Clearly recognizable as pretix's webhook service module, rebranded to eventyay: the WebhookEvent/Parametrized* class hierarchy, register_webhook_events signal with dispatch_uid, get_all_webhook_events() global cache, and notify_webhooks/send_webhook Celery task pair with the '9 retries with 2**(2*x) \u2248 72 hours' comment and 410->disable / >299->retry logic are all pretix hallmarks. But this is a diverged fork (eventyay.* action types, SizeKey/MAX_SIZE_CONFIG constants not in stock pretix), so I could NOT reliably reproduce the exact canonical upstream to bug-hunt by diffing \u2014 details like the loop break-vs-continue, retry ceiling, and payload fields I'd verify from first principles rather than memory.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 270,
+        "title": "`break` instead of `continue` when logentry has no organizer silently drops the rest of the batch",
+        "symbol": "notify_webhooks",
+        "why": "notify_webhooks iterates over a batch (list) of log entries. When an entry lacks an organizer, the code `break`s out of the whole loop instead of skipping just that entry. The comment ('We need to know the organizer') indicates per-entry skip intent. Because log entries without an organizer are common, the first such entry aborts processing of ALL remaining entries in the batch, so their webhooks are never dispatched. Should be `continue`."
+      },
+      {
+        "severity": "High",
+        "line": 275,
+        "title": "`break` instead of `continue` when logentry has no webhook_type silently drops the rest of the batch",
+        "symbol": "notify_webhooks",
+        "why": "When a log entry has no notification_type (no webhook for this event type), the loop `break`s instead of skipping the entry. Most log entries have no webhook_type, so the first non-notifiable entry terminates the entire batch loop, and every subsequent notifiable entry is silently skipped and its webhooks are never sent. Should be `continue`."
+      }
+    ],
+    "fixed_raw": [
+      {
+        "severity": "High",
+        "line": 326,
+        "title": "requests.post has no timeout \u2014 unresponsive webhook target hangs the Celery worker indefinitely",
+        "symbol": "send_webhook",
+        "why": "The POST to the arbitrary, user-controlled webhook.target_url omits a timeout, so a slow/hanging endpoint blocks the worker forever. With acks_late=True the task never acks and the worker slot stays occupied. Upstream pretix passes timeout=30. This is a runtime liveness/resource-leak defect."
+      },
+      {
+        "severity": "Medium",
+        "line": 287,
+        "title": "Webhook queryset cache keyed on (organizer, action_type) ignores event_id, delivering to wrong webhooks",
+        "symbol": "notify_webhooks",
+        "why": "The recompute guard checks only _org and _at, but the cached queryset is further filtered by logentry.event_id (lines 298-299). When a batch contains entries with the same organizer+action_type but different event_id, the later entry reuses the earlier entry's event-scoped webhook set, causing missed deliveries and misrouted deliveries."
+      },
+      {
+        "severity": "Low",
+        "line": 119,
+        "title": "event.deleted branch dereferences organizer without a None check, unlike every other build_payload path",
+        "symbol": "ParametrizedEventWebhookEvent.build_payload",
+        "why": "organizer = logentry.content_object is used as organizer.slug (line 122) with no guard, while the normal path guards with 'if not event: return None'. If content_object resolves to None (referenced object deleted), this raises AttributeError and crashes the task instead of returning None."
+      }
+    ],
+    "buggy_confirmed": [
+      {
+        "severity": "High",
+        "line": 270,
+        "symbol": "notify_webhooks",
+        "title": "`break` instead of `continue` when logentry has no organizer aborts the rest of the batch",
+        "why": "notify_webhooks processes a batch (id__in=logentry_ids) and memoizes webhooks per changing organizer/action_type \u2014 proving multi-entry batch intent. `if not logentry.organizer: break` terminates the entire loop on the first organizer-less entry (common for system/global log entries), silently dropping every subsequent entry's webhooks. Comment 'We need to know the organizer' is a per-entry skip condition; fixed/ version uses `continue`."
+      },
+      {
+        "severity": "High",
+        "line": 275,
+        "symbol": "notify_webhooks",
+        "title": "`break` instead of `continue` when logentry has no webhook_type aborts the rest of the batch",
+        "why": "`if not notification_type: break` terminates the batch loop on the first entry whose action_type has no registered webhook event. webhook_type is None for the majority of action types (only ~20 are registered), so a non-notifiable entry preceding notifiable ones silences their webhooks entirely. Comment says 'Ignore' (skip this entry); fixed/ version uses `continue`."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [
+      {
+        "severity": "High",
+        "line": 326,
+        "symbol": "send_webhook",
+        "title": "requests.post has no timeout \u2014 a slow/hanging webhook target pins the Celery worker indefinitely",
+        "why": "Provable from the code: requests.post(webhook.target_url, json=payload, allow_redirects=False) omits timeout, and the requests library applies no implicit default, so a target that accepts the connection but never responds blocks forever. target_url is organizer-controlled, and the task decorator sets acks_late=True, so the message is not acked while the task hangs and the worker prefetch slot stays occupied. Trigger (a slow/black-hole endpoint) is trivially reachable and causation is certain; enough such targets starve the webhook worker pool. Upstream pretix passes timeout=30. Real liveness/resource-exhaustion defect."
+      }
+    ],
+    "fixed_dropped": [
+      {
+        "severity": "Medium",
+        "line": 287,
+        "symbol": "notify_webhooks",
+        "title": "Webhook queryset cache keyed on (organizer, action_type) ignores event_id",
+        "why": "The code observation is accurate \u2014 event_id filters the queryset (298-299) but is absent from the recompute guard (287), so within a run of same-org/same-action_type entries the first entry's event_id filter is reused. But the wrong-delivery outcome requires a single notify_webhooks batch containing >=2 entries with the same organizer AND action_type but different event_id. The dominant call path is single-entry (notify_webhooks(pk)), and bulk log flows are event-scoped (constant event_id); no caller producing a mixed-event batch is demonstrable from this file. This is unchanged long-standing upstream (pretix) code, and any effect is confined to one organizer's own webhooks. Cannot prove a live defect from the code \u2192 dropped."
+      },
+      {
+        "severity": "Low",
+        "line": 119,
+        "symbol": "ParametrizedEventWebhookEvent.build_payload",
+        "title": "event.deleted branch dereferences content_object as organizer.slug without a None check",
+        "why": "The asymmetry with the normal path (if not event: return None) is real, but the NPE is unreachable. The branch is intentionally designed so content_object = the Organizer (the deleted event's slug is read from parsed_data precisely because the event object is gone), so content_object is non-None in normal operation. notify_webhooks already confirmed logentry.organizer is truthy at dispatch, which for this branch means content_object is an Organizer. The only way to None it before send_webhook runs is deleting the organizer, which cascade/PROTECT-removes the WebHook (org FK), so WebHook.objects.get(id=webhook_id) raises DoesNotExist before build_payload is ever called. Guarded/shadowed elsewhere \u2192 dropped."
+      }
+    ]
+  },
+  {
+    "bug": "pypa/pipx#1860",
+    "project": "pypa/pipx",
+    "file": "src/pipx/package_specifier.py",
+    "recognized": false,
+    "recog_note": "I recognize the project with certainty \u2014 this is pipx's src/pipx/package_specifier.py (the ParsedPackage dataclass, _parse_specifier, parse_specifier_for_install/metadata/upgrade, fix_package_name are all distinctive pipx code). But I do NOT have a precise enough memory of this specific file's canonical upstream contents to reproduce it line-for-line and diff against it to locate an injected bug. I can recall the module's structure and purpose, not the exact implementation details (e.g. the precise regex in _split_path_extras, the exact _LOCAL_VCS_SCHEMES handling, or the constraint-path-resolution loop in parse_specifier_for_install). Any bug-finding here would come from first-principles reasoning about the logic, not from comparison to a memorized correct version. So recognized=false per the strict criterion.",
+    "buggy_raw": [
+      {
+        "severity": "High",
+        "line": 183,
+        "symbol": "parse_specifier_for_install",
+        "title": "Unconditional `break` resolves only the first `-c`/`--constraint` path, leaving additional constraint files unresolved",
+        "why": "The loop over `pip_args` is supposed to convert every local constraint-file path to an absolute path (pip's cwd may differ from pipx's). The `break` at line 183 sits in the loop body outside the if/elif, so after the first arg matching `-c`/`--constraint` is processed the loop terminates. With multiple constraint options (e.g. `[\"-c\", \"a.txt\", \"-c\", \"b.txt\"]`), only `a.txt` is resolved to an absolute path; `b.txt` stays relative and pip will fail to locate it when run from a different working directory. The loop must continue iterating over all args (remove the break) so every constraint path is resolved."
+      }
+    ],
+    "fixed_raw": [],
+    "buggy_confirmed": [
+      {
+        "severity": "Medium",
+        "line": 183,
+        "symbol": "parse_specifier_for_install",
+        "title": "Unconditional `break` resolves only the first `-c`/`--constraint` path, leaving additional constraint files unresolved",
+        "why": "Non-matching pip_args hit `continue`, so the `break` on line 183 is reached only after the first arg starting with `-c`/`--constraint` is processed, terminating the loop. With multiple constraint options (e.g. [\"-c\",\"a.txt\",\"-c\",\"b.txt\"]) only a.txt is resolved to an absolute path; b.txt stays relative and pip fails to locate it when its cwd differs from pipx's. Confirmed by the fixed version, which removes the break and lets the loop iterate over every arg."
+      }
+    ],
+    "buggy_dropped": [],
+    "fixed_confirmed": [],
+    "fixed_dropped": []
+  }
+]

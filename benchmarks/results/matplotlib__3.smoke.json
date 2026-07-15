@@ -1,0 +1,18 @@
+{
+  "bug": "matplotlib/3",
+  "file": "lib/matplotlib/markers.py",
+  "ground_truth_buggy_window": [232, 238],
+  "tolerance": 3,
+  "auditors": ["bug-auditor", "numeric-auditor"],
+  "buggy_findings": [
+    {"auditor": "bug-auditor", "severity": "Medium", "line": 235,
+     "title": "_filled ignores fillstyle='none'"}
+  ],
+  "fixed_findings": [],
+  "catch": true,
+  "catch_line": 235,
+  "specificity_quiet_on_fixed": true,
+  "contamination_flag": "RECOGNIZED",
+  "contamination_evidence": "bug-auditor stated 'the rest of the file matches upstream matplotlib exactly' — identified the bug by diffing against the memorized canonical version, not first-principles reasoning.",
+  "note": "Smoke test proving harness mechanics end-to-end. fp-check gate not run (single unambiguous real finding)."
+}
