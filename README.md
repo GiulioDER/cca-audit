@@ -10,6 +10,18 @@ Every AI reviewer has the same problem: it hallucinates. It flags a null-deref t
 
 One command — `/audit-fix` — runs specialized auditors in parallel on your changed code, deduplicates their findings, **verifies each one against the real code (anti-hallucination gate)**, auto-fixes what's confirmed, re-verifies, checks the fix introduced no regression, and gates the result through an architect review. Any language, auto-tiered by how risky the diff is.
 
+## Field results — real bugs, real repos
+
+Not a rigged demo. This is a bug CCA's [hunt mode](#hunt-mode--audit-code-you-didnt-write) found in third-party code it never wrote:
+
+| Repo | Bug it found | Impact | Evidence |
+|------|--------------|--------|----------|
+| **[Polymarket/py-sdk](https://github.com/Polymarket/py-sdk)** &nbsp;·&nbsp; ⭐ 70, active | Client-side price validation checked decimal **places**, not **tick-grid membership**. On a `0.005` / `0.0025` half-tick market an off-grid price like `0.007` passed validation, got EIP-712 **signed**, and could only be rejected downstream by the exchange. Present in *both* the limit and market price paths. | Silent rejection of real-money orders | fix **[merged — PR #1](https://github.com/GiulioDER/py-sdk/pull/1)** · reported upstream: **[issue #162](https://github.com/Polymarket/py-sdk/issues/162)** |
+
+**How it got there:** `/audit-fix hunt` surfaced 4 candidates; the adversarial 2-of-3 verifier **killed the flashiest one** (already fixed in an open upstream PR) and one deliberate-by-design finding, leaving a single bug that survived scrutiny — then reproduced it against **~23,000 exhaustive price/tick cases** (zero false accepts, zero false rejects) *before a line was written*.
+
+> **Straight about the links:** upstream `py-sdk` accepts issues but locks pull requests to collaborators, so the fix is merged in a **fork** (PR #1) and the bug is filed **upstream as an issue** (#162) — not merged into Polymarket. Both are live links; check them.
+
 ## See it work
 
 We planted **one subtle, money-losing bug** in a position sizer — `risk_limit_bps / 100` where basis points require `/ 10_000`, a **100× over-size** that a green test suite sails right past — plus **three false-positive traps** designed to bait a lazy reviewer (a guarded division, a cross-file guard, an off-diff config key).
