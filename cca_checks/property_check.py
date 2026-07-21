@@ -22,11 +22,17 @@ from .properties import MAX_EXAMPLES
 TIMEOUT_S = 120
 SOURCE = "hypothesis"
 
-# Hypothesis prints the shrunk input under this banner, up to a blank line.
-_FALSIFYING = re.compile(r"Falsifying example:.*?(?=\n\s*\n|\Z)", re.S)
+# Hypothesis prints the shrunk input under this banner, up to a blank line or the
+# start of a pytest separator/summary block. Terminating on the separator matters:
+# pytest's grouped-exception output has no blank line before the summary, so a
+# bare `(?=\n\s*\n|\Z)` runs to end-of-output and swallows the short test summary
+# and timing footer into the evidence.
+_FALSIFYING = re.compile(
+    r"Falsifying example:.*?(?=\n\s*\n|\n=+[ =]|\n-+[ -]|\n\+-+|\Z)", re.S)
 # Our own violation message, which names the property and the required relation.
 _PROPERTY_LINE = re.compile(r"^.*PROPERTY .+ violated \|.*$", re.M)
 _NO_HYPOTHESIS = "No module named 'hypothesis'"
+_NO_PYTEST = "No module named pytest"
 
 
 def _uncertain(finding_id: str, why: str) -> Verdict:
@@ -56,6 +62,12 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
     if _NO_HYPOTHESIS in out:
         return _uncertain(finding_id,
                           "property check unavailable (hypothesis not installed); escalated")
+    # Same reasoning for pytest itself: `python -m pytest` with pytest absent exits
+    # rc=1, which is the returncode this checker reads as "a property failed". The
+    # OSError branch above cannot catch it because the interpreter always launches.
+    if _NO_PYTEST in out:
+        return _uncertain(finding_id,
+                          "property check unavailable (pytest not installed); escalated")
 
     rc = proc.returncode
     if rc == 0:
@@ -85,6 +97,21 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
     # a helper can no longer reach CONFIRMED. That is the anti-tautology
     # guarantee (see properties.py's module docstring) enforced at the
     # verdict boundary, not just at authoring time.
+    # Hypothesis reports multiple bugs from one @given test by default
+    # (report_multiple_bugs=True), emitting one banner per distinct exception. The
+    # banner search and the PROPERTY search below are independent first-matches
+    # over the whole output, so with more than one banner they can pair bug A's
+    # shrunk input with bug B's property line -- yielding a CONFIRMED whose named
+    # counterexample does not violate the declared property, and which a downstream
+    # agent cannot reproduce. We cannot bind them reliably after the fact, so
+    # ambiguity escalates rather than guessing a pairing.
+    if len(_FALSIFYING.findall(out)) > 1:
+        return _uncertain(finding_id,
+                          f"multiple falsifying examples reported; the property "
+                          f"violation cannot be bound to a specific counterexample "
+                          f"(likely an unrelated exception alongside the property "
+                          f"failure); escalated:\n{tail}")
+
     prop = _PROPERTY_LINE.search(out)
     if not prop:
         return _uncertain(finding_id,

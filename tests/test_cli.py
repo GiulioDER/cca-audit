@@ -7,6 +7,21 @@ from cca_checks import pyright_check as pc
 from cca_checks.claim import make_verdict
 
 
+@pytest.fixture(autouse=True)
+def real_claim_files(tmp_path, monkeypatch):
+    """Give every CLI test a real file at a real line to point at.
+
+    The CLI now refuses a claim coordinate it cannot settle -- a missing file, a
+    directory, or a line past EOF -- because no diagnostic can ever match such a
+    coordinate and the checkers would read that silence as evidence and emit a
+    confident FALSE_POSITIVE. These tests exercise verdict plumbing with mocked
+    checkers, so the paths they name have to exist for the coordinate to be usable.
+    """
+    monkeypatch.chdir(tmp_path)
+    for name in ("svc.py", "s.py", "app.py"):
+        (tmp_path / name).write_text("x = 1\n" * 50, encoding="utf-8")
+
+
 @pytest.fixture
 def no_pyright(monkeypatch):
     """Make run_pyright report the tool as unavailable, so the CLI never shells out."""

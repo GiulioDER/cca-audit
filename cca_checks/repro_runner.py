@@ -3,6 +3,15 @@ import sys
 from typing import Optional
 from .claim import Verdict, make_verdict
 
+# `python -m pytest` with pytest absent exits rc=1 -- the SAME code as a genuine
+# test failure -- and prints this to stderr. The OSError branch below cannot catch
+# it, because the interpreter itself always launches. Left unchecked, a machine
+# without pytest reports "the repro failed", and since confirmation only requires
+# the predicted error string to appear anywhere in the output, a claim predicting
+# e.g. "No module named" is CONFIRMED by the absence of pytest. An environment gap
+# must never manufacture evidence.
+NO_PYTEST = "No module named pytest"
+
 # WARNING: run_repro executes the target's test code. pytest imports conftest.py
 # during collection, so running this against a repo you do not trust executes
 # that repo's code with your privileges and environment. Do not point it at
@@ -10,7 +19,11 @@ from .claim import Verdict, make_verdict
 def run_repro(finding_id: str, test_path: str, expected_error: Optional[str]) -> Verdict:
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-xq", "--", test_path],
+            # -p no:cacheprovider: keep the checker side-effect free. Without it
+            # pytest writes .pytest_cache/ into the repo under audit, dirtying the
+            # very tree the pipeline is reviewing (and failing on a read-only mount).
+            [sys.executable, "-m", "pytest", "-xq", "-p", "no:cacheprovider",
+             "--", test_path],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=120,
         )
@@ -23,6 +36,12 @@ def run_repro(finding_id: str, test_path: str, expected_error: Optional[str]) ->
                             "repro could not run (pytest unavailable); escalated", "pytest")
     out = (proc.stdout or "") + (proc.stderr or "")
     tail = out[-800:]
+    # Checked before the returncode, for the same reason property_check checks for
+    # a missing hypothesis first: a missing dependency surfaces as an ordinary
+    # rc=1, which is indistinguishable from the result we are looking for.
+    if NO_PYTEST in out:
+        return make_verdict(finding_id, "UNCERTAIN",
+                            "repro could not run (pytest not installed); escalated", "pytest")
     rc = proc.returncode
     # pytest returncodes: 0=all passed, 1=tests failed, 2=interrupted,
     # 3=internal error, 4=usage error, 5=no tests collected. Only rc==1 is a

@@ -93,8 +93,16 @@ run TWO phases in order:
   @cca_settings
   @given(mu=st.floats(-0.5, 0.5), vol=st.floats(0.01, 1.0), t=st.floats(0.01, 5.0))
   def test_property(mu, vol, t):
-      assert_monotonic_in(<target>, (mu, vol, t), index=1, direction="decreasing", delta=0.1)
+      assert_monotonic_in(<target>, (mu, vol, t), index=1, direction="decreasing",
+                          delta=0.1, domain_hi=1.0, strict=True)
   ```
+
+  `domain_hi` MUST carry the upper bound of the probed argument's declared domain (here
+  `vol`'s `1.0`). Without it the helper evaluates at `vol + delta = 1.1` — outside the domain
+  the strategy generates from — so a function that is correct on `[0.01, 1.0]` can be
+  "falsified" at an input production never produces. Pass `strict=True` when the claim is that
+  a specific term *moves* the result: the default non-strict comparison passes on a term that
+  was dropped entirely, which is one of the defects this check exists to catch.
 
   Second template, for the two-function shape (`assert_round_trips`, whose `properties:` entry
   carries `forward`/`inverse`/`value` instead of `target`/`args`/`index`):
@@ -107,8 +115,14 @@ run TWO phases in order:
   @cca_settings
   @given(amount=st.floats(0.01, 1000000.0))
   def test_property(amount):
-      assert_round_trips(<forward>, <inverse>, amount)
+      assert_round_trips(<forward>, <inverse>, amount, quantum=0.01)
   ```
+
+  `quantum` is the granularity the forward direction lands on, and it is REQUIRED for any
+  conversion that quantizes — money to integer minor units, token decimals, tick grids. These
+  are lossy by design (`1.625 → 162 cents → 1.62`), so omitting it falsifies a CORRECT
+  converter within a few examples and the resulting `CONFIRMED` is binding. Omit it only for an
+  exact, information-preserving round trip.
 
   **Numeric verdicts are asymmetric, the mirror of taint.** The checker never returns
   `FALSE_POSITIVE` for a `numeric` claim: properties holding across a bounded search is not proof

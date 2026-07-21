@@ -3,6 +3,13 @@
 #          so the finding's premise must NOT be refuted.
 # These are plain pattern rules, never taint rules: this file answers only
 # "does a sink of class C occur here".
+#
+# Soundness note. Absence from BOTH tiers is the sole trigger for a FALSE_POSITIVE,
+# so this catalog is load-bearing in a way a best-effort list normally is not: every
+# sink missing from it converts a real finding into a decisive refutation. The LOOSE
+# tier therefore is not a second list of known sinks -- it is a name-shaped net whose
+# job is to make an UNRECOGNISED call escalate rather than refute. When adding a
+# sink, prefer widening the loose regex over appending one more strict pattern.
 rules:
   - id: sink-strict-sql
     languages: [python]
@@ -13,6 +20,19 @@ rules:
           - pattern: $C.execute($Q, ...)
           - pattern: $C.executemany($Q, ...)
           - pattern: $C.exec_driver_sql(...)
+          - pattern: pandas.read_sql(...)
+          - pattern: pandas.read_sql_query(...)
+          - pattern: pd.read_sql(...)
+          - pattern: pd.read_sql_query(...)
+          - pattern: $C.read_sql(...)
+          - pattern: $C.read_sql_query(...)
+          - pattern: psycopg2.extras.execute_values(...)
+          - pattern: psycopg2.extras.execute_batch(...)
+          - pattern: $C.execute_values(...)
+          - pattern: $C.execute_batch(...)
+          - pattern: sqlalchemy.text(...)
+          - pattern: $C.fetchrow(...)
+          - pattern: $C.fetchval(...)
 
   - id: sink-loose-sql
     languages: [python]
@@ -20,10 +40,16 @@ rules:
     message: possible unvetted sql sink
     patterns:
       - pattern-either:
-          - pattern: $C.sql(...)
-          - pattern: $C.raw(...)
-          - pattern: $C.executescript(...)
-          - pattern: $C.execute_query(...)
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          # Deliberately excludes bare `query`/`fetch`/`select`: those are the ORM
+          # accessor names, and an ORM call that never builds raw SQL is the canonical
+          # false premise this checker exists to refute (see
+          # tests/acceptance/test_taint_suite.py). Widening onto them would make the
+          # refutation path unreachable, trading a false refutation for a useless tool.
+          regex: (?i)^(.*\.)?(sql|raw|executescript|execute_query|execute_sql|run_query|read_sql.*|exec_driver_sql)$
 
   - id: sink-strict-command
     languages: [python]
@@ -33,20 +59,49 @@ rules:
       - pattern-either:
           - pattern: os.system(...)
           - pattern: os.popen(...)
+          # shell=True only. A `shell=$X` metavariable would also match the
+          # canonical SAFE form `shell=False`, reporting it as a vetted dangerous
+          # sink -- a meaning change, not a widening. The variable-flag case
+          # (`shell=flag`) belongs in the loose tier below, where "we cannot tell"
+          # escalates instead of asserting.
           - pattern: subprocess.run(..., shell=True, ...)
           - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: subprocess.check_call(..., shell=True, ...)
+          - pattern: subprocess.check_output(..., shell=True, ...)
           - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: subprocess.getoutput(...)
+          - pattern: subprocess.getstatusoutput(...)
           - pattern: asyncio.create_subprocess_shell(...)
+          - pattern: os.execv(...)
+          - pattern: os.execve(...)
+          - pattern: os.execvp(...)
+          - pattern: os.execvpe(...)
+          - pattern: os.execl(...)
+          - pattern: os.execle(...)
+          - pattern: os.execlp(...)
+          - pattern: os.spawnv(...)
+          - pattern: os.spawnve(...)
+          - pattern: os.spawnl(...)
 
   - id: sink-loose-command
     languages: [python]
     severity: INFO
     message: possible unvetted command sink
-    patterns:
-      - pattern-either:
-          - pattern: $C.spawn(...)
-          - pattern: $C.shell(...)
-          - pattern: $C.check_output(...)
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $F(...)
+              - pattern: $C.$F(...)
+          - metavariable-regex:
+              metavariable: $F
+              regex: (?i)^(.*\.)?(system|popen[0-9]?|spawn.*|shell.*|exec[lv].*|getoutput|getstatusoutput|check_call|check_output|run_command|run_shell)$
+      # A non-literal shell flag: whether it is True cannot be decided statically,
+      # so it must escalate rather than be asserted or ignored.
+      - pattern: subprocess.run(..., shell=$X, ...)
+      - pattern: subprocess.call(..., shell=$X, ...)
+      - pattern: subprocess.check_call(..., shell=$X, ...)
+      - pattern: subprocess.check_output(..., shell=$X, ...)
+      - pattern: subprocess.Popen(..., shell=$X, ...)
 
   - id: sink-strict-code_exec
     languages: [python]
@@ -60,7 +115,14 @@ rules:
           - pattern: pickle.load(...)
           - pattern: marshal.loads(...)
           - pattern: marshal.load(...)
+          - pattern: cPickle.loads(...)
+          - pattern: cPickle.load(...)
+          - pattern: dill.loads(...)
+          - pattern: dill.load(...)
+          - pattern: compile(...)
           - pattern: yaml.load(...)
+          - pattern: yaml.unsafe_load(...)
+          - pattern: yaml.full_load(...)
 
   - id: sink-loose-code_exec
     languages: [python]
@@ -68,8 +130,15 @@ rules:
     message: possible unvetted code-execution sink
     patterns:
       - pattern-either:
-          - pattern: $C.eval(...)
-          - pattern: $C.loads(...)
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          # `load` (bare) and `compile` are excluded: they match json.load,
+          # torch.load and model.eval-adjacent APIs common in ordinary code, and a
+          # loose hit blocks refutation. `eval`/`loads` were already on this tier
+          # before; the yaml variants are the genuine additions.
+          regex: (?i)^(.*\.)?(eval|loads|unsafe_load|full_load|unserialize|deserialize)$
 
   - id: sink-strict-path
     languages: [python]
@@ -78,12 +147,27 @@ rules:
     patterns:
       - pattern-either:
           - pattern: open(...)
+          - pattern: io.open(...)
           - pattern: os.remove(...)
           - pattern: os.unlink(...)
+          - pattern: os.rename(...)
+          - pattern: os.replace(...)
+          - pattern: os.rmdir(...)
+          - pattern: os.mkdir(...)
+          - pattern: os.makedirs(...)
           - pattern: shutil.rmtree(...)
+          - pattern: shutil.copy(...)
+          - pattern: shutil.copy2(...)
+          - pattern: shutil.copyfile(...)
+          - pattern: shutil.move(...)
           - pattern: tarfile.open(...).extractall(...)
           - pattern: zipfile.ZipFile(...).extractall(...)
           - pattern: $A.extractall(...)
+          # pathlib: the sink is the .open() on a constructed Path, which the bare
+          # `open(...)` pattern above does not reach.
+          - pattern: pathlib.Path(...).open(...)
+          - pattern: Path(...).open(...)
+          - pattern: $C.joinpath(...).open(...)
 
   - id: sink-loose-path
     languages: [python]
@@ -91,7 +175,15 @@ rules:
     message: possible unvetted filesystem sink
     patterns:
       - pattern-either:
-          - pattern: $C.read_text(...)
-          - pattern: $C.write_text(...)
-          - pattern: $C.read_bytes(...)
-          - pattern: $C.unlink(...)
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          # Deliberately excludes `replace`, `copy`, `move`, `touch` and bare
+          # `open`: those are str/dict/list method names, so including them made
+          # `s.replace("-","_")` and `d.copy()` read as possible filesystem sinks.
+          # Since ANY loose hit in the enclosing span blocks a refutation, that
+          # made the path-class FALSE_POSITIVE unreachable on ordinary Python --
+          # trading a false refutation for a checker that can never refute at all.
+          # Bare `open(...)` is already covered on the strict tier.
+          regex: (?i)^(.*\.)?(read_text|write_text|read_bytes|write_bytes|unlink|rmtree|rmdir|makedirs|copyfile|copytree|extractall|sendfile)$
