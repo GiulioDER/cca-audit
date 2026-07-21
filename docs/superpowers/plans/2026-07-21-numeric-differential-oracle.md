@@ -18,7 +18,7 @@
 - Evidence strings for non-decisive outcomes must end in `"; escalated"`, matching `repro_runner.py`.
 - `MAX_EXAMPLES = 200`, `TIMEOUT_S = 120`.
 - Subprocess invocation must use `sys.executable` (never bare `"python"`), pass `--` before any path, set `encoding="utf-8"`, and set a timeout. This is locked in by test, mirroring `tests/test_repro_runner.py:47`.
-- Agent markdown exists in **two copies** that must never drift: `claude-code/agents/` and `.claude/agents/`. Every agent edit applies to both.
+- Agent markdown exists in **two copies** that must never drift on disk: `claude-code/agents/` and `.claude/agents/`. Every agent edit applies to both. **Only `claude-code/` is tracked in git** — `.claude/` is the local dogfooding mirror, generated from `claude-code/` by `install.sh`, and must stay untracked. Sync it, do not commit it.
 - Do not modify `cca_checks/claim.py`.
 - Commit after every task.
 
@@ -873,7 +873,7 @@ Run, in an environment where `hypothesis` is NOT installed:
 cd /c/Users/gde00/Documents/cca-audit
 python -m pytest tests/acceptance/test_numeric_suite.py -q
 ```
-Expected: `4 skipped` — never an error, never a failure.
+Expected: `1 skipped` — a module-level `pytest.importorskip` skips the whole module as one unit, so the count is 1, not one-per-test. Never an error, never a failure.
 
 - [ ] **Step 3: Install the extra**
 
@@ -1039,7 +1039,7 @@ Expected: `NO DRIFT`
 
 ```bash
 cd /c/Users/gde00/Documents/cca-audit
-git add claude-code/agents claude-code/commands .claude
+git add claude-code/agents claude-code/commands   # NOT .claude/ — it is an untracked local mirror
 git commit -m "feat(agents): numeric claim type, properties block, DEEP artifact rule"
 ```
 
