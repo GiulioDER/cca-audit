@@ -703,6 +703,7 @@ git commit -m "feat(cli): numeric subcommand + optional hypothesis extra"
 **Files:**
 - Create: `tests/fixtures/numeric/drift.py`
 - Create: `tests/fixtures/numeric/props_violated.py`
+- Create: `tests/fixtures/numeric/props_fixed.py`
 - Create: `tests/fixtures/numeric/props_hold.py`
 - Create: `tests/acceptance/test_numeric_suite.py`
 
@@ -722,9 +723,6 @@ variance term enters with the wrong sign. The expression is well formed and the
 names are right; only the meaning is inverted, which is exactly what reads as
 correct on review.
 """
-
-CORRECT_SIGN = -0.5
-BUGGY_SIGN = +0.5
 
 
 def expected_log_growth(mu: float, vol: float, t: float) -> float:
@@ -765,6 +763,34 @@ def test_growth_decreases_with_volatility(mu, vol, t):
                         direction="decreasing", delta=0.1)
 ```
 
+Create `tests/fixtures/numeric/props_fixed.py` — the same property against the corrected twin:
+
+```python
+import os
+import sys
+
+from hypothesis import given, strategies as st
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+from cca_checks.hypo import cca_settings              # noqa: E402
+from cca_checks.properties import assert_monotonic_in  # noqa: E402
+from drift import expected_log_growth_fixed          # noqa: E402
+
+
+@cca_settings
+@given(
+    mu=st.floats(-0.5, 0.5),
+    vol=st.floats(0.01, 1.0),
+    t=st.floats(0.01, 5.0),
+)
+def test_growth_decreases_with_volatility(mu, vol, t):
+    # Identical property, correct implementation. Proves the property discriminates
+    # between the two rather than failing on everything it is pointed at.
+    assert_monotonic_in(expected_log_growth_fixed, (mu, vol, t), index=1,
+                        direction="decreasing", delta=0.1)
+```
+
 Create `tests/fixtures/numeric/props_hold.py` — the blindness probe:
 
 ```python
@@ -800,6 +826,7 @@ from cca_checks.property_check import run_properties
 pytest.importorskip("hypothesis", reason="numeric extra not installed")
 
 VIOLATED = "tests/fixtures/numeric/props_violated.py"
+FIXED = "tests/fixtures/numeric/props_fixed.py"
 HOLD = "tests/fixtures/numeric/props_hold.py"
 
 
@@ -809,6 +836,14 @@ def test_sign_trap_is_confirmed_with_a_falsifying_example():
     assert v.source == "hypothesis"
     assert "Falsifying example" in v.evidence
     assert "monotonic" in v.evidence
+
+
+def test_the_corrected_twin_is_not_confirmed():
+    # The same property against the fixed implementation. A checker that
+    # confirmed both would be discriminating nothing.
+    v = run_properties("NUM-ACC-3", FIXED)
+    assert v.verdict == "UNCERTAIN"
+    assert v.verdict != "CONFIRMED"
 
 
 def test_confirmation_is_reproducible():
@@ -838,7 +873,7 @@ Run, in an environment where `hypothesis` is NOT installed:
 cd /c/Users/gde00/Documents/cca-audit
 python -m pytest tests/acceptance/test_numeric_suite.py -q
 ```
-Expected: `3 skipped` — never an error, never a failure.
+Expected: `4 skipped` — never an error, never a failure.
 
 - [ ] **Step 3: Install the extra**
 
@@ -858,7 +893,7 @@ Run:
 cd /c/Users/gde00/Documents/cca-audit
 python -m pytest tests/acceptance/test_numeric_suite.py -q
 ```
-Expected: PASS, 3 passed
+Expected: PASS, 4 passed
 
 Then the full suite, to confirm nothing regressed:
 ```bash
