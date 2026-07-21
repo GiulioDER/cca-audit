@@ -156,3 +156,38 @@ def test_sink_class_is_ignored_for_non_taint_claims(capsys, no_pyright):
                        "--finding-id", "D", "--file", "s.py", "--line", "1"])
     assert out["verdict"] == "UNCERTAIN"
     assert out["source"] == "llm"
+
+
+def test_numeric_subcommand_emits_a_verdict(capsys, monkeypatch):
+    monkeypatch.setattr(cli, "run_properties",
+                        lambda fid, test: make_verdict(fid, "CONFIRMED",
+                                                       "property violated:\nFalsifying example: f(x=1.0)",
+                                                       "hypothesis"))
+    out = run(capsys, ["numeric", "--finding-id", "NUM-1", "--test", "t_NUM-1_props.py"])
+    assert out["finding_id"] == "NUM-1"
+    assert out["verdict"] == "CONFIRMED"
+    assert out["source"] == "hypothesis"
+
+
+def test_numeric_subcommand_passes_the_test_path_through(capsys, monkeypatch):
+    captured = {}
+
+    def spy(fid, test):
+        captured["fid"] = fid
+        captured["test"] = test
+        return make_verdict(fid, "UNCERTAIN", "stub; escalated", "hypothesis")
+
+    monkeypatch.setattr(cli, "run_properties", spy)
+    run(capsys, ["numeric", "--finding-id", "NUM-2", "--test", "props.py"])
+    assert captured == {"fid": "NUM-2", "test": "props.py"}
+
+
+def test_numeric_requires_a_test_path():
+    with pytest.raises(SystemExit):
+        cli.main(["numeric", "--finding-id", "NUM-3"])
+
+
+def test_numeric_is_not_a_check_claim_type():
+    # `check` settles a static claim at a file:line; `numeric` executes a test
+    # file. Conflating them would put an unusable --file/--line on the numeric path.
+    assert "numeric" not in cli.CLAIM_TYPES
