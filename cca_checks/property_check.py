@@ -75,8 +75,24 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
                           f"property test failed without a falsifying example "
                           f"(not a property violation); escalated:\n{tail}")
 
+    # Hypothesis prints "Falsifying example:" for ANY exception raised inside
+    # a @given test -- not just PropertyViolation. An incidental crash (e.g. a
+    # ZeroDivisionError in the code under test) shrinks and banners exactly
+    # like a real property violation, so the banner alone is not sufficient
+    # evidence. Only the six helpers in cca_checks/properties.py emit the
+    # "PROPERTY ... violated" line, so requiring BOTH matches also enforces
+    # that vocabulary: an auditor who writes a raw `assert` instead of calling
+    # a helper can no longer reach CONFIRMED. That is the anti-tautology
+    # guarantee (see properties.py's module docstring) enforced at the
+    # verdict boundary, not just at authoring time.
     prop = _PROPERTY_LINE.search(out)
+    if not prop:
+        return _uncertain(finding_id,
+                          f"falsifying example found, but the failure is not "
+                          f"a declared property violation (no 'PROPERTY ... "
+                          f"violated' line) -- likely an unrelated exception "
+                          f"in the code under test; escalated:\n{tail}")
+
     evidence = "property violated:\n" + example.group(0).strip()
-    if prop:
-        evidence += "\n" + prop.group(0).strip()
+    evidence += "\n" + prop.group(0).strip()
     return make_verdict(finding_id, "CONFIRMED", evidence, SOURCE)

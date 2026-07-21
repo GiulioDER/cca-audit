@@ -8,11 +8,24 @@ from cca_checks.property_check import run_properties
 
 FALSIFYING = """
 E   cca_checks.properties.PropertyViolation: PROPERTY monotonic violated | inputs=(0.1, 0.3) | observed=(0.145, 0.26) | required=result non-increasing in arg 1
+E
+E   Falsifying example: test_growth(
+E       mu=0.1,
+E       vol=0.3,
+E   )
+"""
 
-Falsifying example: test_growth(
-    mu=0.1,
-    vol=0.3,
-)
+# Real pytest output for a @given test that raises an exception unrelated to
+# the declared property (e.g. a ZeroDivisionError deep in the code under
+# test). Hypothesis still shrinks and prints the banner -- this must NOT
+# confirm, since there is no "PROPERTY ... violated" line anywhere.
+FALSIFYING_UNRELATED_EXCEPTION = """
+E   ZeroDivisionError: float division by zero
+E
+E   Falsifying example: test_growth(
+E       mu=0.0,
+E       vol=0.0,
+E   )
 """
 
 
@@ -77,6 +90,22 @@ def test_failure_without_a_falsifying_example_is_uncertain(monkeypatch):
     assert "without a falsifying example" in v.evidence
 
 
+def test_falsifying_banner_without_property_line_is_uncertain(monkeypatch):
+    # Hypothesis prints "Falsifying example:" for ANY exception raised inside
+    # a @given test, not only PropertyViolation -- an unrelated crash (e.g. a
+    # ZeroDivisionError in the code under test) shrinks and banners exactly
+    # like a real violation. Without the "PROPERTY ... violated" line, this
+    # must NOT confirm; that would certify a numeric finding on the basis of
+    # an incidental exception that never touched the declared property.
+    monkeypatch.setattr(subprocess, "run",
+                        fake(1, FALSIFYING_UNRELATED_EXCEPTION))
+    v = run_properties("NUM-1", "t.py")
+    assert v.verdict == "UNCERTAIN"
+    assert v.verdict != "CONFIRMED"
+    assert "not a declared property violation" in v.evidence
+    assert "ZeroDivisionError" in v.evidence
+
+
 def test_timeout_escalates_to_uncertain(monkeypatch):
     def boom(*a, **k):
         raise subprocess.TimeoutExpired(cmd="pytest", timeout=120)
@@ -97,7 +126,13 @@ def test_launch_failure_escalates_to_uncertain(monkeypatch):
 
 def test_false_positive_is_unreachable(monkeypatch):
     # The asymmetry is the contract: this checker may never refute a finding.
-    for rc, out in [(0, "passed"), (1, FALSIFYING), (1, "assert 1 == 2"), (5, "no tests")]:
+    for rc, out in [
+        (0, "passed"),
+        (1, FALSIFYING),
+        (1, "assert 1 == 2"),
+        (1, FALSIFYING_UNRELATED_EXCEPTION),
+        (5, "no tests"),
+    ]:
         monkeypatch.setattr(subprocess, "run", fake(rc, out))
         assert run_properties("NUM-1", "t.py").verdict != "FALSE_POSITIVE"
 
