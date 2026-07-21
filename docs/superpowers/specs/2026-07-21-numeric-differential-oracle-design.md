@@ -43,7 +43,7 @@ A sign error is caught by exactly this: `assert_limit` on a degenerate case (vol
 
 ## Components
 
-Three new files, two modified, mirroring the existing taint/repro shape.
+Four new files, two modified, mirroring the existing taint/repro shape.
 
 ### `cca_checks/properties.py` (new)
 
@@ -62,6 +62,14 @@ carrying the property name, the falsifying input, and the observed vs required v
 Every helper takes the **intended** relation as an explicit argument. This is what makes a
 tautological property (one that merely restates the implementation) impossible to write through
 this vocabulary.
+
+### `cca_checks/hypo.py` (new)
+
+The determinism contract, isolated so `properties.py` stays import-free of Hypothesis. Exports
+`cca_settings = settings(derandomize=True, max_examples=MAX_EXAMPLES, deadline=None)`, which every
+generated property file applies. Determinism therefore lives in our code, not in a setting the
+auditor must remember to write. Importing this module without `hypothesis` installed raises
+`ModuleNotFoundError`, which the runner detects and maps to UNCERTAIN.
 
 ### `cca_checks/property_check.py` (new)
 
@@ -155,8 +163,11 @@ Mirrors the existing per-module layout.
 - `tests/fixtures/numeric/` — a sign-flipped function and its correct twin.
 - `tests/acceptance/test_numeric_suite.py` — end to end: the sign-trap fixture returns CONFIRMED
   with a falsifying example; the corrected version does not.
-- `tests/test_blindness_probe.py` — extended with an honest blindness case: a sign error that only
-  manifests outside the declared input domain must return UNCERTAIN, never a refutation.
+- Blindness probe — an honest case where the defect is real and still present but the chosen
+  property cannot see it (`assert_limit` at vol=0, where the flipped term vanishes). Must return
+  UNCERTAIN, never a refutation. This lives in `tests/acceptance/test_numeric_suite.py` rather than
+  in `tests/test_blindness_probe.py`: the latter is specific to `pyright_is_blind_at` and mixing an
+  execution-based probe into it would blur that module's subject.
 
 ## Failure modes
 
