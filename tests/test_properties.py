@@ -31,6 +31,24 @@ def test_bounded_rejects_nan():
         assert_bounded(lambda x: math.nan, (1.0,), lo=0.0, hi=1.0)
 
 
+def test_bounded_tolerates_a_one_ulp_overshoot_at_the_upper_bound():
+    # Same class of bug as the monotonic finding: a hard, zero-tolerance
+    # boundary check is magnitude-blind. At a large-magnitude bound (~1e6),
+    # a result that is mathematically exactly `hi` but lands one ULP above
+    # it due to floating-point representation is not a real defect.
+    hi = 1_000_000.0
+    y = math.nextafter(hi, math.inf)
+    assert_bounded(lambda: y, (), lo=0.0, hi=hi)
+
+
+def test_bounded_still_catches_a_real_violation_at_large_magnitude():
+    # Guard against overcorrecting: a genuinely out-of-range result at large
+    # magnitude must still be caught, not swallowed by the widened epsilon.
+    hi = 1_000_000.0
+    with pytest.raises(PropertyViolation):
+        assert_bounded(lambda: hi * 1.1, (), lo=0.0, hi=hi)
+
+
 # --- assert_monotonic_in ---------------------------------------------------
 
 def test_monotonic_increasing_passes():
@@ -55,6 +73,47 @@ def test_monotonic_rejects_an_unknown_direction():
                             direction="sideways", delta=0.1)
 
 
+def test_monotonic_increasing_tolerates_float_noise_at_large_magnitude():
+    # A bare ABS_TOL (1e-12) is magnitude-blind: on a flat region at prices/
+    # notionals scale (~1e6), ordinary floating-point noise of ~1e-7 is
+    # 1e5x the old absolute tolerance but only ~1e-13 relative to the
+    # magnitude -- negligible, and not a real defect. This is the motivating
+    # bug shape from the finding: correct, genuinely-flat code raising a
+    # spurious PropertyViolation.
+    BASE = 1_000_000.0
+    NOISE = 1e-7  # >> old bare ABS_TOL=1e-12, << REL_TOL(1e-9) * BASE = 1e-3
+
+    def flat_with_noise(a, b):
+        return BASE if b < 1.0 else BASE - NOISE
+
+    assert_monotonic_in(flat_with_noise, (0.0, 0.5), index=1,
+                        direction="increasing", delta=1.0)
+
+
+def test_monotonic_decreasing_tolerates_float_noise_at_large_magnitude():
+    BASE = 1_000_000.0
+    NOISE = 1e-7
+
+    def flat_with_noise(a, b):
+        return BASE if b < 1.0 else BASE + NOISE
+
+    assert_monotonic_in(flat_with_noise, (0.0, 0.5), index=1,
+                        direction="decreasing", delta=1.0)
+
+
+def test_monotonic_still_catches_a_real_violation_at_large_magnitude():
+    # Guard against overcorrecting: a genuine sign flip at large magnitude
+    # must still be caught, not swallowed by the widened epsilon.
+    BASE = 1_000_000.0
+
+    def actually_decreasing(a, b):
+        return BASE if b < 1.0 else BASE - 500.0
+
+    with pytest.raises(PropertyViolation):
+        assert_monotonic_in(actually_decreasing, (0.0, 0.5), index=1,
+                            direction="increasing", delta=1.0)
+
+
 # --- assert_limit ----------------------------------------------------------
 
 def test_limit_passes_at_the_degenerate_case():
@@ -67,6 +126,28 @@ def test_limit_violation_reports_expected_and_observed():
         assert_limit(lambda mu, vol: mu + vol + 1.0, (0.2, 1.0), index=1,
                      approaching=0.0, expected=0.2)
     assert "limit" in str(e.value)
+
+
+def test_limit_treats_matching_infinities_as_equal():
+    # A property whose degenerate case genuinely diverges (e.g. a limit that
+    # correctly goes to +inf) must not be flagged as a defect merely because
+    # `_close` used to treat any non-finite input as an automatic mismatch.
+    assert_limit(lambda x: math.inf, (1.0,), index=0,
+                 approaching=0.0, expected=math.inf)
+
+
+def test_limit_rejects_opposite_signed_infinities():
+    # A genuine defect (e.g. a flipped sign turning +inf into -inf) must
+    # still be caught -- infinities are only "close" when they agree in sign.
+    with pytest.raises(PropertyViolation):
+        assert_limit(lambda x: -math.inf, (1.0,), index=0,
+                     approaching=0.0, expected=math.inf)
+
+
+def test_limit_rejects_infinity_against_a_finite_expectation():
+    with pytest.raises(PropertyViolation):
+        assert_limit(lambda x: math.inf, (1.0,), index=0,
+                     approaching=0.0, expected=1.0)
 
 
 # --- assert_scale_invariant ------------------------------------------------

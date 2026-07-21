@@ -37,8 +37,16 @@ class PropertyViolation(AssertionError):
 
 
 def _close(a: float, b: float) -> bool:
-    if not (math.isfinite(a) and math.isfinite(b)):
+    if math.isnan(a) or math.isnan(b):
         return False
+    if math.isinf(a) or math.isinf(b):
+        # Two genuinely-infinite values are a real equality (e.g. a limit that
+        # legitimately diverges), not a floating-point artifact -- `isclose`
+        # only has a finite-vs-finite contract, so treating "non-finite" as a
+        # blanket mismatch would flag correct code as a defect. A finite vs.
+        # infinite mismatch, or opposite-signed infinities, is still a
+        # genuine defect and must still fail.
+        return a == b
     return math.isclose(a, b, rel_tol=REL_TOL, abs_tol=ABS_TOL)
 
 
@@ -49,9 +57,16 @@ def _replaced(args: Sequence, index: int, value) -> tuple:
 
 
 def assert_bounded(fn: Callable, args: Sequence, lo: float, hi: float) -> None:
-    """The result must lie within [lo, hi]. Non-finite results are violations."""
+    """The result must lie within [lo, hi] (inclusive). Non-finite results are
+    violations. The boundary check is magnitude-aware: at large lo/hi/result
+    magnitudes, ordinary floating-point representation noise (e.g. a result
+    that is mathematically exactly `hi` but lands one ULP above it) must not
+    read as a defect."""
     y = fn(*args)
-    if not math.isfinite(y) or y < lo or y > hi:
+    if not math.isfinite(y):
+        raise PropertyViolation("bounded", tuple(args), y, f"{lo} <= result <= {hi}")
+    eps = max(ABS_TOL, REL_TOL * max(abs(lo), abs(hi), abs(y)))
+    if y < lo - eps or y > hi + eps:
         raise PropertyViolation("bounded", tuple(args), y, f"{lo} <= result <= {hi}")
 
 
@@ -67,10 +82,17 @@ def assert_monotonic_in(fn: Callable, args: Sequence, index: int,
     y1 = fn(*args1)
     if not (math.isfinite(y0) and math.isfinite(y1)):
         raise PropertyViolation("monotonic", tuple(args), (y0, y1), "finite results")
-    if direction == "increasing" and y1 < y0 - ABS_TOL:
+    # Magnitude-aware epsilon: a bare ABS_TOL (1e-12) is blind to the scale of
+    # the outputs being compared. For large-magnitude results (prices,
+    # notionals in the 1e6+ range), ordinary floating-point noise on a flat
+    # or correctly-monotonic region routinely exceeds 1e-12 in absolute terms
+    # while being negligible relative to the values themselves -- which would
+    # otherwise raise a spurious violation on correct code.
+    eps = max(ABS_TOL, REL_TOL * max(abs(y0), abs(y1)))
+    if direction == "increasing" and y1 < y0 - eps:
         raise PropertyViolation("monotonic", tuple(args), (y0, y1),
                                 f"result non-decreasing in arg {index}")
-    if direction == "decreasing" and y1 > y0 + ABS_TOL:
+    if direction == "decreasing" and y1 > y0 + eps:
         raise PropertyViolation("monotonic", tuple(args), (y0, y1),
                                 f"result non-increasing in arg {index}")
 
