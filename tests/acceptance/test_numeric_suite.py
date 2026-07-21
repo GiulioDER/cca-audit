@@ -23,6 +23,7 @@ def test_the_corrected_twin_is_not_confirmed():
     v = run_properties("NUM-ACC-3", FIXED)
     assert v.verdict == "UNCERTAIN"
     assert v.verdict != "CONFIRMED"
+    assert "no counterexample" in v.evidence
 
 
 def test_confirmation_is_reproducible():

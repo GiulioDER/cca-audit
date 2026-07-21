@@ -119,6 +119,13 @@ run TWO phases in order:
   **Unlike a repro test, do NOT delete the property file.** A `CONFIRMED` property file moves into
   the target's test suite as part of the fix: the property that caught the bug is the regression
   test proving the fix satisfies it.
+
+  **A `CONFIRMED` obliges you to re-read the declared relation, not the verdict, for correctness
+  before it enters the fix plan.** The artifact is only as sound as the relation it encodes — a
+  falsifying example against a wrong `expected`/`direction`/`factor` is a real counterexample to a
+  wrong claim, not evidence of a real bug. Check the `properties:` block's declared relation
+  against what the function is actually supposed to mean; if the relation itself is wrong, this is
+  UNCERTAIN (escalate: the property needs rewriting), not CONFIRMED.
 - `crash_impact` (crash / wrong value with a concrete input) → FIRST write a minimal repro test
   `t_<ID>.py` that drives the code through its **public entry point** (respect validators — never
   call the raw internal function), predicting the impact, THEN:
@@ -126,9 +133,9 @@ run TWO phases in order:
 
 Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
 temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
-that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`, or
-`pytest`. The checker read the code; you are guessing. You adjudicate `UNCERTAIN` only, and
-when you do you must cite the facts you gathered and emit `source: llm`.
+that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`,
+`pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
+`UNCERTAIN` only, and when you do you must cite the facts you gathered and emit `source: llm`.
 
 **Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.
 A `FALSE_POSITIVE` means no sink of that class exists anywhere in the enclosing scope, so the

@@ -365,6 +365,13 @@ in changed code, and has real impact. Provide the file:line evidence for your ve
 A high-stakes P1 is CONFIRMED only if **≥2 of 3** skeptics fail to refute it. Otherwise → FALSE_POSITIVE
 (or UNCERTAIN if split with low confidence → escalate to human, never fix blind).
 
+**Exception: a `NUM-*` P1 carrying a `hypothesis` artifact is NOT subject to this skeptic vote.**
+The artifact settles it — do not spawn the 2-of-3 panel for it. An LLM majority re-reading a sign
+error is exactly the failure mode the artifact exists to prevent; three skeptics failing to refute
+a fluent-looking expression would drop a CONFIRMED finding that a mechanical check already proved.
+This numeric finding still goes through the ordinary `fp-check` path (which re-reads the declared
+relation per the `numeric` section rule), just never through the adversarial panel.
+
 Apply verdicts: CONFIRMED → fix plan · FALSE_POSITIVE → drop (record with evidence) ·
 DUPLICATE → drop (record the upstream URL; it is someone else's find, not yours) ·
 UNCERTAIN → list for the user, treat as deferred-to-human.

@@ -105,6 +105,22 @@ properties:
 `assert_round_trips` is the one helper with two callables instead of one target: use
 `forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
 
+The remaining four helpers follow the same `target`/`args`/`domains`/`rationale` shape as
+`assert_monotonic_in` above, with these helper-specific keys:
+
+- **`assert_bounded`** — `lo`, `hi` (the required inclusive result range).
+- **`assert_limit`** — `index` (which arg is driven to its degenerate value), `approaching`
+  (the degenerate value itself, e.g. `0.0` for vol→0), `expected`. **`expected` is an
+  expression over the OTHER generated args, not a literal constant** — e.g. `mu * t`, not
+  `0.0`. Writing a constant here is the exact trap that produces a false `CONFIRMED`
+  against correct code (see Failure modes in the design spec): if the true limit actually
+  depends on the surviving arguments, a literal collapses that dependency and manufactures
+  a counterexample out of a wrong declared relation, not a real bug.
+- **`assert_scale_invariant`** — `factor` (the multiplier), `indices` (which args get scaled
+  by it; the rest are held fixed).
+- **`assert_sign_symmetric`** — `index` (the arg to negate), `kind` (`odd` — negate the arg,
+  negate the result; or `even` — negate the arg, result unchanged; defaults to `odd`).
+
 State the property as the **intended relation**, derived from what the function is supposed to
 mean — never from what the code does. A property read off the implementation is a tautology: it
 passes on buggy code and proves nothing.
