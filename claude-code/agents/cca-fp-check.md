@@ -77,6 +77,55 @@ run TWO phases in order:
   `sql`, `command`, `code_exec`, `path`; if it fits none of those, omit `--sink-class` and
   the checker will escalate.
   `python -m cca_checks check --claim-type taint --sink-class <CLASS> --finding-id <ID> --file <FILE> --line <LINE>`
+- **`numeric`** — the finding asserts an arithmetic defect: wrong sign, mixed units, bad scaling,
+  wrong rounding direction, a conversion that does not invert. FIRST write a property file
+  `t_<ID>_props.py` from the finding's `properties:` block, applying `@cca_settings` and
+  `@given(...)` with the declared domains, THEN:
+  `python -m cca_checks numeric --finding-id <ID> --test t_<ID>_props.py`
+
+  Template:
+  ```python
+  from hypothesis import given, strategies as st
+  from cca_checks.hypo import cca_settings
+  from cca_checks.properties import assert_monotonic_in
+  from <module> import <target>
+
+  @cca_settings
+  @given(mu=st.floats(-0.5, 0.5), vol=st.floats(0.01, 1.0), t=st.floats(0.01, 5.0))
+  def test_property(mu, vol, t):
+      assert_monotonic_in(<target>, (mu, vol, t), index=1, direction="decreasing", delta=0.1)
+  ```
+
+  Second template, for the two-function shape (`assert_round_trips`, whose `properties:` entry
+  carries `forward`/`inverse`/`value` instead of `target`/`args`/`index`):
+  ```python
+  from hypothesis import given, strategies as st
+  from cca_checks.hypo import cca_settings
+  from cca_checks.properties import assert_round_trips
+  from <module> import <forward>, <inverse>
+
+  @cca_settings
+  @given(amount=st.floats(0.01, 1000000.0))
+  def test_property(amount):
+      assert_round_trips(<forward>, <inverse>, amount)
+  ```
+
+  **Numeric verdicts are asymmetric, the mirror of taint.** The checker never returns
+  `FALSE_POSITIVE` for a `numeric` claim: properties holding across a bounded search is not proof
+  of correctness, only the absence of a counterexample. A `CONFIRMED` carries a falsifying example
+  and is binding. An `UNCERTAIN` reading "no counterexample" means your property could not see the
+  defect — try a different property or escalate; it is NOT a refutation.
+
+  **Unlike a repro test, do NOT delete the property file.** A `CONFIRMED` property file moves into
+  the target's test suite as part of the fix: the property that caught the bug is the regression
+  test proving the fix satisfies it.
+
+  **A `CONFIRMED` obliges you to re-read the declared relation, not the verdict, for correctness
+  before it enters the fix plan.** The artifact is only as sound as the relation it encodes — a
+  falsifying example against a wrong `expected`/`direction`/`factor` is a real counterexample to a
+  wrong claim, not evidence of a real bug. Check the `properties:` block's declared relation
+  against what the function is actually supposed to mean; if the relation itself is wrong, this is
+  UNCERTAIN (escalate: the property needs rewriting), not CONFIRMED.
 - `crash_impact` (crash / wrong value with a concrete input) → FIRST write a minimal repro test
   `t_<ID>.py` that drives the code through its **public entry point** (respect validators — never
   call the raw internal function), predicting the impact, THEN:
@@ -84,9 +133,9 @@ run TWO phases in order:
 
 Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
 temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
-that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`, or
-`pytest`. The checker read the code; you are guessing. You adjudicate `UNCERTAIN` only, and
-when you do you must cite the facts you gathered and emit `source: llm`.
+that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`,
+`pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
+`UNCERTAIN` only, and when you do you must cite the facts you gathered and emit `source: llm`.
 
 **Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.
 A `FALSE_POSITIVE` means no sink of that class exists anywhere in the enclosing scope, so the

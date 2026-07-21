@@ -72,6 +72,62 @@ Report findings grouped by severity: Critical > High > Medium > Low.
 Each finding: `### NUM-NNN: Title` with Severity, File:line, the dimensional/sign mismatch,
 the concrete consequence, and the Fix.
 
+Every finding MUST also carry a `properties:` block naming the metamorphic properties that
+would expose the defect, and the input domain over which they hold. This is what lets L2.5
+settle the finding by execution instead of by re-reading the arithmetic — a sign error reads
+fluently, so a second reading is not evidence.
+
+```yaml
+properties:
+  - helper: assert_monotonic_in     # one of: assert_bounded | assert_monotonic_in |
+                                    # assert_limit | assert_scale_invariant |
+                                    # assert_sign_symmetric | assert_round_trips
+    target: expected_log_growth     # the function under test
+    args: [mu, vol, t]              # positional argument names, in order
+    index: 1                        # which argument the property is about
+    direction: decreasing           # helper-specific parameters
+    delta: 0.1
+    domains:                        # REQUIRED — unbounded floats are not allowed
+      mu: [-0.5, 0.5]
+      vol: [0.01, 1.0]
+      t: [0.01, 5.0]
+    rationale: variance drag must not raise expected log growth
+
+  - helper: assert_round_trips      # two-function shape — no single `target`
+    forward: to_minor_units         # one direction of the conversion under test
+    inverse: from_minor_units       # the other direction — either side may carry the defect
+    value: amount                   # the bare scalar being round-tripped (no `args`/`index`)
+    domains:                        # REQUIRED even here — the value still needs a domain
+      amount: [0.01, 1000000.0]
+    rationale: converting to minor units and back must recover the original amount
+```
+
+`assert_round_trips` is the one helper with two callables instead of one target: use
+`forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
+
+The remaining four helpers follow the same `target`/`args`/`domains`/`rationale` shape as
+`assert_monotonic_in` above, with these helper-specific keys:
+
+- **`assert_bounded`** — `lo`, `hi` (the required inclusive result range).
+- **`assert_limit`** — `index` (which arg is driven to its degenerate value), `approaching`
+  (the degenerate value itself, e.g. `0.0` for vol→0), `expected`. **`expected` is an
+  expression over the OTHER generated args, not a literal constant** — e.g. `mu * t`, not
+  `0.0`. Writing a constant here is the exact trap that produces a false `CONFIRMED`
+  against correct code (see Failure modes in the design spec): if the true limit actually
+  depends on the surviving arguments, a literal collapses that dependency and manufactures
+  a counterexample out of a wrong declared relation, not a real bug.
+- **`assert_scale_invariant`** — `factor` (the multiplier), `indices` (which args get scaled
+  by it; the rest are held fixed).
+- **`assert_sign_symmetric`** — `index` (the arg to negate), `kind` (`odd` — negate the arg,
+  negate the result; or `even` — negate the arg, result unchanged; defaults to `odd`).
+
+State the property as the **intended relation**, derived from what the function is supposed to
+mean — never from what the code does. A property read off the implementation is a tautology: it
+passes on buggy code and proves nothing.
+
+Declare `domains` from the values the function actually receives in production. A counterexample
+found outside that range is an artifact, not a defect.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:

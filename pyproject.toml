@@ -4,9 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cca_checks"
-version = "0.3.0"
+version = "0.4.0"
 description = "Deterministic verification helpers for CCA-Audit's fp-check gate"
 requires-python = ">=3.10"
+
+[project.optional-dependencies]
+numeric = ["hypothesis>=6.0"]
 
 [tool.setuptools]
 packages = ["cca_checks"]

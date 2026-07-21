@@ -4,6 +4,7 @@ import sys
 from dataclasses import asdict
 
 from .claim import Claim, Verdict
+from .property_check import run_properties
 from .pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from .repro_runner import run_repro
 from .semgrep_check import verdict_for_taint
@@ -51,11 +52,17 @@ def main(argv=None) -> int:
     r.add_argument("--test", required=True)
     r.add_argument("--expect-error", default=None)
 
+    n = sub.add_parser("numeric", help="settle a numeric claim by running declared properties")
+    n.add_argument("--finding-id", required=True)
+    n.add_argument("--test", required=True)
+
     a = p.parse_args(argv)
     if a.cmd == "check":
         v = _check(a.claim_type, a)
     elif a.cmd == "definedness":
         v = _check("definedness", a)
+    elif a.cmd == "numeric":
+        v = run_properties(a.finding_id, a.test)
     else:
         v = run_repro(a.finding_id, a.test, a.expect_error)
     print(json.dumps(asdict(v)))

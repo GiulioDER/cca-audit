@@ -47,7 +47,7 @@ Findings stop being prose. Each auditor finding emits:
 { id, file, line, claim_type, proposition, predicted_impact, suggested_check }
 ```
 
-`claim_type ∈ { definedness, type, nullability, reachability, crash_impact, taint, semantic }`
+`claim_type ∈ { definedness, type, nullability, reachability, crash_impact, taint, numeric, semantic }`
 
 ### 3.2 claim_type → checker
 
@@ -59,6 +59,7 @@ Findings stop being prose. Each auditor finding emits:
 | `reachability` | "line N is reachable with value V" (e.g. div-by-zero) | CFG/dominator reasoning; in v3.0-min, subsumed by the repro check |
 | `crash_impact` | "input I triggers the predicted impact" | **generated `pytest` repro** through the real entry point |
 | `taint` | "untrusted source reaches sink" | `semgrep`, over a bundled two-tier sink catalog — **shipped in v3.2**. Refutes a false premise and informs adjudication; never confirms (its taint rule fires on safely-parameterized calls). |
+| `numeric` | "the arithmetic is wrong: bad sign, mixed units, bad scaling" | auditor-declared metamorphic properties run under `hypothesis` — **shipped in v3.4**. Mirror-image asymmetry of taint: a violated property is a `CONFIRMED` falsifying example; properties holding is never `FALSE_POSITIVE`, only `UNCERTAIN` (absence of a counterexample is not proof of correctness). |
 | `semantic` | domain/business-logic judgment | **no tool** → LLM adjudicator with cited facts |
 
 ### 3.3 Verdict rule
@@ -136,3 +137,10 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
   `docs/superpowers/specs/2026-07-10-v3.2-taint-semgrep-design.md`.
 - **v3.3** — other languages (TypeScript via `tsc`, Go, Rust), which is also the point at
   which the mechanical checks should move behind their own layer.
+- **v3.4 (shipped)** — `numeric` claims via auditor-declared metamorphic properties, run
+  under `hypothesis` (`assert_bounded`, `assert_monotonic_in`, `assert_limit`,
+  `assert_scale_invariant`, `assert_sign_symmetric`, `assert_round_trips`). A violated
+  property is a `CONFIRMED` falsifying example; the checker never returns `FALSE_POSITIVE` —
+  properties holding across a bounded search is not proof of correctness. `hypothesis` is an
+  optional `[numeric]` extra; absent ⇒ `UNCERTAIN`, never a silent pass. See
+  `docs/superpowers/specs/2026-07-21-numeric-differential-oracle-design.md`.
