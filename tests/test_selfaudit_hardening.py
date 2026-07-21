@@ -317,6 +317,54 @@ def test_confirmed_evidence_excludes_the_pytest_footer(monkeypatch):
     assert "short test summary" not in v.evidence
 
 
+def test_the_same_banner_echoed_twice_is_one_bug(monkeypatch):
+    """Regression: the ambiguity check counts DISTINCT banners, not occurrences.
+
+    pytest and Hypothesis echo the same "Falsifying example" in more than one place
+    depending on version -- the failure body, the -r summary, the explain phase. A
+    raw occurrence count therefore measured the toolchain rather than the code under
+    test, so an ordinary single-bug run escalated to UNCERTAIN on some installs and
+    confirmed on others. CI caught this on all four Python versions after a local
+    run of the same suite passed.
+    """
+    banner = "Falsifying example: test_bounded(x=4.0,)\n"
+    out = (
+        banner
+        + "PROPERTY bounded violated | inputs=(4.0,) | observed=9.0 | required=0 <= result <= 1\n"
+        + "\n=========== short test summary info ===========\n"
+        + "E   " + banner  # the SAME bug, echoed with pytest's gutter prefix
+        + "1 failed in 4.20s\n"
+    )
+    monkeypatch.setattr(
+        pcheck.subprocess, "run",
+        lambda *a, **kw: subprocess.CompletedProcess(a[0] if a else [], 1, out, ""))
+    v = pcheck.run_properties("NUM-1", "t_props.py")
+    assert v.verdict == "CONFIRMED", v.evidence
+
+
+def test_confirmed_evidence_is_byte_identical_across_runs(monkeypatch):
+    """A CONFIRMED artifact must reproduce exactly.
+
+    The escalation path embeds pytest's output tail, which carries the run
+    duration, so an artifact that wrongly fell into it stopped being reproducible
+    between two identical runs.
+    """
+    def settle(duration):
+        out = (
+            "Falsifying example: test_bounded(x=4.0,)\n"
+            "PROPERTY bounded violated | inputs=(4.0,) | observed=9.0 | required=0 <= result <= 1\n"
+            f"1 failed in {duration}s\n"
+        )
+        monkeypatch.setattr(
+            pcheck.subprocess, "run",
+            lambda *a, **kw: subprocess.CompletedProcess(a[0] if a else [], 1, out, ""))
+        return pcheck.run_properties("NUM-1", "t_props.py")
+
+    a, b = settle("4.20"), settle("4.23")
+    assert a.verdict == b.verdict == "CONFIRMED"
+    assert a.evidence == b.evidence
+
+
 def test_single_falsifying_example_still_confirms(monkeypatch):
     out = (
         "Falsifying example: test_bounded(x=4.0,)\n"
