@@ -72,6 +72,35 @@ Report findings grouped by severity: Critical > High > Medium > Low.
 Each finding: `### NUM-NNN: Title` with Severity, File:line, the dimensional/sign mismatch,
 the concrete consequence, and the Fix.
 
+Every finding MUST also carry a `properties:` block naming the metamorphic properties that
+would expose the defect, and the input domain over which they hold. This is what lets L2.5
+settle the finding by execution instead of by re-reading the arithmetic — a sign error reads
+fluently, so a second reading is not evidence.
+
+```yaml
+properties:
+  - helper: assert_monotonic_in     # one of: assert_bounded | assert_monotonic_in |
+                                    # assert_limit | assert_scale_invariant |
+                                    # assert_sign_symmetric | assert_round_trips
+    target: expected_log_growth     # the function under test
+    args: [mu, vol, t]              # positional argument names, in order
+    index: 1                        # which argument the property is about
+    direction: decreasing           # helper-specific parameters
+    delta: 0.1
+    domains:                        # REQUIRED — unbounded floats are not allowed
+      mu: [-0.5, 0.5]
+      vol: [0.01, 1.0]
+      t: [0.01, 5.0]
+    rationale: variance drag must not raise expected log growth
+```
+
+State the property as the **intended relation**, derived from what the function is supposed to
+mean — never from what the code does. A property read off the implementation is a tautology: it
+passes on buggy code and proves nothing.
+
+Declare `domains` from the values the function actually receives in production. A counterexample
+found outside that range is an artifact, not a defect.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:

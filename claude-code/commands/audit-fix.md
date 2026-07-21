@@ -156,7 +156,7 @@ ELSE:                TIER = STANDARD
 | L1 domain (STAKES/NUM/DAT) | — | if flag set | if flag set |
 | L1 dep-auditor | — | if RUN_DEP | if RUN_DEP |
 | L1 deploy-auditor | — | if RUN_DEPLOY | if RUN_DEPLOY |
-| L2.5 findings verification | — | single fp-check | fp-check + **adversarial 2-of-3 on high-stakes P1** |
+| L2.5 findings verification | — | single fp-check | fp-check + **adversarial 2-of-3 on high-stakes P1** + **`numeric` artifact required on NUM-\* P1** |
 | L4 P1 fix style | direct | red→green test | red→green test |
 | L5.5 regression diff | — | yes | yes |
 | L6 architect gate | yes (verdict only) | yes + mapping | yes + mapping |
@@ -368,6 +368,13 @@ A high-stakes P1 is CONFIRMED only if **≥2 of 3** skeptics fail to refute it. 
 Apply verdicts: CONFIRMED → fix plan · FALSE_POSITIVE → drop (record with evidence) ·
 DUPLICATE → drop (record the upstream URL; it is someone else's find, not yours) ·
 UNCERTAIN → list for the user, treat as deferred-to-human.
+
+**DEEP tier — NUM-\* P1 artifact rule.** A `NUM-*` P1 may NOT enter the fix plan on an
+`llm`-sourced verdict. It carries a `hypothesis` artifact (a falsifying example from
+`python -m cca_checks numeric`) or it is escalated as UNCERTAIN. A numeric defect that an LLM
+merely re-read and approved is unverified — a sign error reads fluently, which is precisely why
+this class needs execution rather than a second opinion. FAST and STANDARD are unaffected: the
+claim type is available there, but nothing blocks on it.
 
 If `no-fix`: STOP here. Report consolidated findings + verdicts.
 

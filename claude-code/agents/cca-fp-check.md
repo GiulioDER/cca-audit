@@ -77,6 +77,34 @@ run TWO phases in order:
   `sql`, `command`, `code_exec`, `path`; if it fits none of those, omit `--sink-class` and
   the checker will escalate.
   `python -m cca_checks check --claim-type taint --sink-class <CLASS> --finding-id <ID> --file <FILE> --line <LINE>`
+- **`numeric`** — the finding asserts an arithmetic defect: wrong sign, mixed units, bad scaling,
+  wrong rounding direction, a conversion that does not invert. FIRST write a property file
+  `t_<ID>_props.py` from the finding's `properties:` block, applying `@cca_settings` and
+  `@given(...)` with the declared domains, THEN:
+  `python -m cca_checks numeric --finding-id <ID> --test t_<ID>_props.py`
+
+  Template:
+  ```python
+  from hypothesis import given, strategies as st
+  from cca_checks.hypo import cca_settings
+  from cca_checks.properties import assert_monotonic_in
+  from <module> import <target>
+
+  @cca_settings
+  @given(mu=st.floats(-0.5, 0.5), vol=st.floats(0.01, 1.0), t=st.floats(0.01, 5.0))
+  def test_property(mu, vol, t):
+      assert_monotonic_in(<target>, (mu, vol, t), index=1, direction="decreasing", delta=0.1)
+  ```
+
+  **Numeric verdicts are asymmetric, the mirror of taint.** The checker never returns
+  `FALSE_POSITIVE` for a `numeric` claim: properties holding across a bounded search is not proof
+  of correctness, only the absence of a counterexample. A `CONFIRMED` carries a falsifying example
+  and is binding. An `UNCERTAIN` reading "no counterexample" means your property could not see the
+  defect — try a different property or escalate; it is NOT a refutation.
+
+  **Unlike a repro test, do NOT delete the property file.** A `CONFIRMED` property file moves into
+  the target's test suite as part of the fix: the property that caught the bug is the regression
+  test proving the fix satisfies it.
 - `crash_impact` (crash / wrong value with a concrete input) → FIRST write a minimal repro test
   `t_<ID>.py` that drives the code through its **public entry point** (respect validators — never
   call the raw internal function), predicting the impact, THEN:
