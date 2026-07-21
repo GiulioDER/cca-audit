@@ -1,6 +1,7 @@
 import shutil
-import pytest
 from pathlib import Path
+
+import pytest
 
 from cca_checks.claim import Claim
 from cca_checks.pyright_check import (

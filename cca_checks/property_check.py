@@ -17,9 +17,8 @@ import subprocess
 import sys
 
 from .claim import Verdict, make_verdict
-from .properties import MAX_EXAMPLES
+from .config import MAX_EXAMPLES, TIMEOUT_S
 
-TIMEOUT_S = 120
 SOURCE = "hypothesis"
 
 # Hypothesis prints the shrunk input under this banner, up to a blank line or the
@@ -28,7 +27,8 @@ SOURCE = "hypothesis"
 # bare `(?=\n\s*\n|\Z)` runs to end-of-output and swallows the short test summary
 # and timing footer into the evidence.
 _FALSIFYING = re.compile(
-    r"Falsifying example:.*?(?=\n\s*\n|\n=+[ =]|\n-+[ -]|\n\+-+|\Z)", re.S)
+    r"Falsifying example:.*?"
+    r"(?=\n\s*\n|\n=+[ =]|\n-+[ -]|\n\+-+|\n(?:E\s+)?\d+ \w+ in \d|\Z)", re.S)
 # Our own violation message, which names the property and the required relation.
 _PROPERTY_LINE = re.compile(r"^.*PROPERTY .+ violated \|.*$", re.M)
 _NO_HYPOTHESIS = "No module named 'hypothesis'"
@@ -37,6 +37,33 @@ _NO_PYTEST = "No module named pytest"
 
 def _uncertain(finding_id: str, why: str) -> Verdict:
     return make_verdict(finding_id, "UNCERTAIN", why, SOURCE)
+
+
+def _distinct_falsifying(out: str) -> list[str]:
+    """Deduplicated "Falsifying example:" blocks.
+
+    A raw occurrence count is NOT a bug count. Depending on the pytest/Hypothesis
+    versions in play, the same banner is echoed in more than one place -- the
+    failure body, the `-r` summary, the explain phase -- so counting occurrences
+    measures the toolchain rather than the code under test, and would escalate a
+    perfectly ordinary single-bug run on some installs and not others.
+
+    What identifies a bug here is the FALSIFYING INPUT, not the surrounding output,
+    so the dedup key is the shrunk argument list -- `test_bounded(x=4.0,)` -- with
+    pytest's `E ` gutter and line wrapping normalised away. Two genuinely different
+    bugs shrink to different inputs and survive dedup; the same bug echoed in two
+    places collapses to one entry, even when the two copies captured different
+    amounts of trailing text.
+    """
+    seen: dict[str, str] = {}
+    for block in _FALSIFYING.findall(out):
+        flat = re.sub(r"^E\s+", "", block, flags=re.M)
+        flat = re.sub(r"\s+", " ", flat).strip()
+        args = re.search(r"Falsifying example:\s*[\w.]+\((.*?)\)", flat)
+        # Fall back to the whole flattened block if the banner is in a shape we do
+        # not recognise: erring toward "distinct" escalates, which is the safe side.
+        seen.setdefault(args.group(1).strip() if args else flat, block)
+    return list(seen.values())
 
 
 def run_properties(finding_id: str, test_path: str) -> Verdict:
@@ -105,7 +132,7 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
     # counterexample does not violate the declared property, and which a downstream
     # agent cannot reproduce. We cannot bind them reliably after the fact, so
     # ambiguity escalates rather than guessing a pairing.
-    if len(_FALSIFYING.findall(out)) > 1:
+    if len(_distinct_falsifying(out)) > 1:
         return _uncertain(finding_id,
                           f"multiple falsifying examples reported; the property "
                           f"violation cannot be bound to a specific counterexample "

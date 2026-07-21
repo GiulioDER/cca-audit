@@ -1,7 +1,5 @@
 import textwrap
 
-import pytest
-
 from cca_checks.scope import enclosing_span
 
 

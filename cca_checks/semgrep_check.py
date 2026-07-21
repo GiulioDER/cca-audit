@@ -2,9 +2,9 @@ import json
 import os
 import subprocess
 from importlib import resources
-from typing import Optional
 
 from .claim import Claim, Verdict, make_verdict
+from .config import TIMEOUT_S
 from .scope import enclosing_span
 from .toolpath import resolve_tool
 
@@ -38,7 +38,7 @@ def rule_name(check_id) -> str:
     return check_id.rsplit(".", 1)[-1]
 
 
-def run_semgrep(config: str, path: str) -> Optional[list[dict]]:
+def run_semgrep(config: str, path: str) -> list[dict] | None:
     """Run semgrep offline over one file.
 
     None  = could not tell (missing binary, timeout, crash, unparseable output,
@@ -63,7 +63,7 @@ def run_semgrep(config: str, path: str) -> Optional[list[dict]]:
            os.path.abspath(path)]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=120)
+                              encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return None
     except OSError:  # includes FileNotFoundError

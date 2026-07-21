@@ -3,8 +3,8 @@ import subprocess
 
 import pytest
 
-from cca_checks.claim import Claim
 from cca_checks import semgrep_check as sc
+from cca_checks.claim import Claim
 from cca_checks.semgrep_check import (
     SUPPORTED_SINK_CLASSES,
     hits_in_span,
@@ -203,7 +203,7 @@ def test_hits_in_span_still_skips_a_malformed_hit_of_the_wrong_class():
 # --- verdict_for_taint ------------------------------------------------------
 
 def span_1_to_10(monkeypatch):
-    monkeypatch.setattr(sc, "enclosing_span", lambda p, l: (1, 10))
+    monkeypatch.setattr(sc, "enclosing_span", lambda p, line: (1, 10))
 
 
 def test_no_sink_of_either_tier_refutes(monkeypatch):
@@ -298,7 +298,7 @@ def test_non_python_file_escalates_to_llm():
 
 
 def test_unparseable_source_file_escalates(monkeypatch):
-    def boom(p, l):
+    def boom(p, line):
         raise SyntaxError("bad")
     monkeypatch.setattr(sc, "enclosing_span", boom)
     v = verdict_for_taint(claim(), sinks=[], taint=[])
