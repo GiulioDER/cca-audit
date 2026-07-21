@@ -1147,7 +1147,7 @@ python -m cca_checks numeric --finding-id NUM-001 --test examples/sign-trap/t_NU
 {
   "finding_id": "NUM-001",
   "verdict": "CONFIRMED",
-  "evidence": "property violated:\nFalsifying example: test_growth_decreases_with_volatility(\n    mu=0.0,\n    vol=0.01,\n    t=0.01,\n)\nPROPERTY monotonic violated | inputs=(0.0, 0.01, 0.01) | ...",
+  "evidence": "<PLACEHOLDER — Step 4 replaces this with the real output; the brief's guessed values were wrong>",
   "source": "hypothesis"
 }
 ```
