@@ -96,8 +96,8 @@ run TWO phases in order:
       assert_monotonic_in(<target>, (mu, vol, t), index=1, direction="decreasing", delta=0.1)
   ```
 
-  For the two-function shape (`assert_round_trips`, whose `properties:` entry carries
-  `forward`/`inverse`/`value` instead of `target`/`args`/`index`):
+  Second template, for the two-function shape (`assert_round_trips`, whose `properties:` entry
+  carries `forward`/`inverse`/`value` instead of `target`/`args`/`index`):
   ```python
   from hypothesis import given, strategies as st
   from cca_checks.hypo import cca_settings

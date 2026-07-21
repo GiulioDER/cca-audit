@@ -94,8 +94,8 @@ properties:
     rationale: variance drag must not raise expected log growth
 
   - helper: assert_round_trips      # two-function shape — no single `target`
-    forward: to_minor_units         # the function under test
-    inverse: from_minor_units       # the function that must invert it
+    forward: to_minor_units         # one direction of the conversion under test
+    inverse: from_minor_units       # the other direction — either side may carry the defect
     value: amount                   # the bare scalar being round-tripped (no `args`/`index`)
     domains:                        # REQUIRED even here — the value still needs a domain
       amount: [0.01, 1000000.0]
