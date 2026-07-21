@@ -209,6 +209,12 @@ This ensures every audit is fully closed out — no lingering deferred items acr
 - [Configuration](docs/configuration.md) — tiers, domain dispatch, project context
 - [Extending](docs/extending.md) — how to add custom auditors
 
+**Writing**
+
+- [Fluency isn't evidence](docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how the `numeric` claim type settles it with a counterexample instead
+- [Why AI code review hallucinates](docs/blog-why-ai-review-hallucinates.md) — and the two gates that fix it
+- [The benchmark memorization gap](docs/blog-benchmark-memorization-gap.md) — what a passing benchmark score actually measures
+
 ## License
 
 [MIT](LICENSE)
