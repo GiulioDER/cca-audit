@@ -92,7 +92,18 @@ properties:
       vol: [0.01, 1.0]
       t: [0.01, 5.0]
     rationale: variance drag must not raise expected log growth
+
+  - helper: assert_round_trips      # two-function shape — no single `target`
+    forward: to_minor_units         # the function under test
+    inverse: from_minor_units       # the function that must invert it
+    value: amount                   # the bare scalar being round-tripped (no `args`/`index`)
+    domains:                        # REQUIRED even here — the value still needs a domain
+      amount: [0.01, 1000000.0]
+    rationale: converting to minor units and back must recover the original amount
 ```
+
+`assert_round_trips` is the one helper with two callables instead of one target: use
+`forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
 
 State the property as the **intended relation**, derived from what the function is supposed to
 mean — never from what the code does. A property read off the implementation is a tautology: it
