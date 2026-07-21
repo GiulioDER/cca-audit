@@ -50,7 +50,7 @@ def test_growth_decreases_with_volatility(mu, vol, t):
 ```
 
 ```bash
-pip install "cca_checks[numeric]"
+pip install -e ".[numeric]"   # from a clone -- cca_checks is not on PyPI
 python -m cca_checks numeric --finding-id NUM-001 --test t_NUM-001_props.py
 ```
 

@@ -77,7 +77,8 @@ flowchart LR
     H --> I["Step 7\nCommit"]
 ```
 
-(FAST tier skips the verification/regression gates and runs only the 3 core auditors.)
+(FAST tier runs only the 3 core auditors and skips the regression gate — but it still verifies every
+P1 before fixing it. No finding is edited into your code unverified, on any tier.)
 
 ## The Auditors
 
@@ -122,12 +123,24 @@ irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/ins
 
 This copies the commands into `.claude/commands/`, the agents into `.claude/agents/`, and installs the **`cca_checks`** helper package (`python -m cca_checks`) that powers the deterministic verifier. Run it from the root of the project you want to audit.
 
-**For the deterministic verification layer**, also have `pyright`, `pytest`, and `semgrep` on your `PATH` (`pip install pyright pytest semgrep`). Without `cca_checks` or those tools, `/audit-fix` gracefully **falls back to LLM-only verification** — no crash, no regression. See the [Claude Code README](claude-code/README.md) for local-clone install and details.
+**For the deterministic verification layer**, also have `pyright`, `pytest`, and `semgrep` on your `PATH` (`pip install pyright pytest semgrep`). Without `cca_checks` or those tools, the `definedness` / `nullability` / `type` / `taint` claim types **fall back to LLM-only verification** — no crash, no regression. See the [Claude Code README](claude-code/README.md) for local-clone install and details.
 
-**For numeric findings**, install the `numeric` extra (`pip install "cca_checks[numeric]"`). It adds
-the `numeric` claim type, which settles arithmetic defects — wrong sign, mixed units, bad scaling —
-by running declared metamorphic properties under Hypothesis. It confirms with a falsifying example
-and never refutes, because properties holding is not proof of correctness. Worked example:
+**`numeric` is the exception: it fails closed rather than falling back.** On the DEEP tier a `NUM-*`
+P1 may not enter the fix plan on an LLM-sourced verdict — it carries a Hypothesis artifact or it is
+escalated as UNCERTAIN. DEEP is forced for every high-stakes or numeric diff and for all of hunt
+mode, so **without the `numeric` extra, arithmetic findings on money-path code cannot be auto-fixed
+at all.** That is deliberate — a sign error reads fluently, so a second LLM opinion is not evidence —
+but it is a hard stop, not a graceful degradation. Install it from a clone:
+
+```bash
+pip install -e ".[numeric]"
+```
+
+`cca_checks` is not published on PyPI, so `pip install "cca_checks[numeric]"` will not resolve; use
+the editable install above, or `pip install "<path-to-clone>[numeric]"`. The extra adds the `numeric`
+claim type, which settles arithmetic defects — wrong sign, mixed units, bad scaling — by running
+declared metamorphic properties under Hypothesis. It confirms with a falsifying example and never
+refutes, because properties holding is not proof of correctness. Worked example:
 [`examples/sign-trap`](examples/sign-trap/).
 
 ## Usage
@@ -183,7 +196,7 @@ else's project.
 
 | Tier | When (auto) | Auditors | Verification gates | P1 fix style |
 |------|-------------|----------|--------------------|--------------|
-| **FAST** | trivial, low-stakes, non-deploy diff | security, bug, code | — | direct |
+| **FAST** | trivial, low-stakes, non-deploy diff | security, bug, code | L2.5 on P1 only (P2/P3 reported, not fixed) | direct |
 | **STANDARD** | normal diff | all 6 core + conditional domain/dep/deploy | L2.5 + L5.5 + mapping | red→green test |
 | **DEEP** | high-stakes / numeric / forced | all of STANDARD | + **adversarial 2-of-3** on high-stakes P1 | red→green test |
 
@@ -208,10 +221,13 @@ This ensures every audit is fully closed out — no lingering deferred items acr
 - [Auditor Scopes](docs/auditor-scopes.md) — full non-overlapping scope matrix
 - [Configuration](docs/configuration.md) — tiers, domain dispatch, project context
 - [Extending](docs/extending.md) — how to add custom auditors
+- [v3 Design](docs/v3-design.md) — the design of record for the deterministic verification layer
 
 **Writing**
 
 - [Fluency isn't evidence](docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how the `numeric` claim type settles it with a counterexample instead
+- [Why AI review hallucinates](docs/blog-why-ai-review-hallucinates.md) — the failure mode the verification gate exists to close
+- [The benchmark memorization gap](docs/blog-benchmark-memorization-gap.md) — why benchmark scores overstate real-world bug-finding
 - [Why AI code review hallucinates](docs/blog-why-ai-review-hallucinates.md) — and the two gates that fix it
 - [The benchmark memorization gap](docs/blog-benchmark-memorization-gap.md) — what a passing benchmark score actually measures
 

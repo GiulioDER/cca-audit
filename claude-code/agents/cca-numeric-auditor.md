@@ -13,7 +13,8 @@ recurring "the math looks right but the units/sign are wrong" class. Used by the
 
 **NOT for general runtime bugs** (use bug-auditor) or performance (use perf-auditor).
 
-Output to `.claude/audits/AUDIT_NUMERIC.md`.
+Output to `.claude/audits/AUDIT_NUMERIC.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -153,6 +154,21 @@ passes on buggy code and proves nothing.
 Declare `domains` from the values the function actually receives in production. A counterexample
 found outside that range is an artifact, not a defect.
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`NUM-NNN`), `auditor` (`numeric-auditor`), `severity`, `priority`, `category`,
+`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes` (always `true` on
+this auditor's paths).
+
+Because the trail is not read back, each finding's `properties:` block must travel in the **reply**
+too — either as a `properties` key on the finding object or in the prose immediately following the
+array, keyed by finding ID. A finding whose properties never reach the orchestrator cannot be
+settled by execution at L2.5.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -163,9 +179,10 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_NUMERIC.md` was created.
-2. Verify file has content beyond headers.
-3. If no issues found, write "No numerical/units issues detected" (not an empty file).
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean), and
+   that every finding's `properties:` block is present in the reply.
+2. Optional trail: if you wrote `.claude/audits/AUDIT_NUMERIC.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No numerical/units issues detected" (not an empty file).
 
 Focus on units, scaling, and sign. **Do NOT duplicate generic runtime-bug checks** — those
 belong in bug-auditor.

@@ -12,7 +12,6 @@ from cca_checks.properties import (
     assert_sign_symmetric,
 )
 
-
 # --- assert_bounded --------------------------------------------------------
 
 def test_bounded_passes_inside_the_range():

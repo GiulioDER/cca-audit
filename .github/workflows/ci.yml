@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The matrix is what makes `requires-python = ">=3.10"` a tested claim
+        # rather than an assertion.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Install the deterministic layer
+        # pyright and semgrep are what the acceptance suite exercises. semgrep has
+        # no Windows wheel, which is one reason this job is ubuntu-only.
+        run: pip install pyright semgrep
+
+      - name: Lint
+        run: ruff check cca_checks tests
+
+      - name: Test
+        run: pytest -q
+
+  package:
+    # A wheel that imports at the repo root but not once installed is a failure
+    # mode the test job cannot see: tests run against the source tree, so a module
+    # or data file missing from the wheel stays invisible until a user installs it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+
+      - name: Install the built wheel into a clean venv and smoke-test it
+        run: |
+          python -m venv /tmp/wheeltest
+          /tmp/wheeltest/bin/pip install --quiet dist/*.whl
+          # CLI entry point resolves
+          /tmp/wheeltest/bin/python -m cca_checks --help
+          # Bundled rule files actually shipped and are reachable through
+          # importlib.resources, not just present in the source tree.
+          /tmp/wheeltest/bin/python - <<'PY'
+          import os
+          from cca_checks.semgrep_check import SINKS_RULES, TAINT_RULES, rules_path
+          for name in (SINKS_RULES, TAINT_RULES):
+              path = rules_path(name)
+              assert os.path.exists(path), f"rule file missing from the wheel: {name}"
+          print("packaged rules OK")
+          PY

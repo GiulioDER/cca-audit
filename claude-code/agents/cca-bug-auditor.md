@@ -9,7 +9,14 @@ model: inherit
 
 Find runtime bugs and error handling issues. **NOT for security vulnerabilities** (use security-auditor for that).
 
-Output to `.claude/audits/AUDIT_BUGS.md`.
+Output to `.claude/audits/AUDIT_BUGS.md` (optional trail). **Return value is authoritative** — see
+Return value below.
+
+> **Dispatched under multiple prefixes.** `/audit-fix` runs this agent more than once concurrently —
+> as the generic bug pass (`BUG-`), the high-stakes/safety pass (`STAKES-`), and the data-integrity
+> pass (`DAT-`) — each with its own scope, and each may name its own trail file. **The finding prefix
+> and trail filename given in the invocation win over the defaults in this file.** Use the prefix you
+> were dispatched with for every finding ID, and keep the trails separate so the passes don't collide.
 
 ## Status Block (Required)
 
@@ -83,6 +90,16 @@ Construct grep patterns based on the project's detected language.
 Report findings grouped by severity: Critical > High > Medium > Low.
 Each finding: `### BUG-NNN: Title` with Severity, File:line, Issue, Impact, Fix.
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`BUG-NNN`, or the prefix the invocation gave you), `auditor` (`bug-auditor`),
+`severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`, `suggested_fix`,
+`confidence`, `high_stakes`.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -93,8 +110,9 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_BUGS.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No runtime bugs detected" (not empty file)
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
+2. Optional trail: if you wrote `.claude/audits/AUDIT_BUGS.md` (or the trail file the invocation
+   named), verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No runtime bugs detected" (not an empty file).
 
 Focus on runtime bugs. **Do NOT duplicate security checks** — those belong in security-auditor.

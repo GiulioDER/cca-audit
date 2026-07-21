@@ -11,9 +11,9 @@ buggy code.
 """
 
 import math
-from typing import Callable, Optional, Sequence
+from collections.abc import Callable, Sequence
 
-MAX_EXAMPLES = 200
+from .config import MAX_EXAMPLES  # noqa: F401  (re-exported: hypo.py imports it from here)
 
 # Comparison tolerance. Numeric audit targets are floating point; an exact
 # equality test would produce counterexamples that are artifacts of
@@ -104,7 +104,7 @@ def assert_bounded(fn: Callable, args: Sequence, lo: float, hi: float) -> None:
 
 def assert_monotonic_in(fn: Callable, args: Sequence, index: int,
                         direction: str, delta: float,
-                        domain_hi: Optional[float] = None, strict: bool = False) -> None:
+                        domain_hi: float | None = None, strict: bool = False) -> None:
     """Increasing args[index] by delta must move the result in `direction`.
 
     `domain_hi` is the declared upper bound of args[index]'s input domain. Without

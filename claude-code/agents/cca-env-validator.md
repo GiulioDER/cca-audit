@@ -7,7 +7,10 @@ model: inherit
 
 # Environment Validator
 
-Validate environment configuration for completeness and consistency. Output to `.claude/audits/AUDIT_ENV.md`.
+Validate environment configuration for completeness and consistency.
+
+Output to `.claude/audits/AUDIT_ENV.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -77,6 +80,16 @@ Each finding: `### ENV-NNN: Title` with Severity, File/Variable, Issue, Fix.
 
 Status: VALID / INVALID (overall assessment)
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`ENV-NNN`), `auditor` (`env-validator`), `severity`, `priority`, `category`,
+`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`. Name variables
+only — **never put a config value in `claim` or `evidence`.**
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -87,8 +100,8 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_ENV.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No environment configuration issues detected" (not empty file)
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
+2. Optional trail: if you wrote `.claude/audits/AUDIT_ENV.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No environment configuration issues detected" (not empty file)
 
 Focus on configuration correctness. **Do NOT duplicate secret detection — that belongs in security-auditor.**

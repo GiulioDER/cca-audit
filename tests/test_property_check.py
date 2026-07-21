@@ -1,8 +1,6 @@
 import subprocess
 import sys
 
-import pytest
-
 from cca_checks import property_check as pcheck
 from cca_checks.property_check import run_properties
 
