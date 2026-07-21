@@ -2,9 +2,9 @@ import json
 import os
 import subprocess
 import tempfile
-from typing import Optional
 
 from .claim import Claim, Verdict, make_verdict
+from .config import TIMEOUT_S
 from .scope import enclosing_span
 from .toolpath import resolve_tool
 
@@ -83,7 +83,7 @@ REFUTE_LABEL = {
 
 # --- pyright invocation -----------------------------------------------------
 
-def run_pyright(path: str) -> Optional[list[dict]]:
+def run_pyright(path: str) -> list[dict] | None:
     """pyright over `path` in normal mode.
 
     None means "could not tell -- escalate": pyright is missing, crashed, timed
@@ -112,7 +112,7 @@ def run_pyright(path: str) -> Optional[list[dict]]:
     })
 
 
-def _run_pyright_with_config(path: str, config: dict) -> Optional[list[dict]]:
+def _run_pyright_with_config(path: str, config: dict) -> list[dict] | None:
     """Run pyright over one file under a generated project config.
 
     Shared by the normal and strict passes so their fail-safe cascades cannot
@@ -150,7 +150,8 @@ def _run_pyright_with_config(path: str, config: dict) -> Optional[list[dict]]:
                                {"root": os.getcwd(), "extraPaths": search}]}, fh)
             proc = subprocess.run(
                 [exe, "--project", td, "--outputjson", abs_path],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=TIMEOUT_S,
             )
     except subprocess.TimeoutExpired:
         return None
@@ -175,7 +176,7 @@ def _run_pyright_with_config(path: str, config: dict) -> Optional[list[dict]]:
     return diags if isinstance(diags, list) else None
 
 
-def _line_bounds(d: dict) -> Optional[tuple[int, int]]:
+def _line_bounds(d: dict) -> tuple[int, int] | None:
     """1-based (first, last) line a diagnostic covers, or None if unreadable.
 
     pyright's range.start.line / range.end.line are 0-indexed. Every field is
@@ -250,7 +251,7 @@ def _unlocatable_in_rules(diags: list[dict], rules: frozenset) -> list[dict]:
             if isinstance(d, dict) and d.get("rule") in rules and _line_bounds(d) is None]
 
 
-def _diag_at(diags: list[dict], line_1based: int, rules: frozenset) -> Optional[dict]:
+def _diag_at(diags: list[dict], line_1based: int, rules: frozenset) -> dict | None:
     for d in _diags_at(diags, line_1based):
         if d.get("rule") in rules:
             return d
@@ -264,7 +265,7 @@ def _diag_at(diags: list[dict], line_1based: int, rules: frozenset) -> Optional[
 # would silently trade a false positive for a false negative. So before refuting a
 # type-dependent claim we ask pyright, in strict mode, whether it could see at all.
 
-def run_pyright_strict(path: str) -> Optional[list[dict]]:
+def run_pyright_strict(path: str) -> list[dict] | None:
     """pyright over `path` in strict mode. None on any failure (assume blind).
 
     Strict is the only mode that emits the blindness rules, and pyright has no CLI
@@ -318,7 +319,7 @@ def pyright_is_blind_at(path: str, line_1based: int) -> bool:
 
 def verdict_for_claim(
     claim: Claim,
-    diags: Optional[list[dict]],
+    diags: list[dict] | None,
     rules: frozenset,
     blind_probe=None,
 ) -> Verdict:
@@ -388,5 +389,5 @@ def verdict_for_claim(
     return make_verdict(claim.finding_id, "FALSE_POSITIVE", ev, "pyright")
 
 
-def verdict_for_definedness(claim: Claim, diags: Optional[list[dict]]) -> Verdict:
+def verdict_for_definedness(claim: Claim, diags: list[dict] | None) -> Verdict:
     return verdict_for_claim(claim, diags, DEFINEDNESS_RULES)

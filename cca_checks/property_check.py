@@ -17,9 +17,8 @@ import subprocess
 import sys
 
 from .claim import Verdict, make_verdict
-from .properties import MAX_EXAMPLES
+from .config import MAX_EXAMPLES, TIMEOUT_S
 
-TIMEOUT_S = 120
 SOURCE = "hypothesis"
 
 # Hypothesis prints the shrunk input under this banner, up to a blank line or the

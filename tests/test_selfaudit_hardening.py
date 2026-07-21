@@ -25,7 +25,6 @@ from cca_checks.properties import (
 )
 from cca_checks.scope import enclosing_span
 
-
 # --- SEC-001: analyzer binaries must not be resolved from the audited tree -----
 
 def test_resolve_tool_refuses_a_binary_inside_the_audited_tree(tmp_path, monkeypatch):
@@ -358,8 +357,9 @@ def test_repro_is_side_effect_free(monkeypatch):
 # --- STAKES-006 / SEC-006: an unsettleable coordinate must escalate ------------
 
 def _cli(argv, capsys):
-    from cca_checks import __main__ as cli
     import json as _json
+
+    from cca_checks import __main__ as cli
     assert cli.main(argv) == 0
     return _json.loads(capsys.readouterr().out.strip())
 

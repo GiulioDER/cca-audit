@@ -17,7 +17,6 @@ alternative costs the auditor's machine.
 
 import os
 import shutil
-from typing import Optional
 
 
 def _is_inside(path: str, root: str) -> bool:
@@ -30,7 +29,7 @@ def _is_inside(path: str, root: str) -> bool:
         return False
 
 
-def resolve_tool(name: str, cwd: Optional[str] = None) -> Optional[str]:
+def resolve_tool(name: str, cwd: str | None = None) -> str | None:
     """Absolute path to analyzer `name`, or None if it is missing or untrusted.
 
     None means "tool unavailable" to every caller, which is the existing escalate

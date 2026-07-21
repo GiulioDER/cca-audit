@@ -1,4 +1,5 @@
-from cca_checks.claim import Claim, Verdict, make_verdict
+from cca_checks.claim import Claim, make_verdict
+
 
 def test_confirmed_without_evidence_becomes_uncertain():
     v = make_verdict("BUG-1", "CONFIRMED", "", "pyright")

@@ -1,12 +1,10 @@
 import textwrap
 
-import pytest
-
-from cca_checks.claim import Claim
 from cca_checks import pyright_check as pc
+from cca_checks.claim import Claim
 from cca_checks.pyright_check import (
-    NULLABILITY_RULES,
     DEFINEDNESS_RULES,
+    NULLABILITY_RULES,
     pyright_is_blind_at,
     verdict_for_claim,
 )
@@ -79,7 +77,7 @@ def test_not_blind_when_strict_pyright_is_clean(tmp_path, monkeypatch):
 
 def test_nullability_refutation_is_escalated_when_pyright_is_blind():
     claim = Claim("F-1", "svc.py", 7, "nullability")
-    v = verdict_for_claim(claim, [], NULLABILITY_RULES, blind_probe=lambda p, l: True)
+    v = verdict_for_claim(claim, [], NULLABILITY_RULES, blind_probe=lambda p, line: True)
     assert v.verdict == "UNCERTAIN"
     assert v.source == "pyright"
     assert "no type information" in v.evidence
@@ -87,22 +85,22 @@ def test_nullability_refutation_is_escalated_when_pyright_is_blind():
 
 def test_nullability_refutation_stands_when_pyright_can_see():
     claim = Claim("F-1", "svc.py", 7, "nullability")
-    v = verdict_for_claim(claim, [], NULLABILITY_RULES, blind_probe=lambda p, l: False)
+    v = verdict_for_claim(claim, [], NULLABILITY_RULES, blind_probe=lambda p, line: False)
     assert v.verdict == "FALSE_POSITIVE"
     assert v.evidence == "pyright: no optional-access diagnostic @ svc.py:7"
 
 
 def test_type_refutation_is_escalated_when_pyright_is_blind():
     claim = Claim("F-1", "svc.py", 7, "type")
-    v = verdict_for_claim(claim, [], pc.TYPE_RULES, blind_probe=lambda p, l: True)
+    v = verdict_for_claim(claim, [], pc.TYPE_RULES, blind_probe=lambda p, line: True)
     assert v.verdict == "UNCERTAIN"
 
 
 def test_definedness_never_runs_the_probe():
     calls = []
 
-    def probe(p, l):
-        calls.append((p, l))
+    def probe(p, line):
+        calls.append((p, line))
         return True
 
     claim = Claim("F-1", "svc.py", 7, "definedness")
@@ -114,11 +112,12 @@ def test_definedness_never_runs_the_probe():
 def test_probe_is_not_run_on_the_confirm_path():
     calls = []
 
-    def probe(p, l):
+    def probe(p, line):
         calls.append(1)
         return True
 
-    diags = [{"range": {"start": {"line": 6}}, "rule": "reportOptionalMemberAccess", "message": "m"}]
+    diags = [{"range": {"start": {"line": 6}},
+              "rule": "reportOptionalMemberAccess", "message": "m"}]
     claim = Claim("F-1", "svc.py", 7, "nullability")
     v = verdict_for_claim(claim, diags, NULLABILITY_RULES, blind_probe=probe)
     assert v.verdict == "CONFIRMED"

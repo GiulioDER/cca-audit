@@ -3,6 +3,7 @@ import sys
 
 from cca_checks.repro_runner import run_repro
 
+
 def test_failing_repro_confirms():
     v = run_repro("BUG-1", "tests/fixtures/raises_fixture.py", "ZeroDivisionError")
     assert v.verdict == "CONFIRMED" and v.source == "pytest"

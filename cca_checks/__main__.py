@@ -3,7 +3,6 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from typing import Optional
 
 from .claim import Claim, Verdict, make_verdict
 from .property_check import run_properties
@@ -28,7 +27,7 @@ def _add_claim_args(parser):
     parser.add_argument("--sink-class", default="")
 
 
-def _validate_coordinate(file: str, line: int, finding_id: str) -> Optional[Verdict]:
+def _validate_coordinate(file: str, line: int, finding_id: str) -> Verdict | None:
     """Reject a claim coordinate that cannot be settled. None means "usable".
 
     A coordinate no diagnostic can ever match must NOT reach the checkers, because
