@@ -7,7 +7,18 @@ model: inherit
 
 # Fix Planner
 
-Read audits in `.claude/audits/`. Deduplicate and prioritize findings. Output to `.claude/audits/FIXES.md`.
+> **OPTIONAL standalone helper — NOT part of the `/audit-fix` pipeline.** No command dispatches this
+> agent. `/audit-fix` consolidates and prioritizes findings inline from the auditors' structured
+> return values; it never invokes a planner and never reads `.claude/audits/FIXES.md`. Use this agent
+> only when you want a standalone, written fix plan out of a set of findings you already have.
+
+Deduplicate and prioritize findings, then output a consolidated plan to `.claude/audits/FIXES.md`.
+
+**Input contract:** findings arrive as a **JSON array per the CCA Findings Schema** (defined in the
+`audit-fix.md` command) — passed to you by whoever invokes this agent. Each object carries `id`,
+`auditor`, `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`, `suggested_fix`,
+`confidence`, `high_stakes`. The `.claude/audits/AUDIT_*.md` files are optional audit-trail only;
+read them only as a fallback when no findings array was supplied.
 
 ## Status Block (Required)
 
@@ -31,20 +42,23 @@ skipped_checks: []
 
 ## Process
 
-1. **Read** all audit reports in `.claude/audits/AUDIT_*.md`
-2. **Validate** each audit has status block with findings count
+1. **Take** the supplied findings array (CCA Findings Schema). Fallback only if none was supplied:
+   read the audit-trail reports in `.claude/audits/AUDIT_*.md`
+2. **Validate** each finding has the schema fields (or, in fallback mode, each audit has a status
+   block with a findings count)
 3. **Deduplicate** findings using the algorithm below
 4. **Prioritize** using P1-P3 framework
 5. **Output** consolidated FIXES.md
 
 ## Audit Sources
 
-Read all available audits:
+Prefer the `auditor` field on each supplied finding. Only in fallback mode (no findings array
+supplied) enumerate the trail files:
 ```bash
 ls -la .claude/audits/AUDIT_*.md 2>/dev/null
 ```
 
-Expected sources (only those that exist):
+Expected fallback sources (only those that exist):
 - `AUDIT_SECURITY.md` — From security-auditor (SINGLE authority for security + CVEs)
 - `AUDIT_BUGS.md` — From bug-auditor (runtime bugs only)
 - `AUDIT_CODE.md` — From code-auditor (quality only)

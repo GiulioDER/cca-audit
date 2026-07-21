@@ -55,6 +55,8 @@ does not depend on these files). Files that may be created:
 | `AUDIT_ENV.md` | Environment config findings |
 | `AUDIT_DEPLOY.md` | Deployability findings |
 | `AUDIT_DEPS.md` | Dependency findings |
+| `AUDIT_NUMERIC.md` | Numerical / units / sign findings |
+| `AUDIT_FPCHECK.md` | Findings-verification verdicts (Step 2.5) |
+| `AUDIT_DIFFREVIEW.md` | Differential review of the fix diff (Step 5.5) |
 | `FIXES.md` | Consolidated fix plan |
-| `REVIEW.md` | Architect-reviewer verdict |
 | `EXECUTION_LOG.md` | Run history |

@@ -77,6 +77,15 @@ Review the full diff and assess:
 - Conflicting requirements that can't be resolved automatically
 - Describe the blocker clearly and what human input is needed
 
+## Return value (authoritative)
+
+**Your reply is the return value the orchestrator consumes.** Emit the status block (with `verdict`)
+and the review below as the FIRST thing in your reply. Any `.claude/audits/*.md` file you write is
+optional audit-trail only and is NOT read back — a verdict that exists only in a file did not happen.
+
+Unlike the Layer-1 auditors you do **not** emit a CCA Findings Schema JSON array: your contract is
+the `APPROVED | REVISE | BLOCKED` verdict plus, on STANDARD/DEEP, the fix→finding mapping table.
+
 ## Output Format
 
 ```markdown

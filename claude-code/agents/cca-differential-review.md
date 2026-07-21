@@ -11,7 +11,8 @@ After fixes are applied and tests pass, confirm the fix diff changed **nothing b
 intent of each finding**. Used by the CCA pipeline (Layer 5.5). This agent does NOT apply or
 revert changes — it renders a verdict per hunk and hands control back to the orchestrator.
 
-Output to `.claude/audits/AUDIT_DIFFREVIEW.md`.
+Output to `.claude/audits/AUDIT_DIFFREVIEW.md` (optional trail). **Return value is authoritative** —
+see Return value below.
 
 ## Status Block (Required)
 
@@ -47,6 +48,15 @@ Verify:
 
 Map each hunk to the finding it serves. Flag any hunk that changes behavior NOT tied to a finding.
 
+## Return value (authoritative)
+
+**Your reply is the return value the orchestrator consumes.** Emit the status block and the per-hunk
+verdict table as the FIRST thing in your reply. The `.claude/audits/*.md` file is optional
+audit-trail only and is NOT read back — a verdict that exists only in a file did not happen.
+
+Unlike the Layer-1 auditors you do **not** emit a CCA Findings Schema JSON array: your contract is
+one `SAFE | SCOPE_CREEP | REGRESSION_RISK` verdict per hunk, each with `file:line` and reasoning.
+
 ## Verdict per Hunk
 
 - **SAFE** — the hunk resolves its finding and changes nothing else.
@@ -80,8 +90,8 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_DIFFREVIEW.md` was created.
-2. Verify every hunk in the fix diff received a verdict.
-3. If the fix diff is empty, write "No fix diff to review" (not an empty file).
+1. **Primary:** verify your reply carries the status block and a verdict for every hunk in the fix diff.
+2. Optional trail: if you wrote `.claude/audits/AUDIT_DIFFREVIEW.md`, verify it has content beyond headers.
+3. If the fix diff is empty, say "No fix diff to review" in the reply (not an empty file).
 
 Be specific with file:line. A vague REGRESSION_RISK without a reason wastes an iteration.

@@ -113,10 +113,15 @@ Findings are merged deterministically on `(file, line, category)`:
 ### Step 2.5: Findings Verification (anti-hallucination) — STANDARD / DEEP
 
 Before any fix, P1/P2 findings are re-checked against the real code by an `fp-check` agent: does the
-issue exist, is it in changed code, is the impact real, does it contradict a settled decision? Verdict
-per finding: CONFIRMED / FALSE_POSITIVE / UNCERTAIN. False positives are dropped; uncertain ones are
-escalated to the user (never fixed blind). **High-stakes P1 findings** get an adversarial **2-of-3**
-check (three independent skeptics, default-to-refute) on the DEEP tier.
+issue exist, is it in changed code, is the impact real, does it contradict a settled decision, or is it
+already reported/fixed upstream? Verdict per finding: CONFIRMED / FALSE_POSITIVE / DUPLICATE (hunt
+mode — cite the upstream URL) / UNCERTAIN. False positives and duplicates are dropped; uncertain ones
+are escalated to the user (never fixed blind). **High-stakes P1 findings** get an adversarial **2-of-3**
+check (three independent skeptics, default-to-refute) on the DEEP tier — **except** findings whose
+verdict already rests on a tool artifact (`pyright`, `semgrep`, `pytest`, `hypothesis`), notably a
+`NUM-*` P1 carrying a `hypothesis` artifact. The artifact settles it; an LLM majority does not get to
+outvote a falsifying example. Conversely, on DEEP a `NUM-*` P1 may **not** enter the fix plan without
+that artifact.
 
 ### Step 3: Fix Plan
 
