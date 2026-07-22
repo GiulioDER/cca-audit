@@ -8,6 +8,8 @@ runner must handle.
 import math
 from math import cos
 
+from helper_module import degraded_cos
+
 
 def unstable(x):
     """Catastrophic cancellation: at x=1e-8 this returns 0.0, not 0.5."""
@@ -37,3 +39,18 @@ def sign_trap(mu, vol, t):
     """The v3.4 GBM sign bug. Both substrates compute the SAME wrong formula,
     so the substrate check is structurally blind to it. Kept as a probe."""
     return (mu + 0.5 * vol ** 2) * t
+
+
+def cross_module_cancellation(x):
+    """Same cancellation trap as `unstable`, but the `cos()` call is delegated to
+    `helper_module.degraded_cos` — a second module `mpmath_bindings` cannot reach,
+    because it only patches the CALLING target's own `__module__` globals.
+
+    Proves the integrity gate's blind spot: `run_under_substrate` still returns a
+    genuine `mpf` here (the outer `1.0 - float` subtraction and the following
+    division against the still-`mpf` `x * x` re-promote the float64-degraded
+    intermediate back into an `mpf`), so the gate's isinstance check passes — but
+    the value it approves is float64-precision, computed via a cos() call that
+    never touched mpmath at all.
+    """
+    return (1.0 - degraded_cos(x)) / (x * x)

@@ -23,6 +23,20 @@ and NEVER a value, because a value could be compared and read as agreement. This
 is the package's own "a check that could not run never passes" rule applied to
 itself.
 
+THE GATE'S SCOPE IS NARROWER THAN IT SOUNDS. It proves the RETURNED VALUE is an
+`mpf` — which catches substrate loss anywhere in the target's OWN module — but it
+does not prove every intermediate computation stayed at high precision. A target
+that delegates to a helper living in a second, unpatched module gets a plain
+`float` back from that helper's `math.sin(mpf)` call; the outer arithmetic then
+re-promotes that float back into an `mpf`, so the gate sees a real `mpf` and
+passes, while the value it holds is already float64-degraded. The consequence is
+bounded and one-directional: a degraded reference can only produce a false
+UNCERTAIN (no divergence found where a sound reference would have found one),
+never a false CONFIRMED — `assert_substrate_agrees` only ever raises on disagreement,
+so a reference silently carrying float64 precision biases toward agreement, not
+away from it. See `test_gate_does_not_catch_cross_module_precision_loss` in
+`tests/test_substrate.py` for a concrete, measured case.
+
 WARNING: this executes the target's code, twice. Targets must be pure. A target
 with side effects will fire them on both runs.
 

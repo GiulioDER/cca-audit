@@ -1,5 +1,6 @@
 import dataclasses
 import math
+import os
 import sys
 
 import pytest
@@ -12,9 +13,9 @@ from cca_checks.substrate import (
     run_under_substrate,
 )
 
-pytest.importorskip("mpmath", reason="substrate extra not installed")
+mpmath = pytest.importorskip("mpmath", reason="substrate extra not installed")
 
-sys.path.insert(0, "tests/fixtures/substrate")
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "fixtures", "substrate"))
 import targets  # noqa: E402
 
 
@@ -95,6 +96,43 @@ def test_dps_below_floor_is_rejected():
     r = run_under_substrate(targets.stable, (1e-8,), dps=MIN_DPS - 1)
     assert r.reason == "bad_dps"
     assert r.value is None
+
+
+def test_gate_does_not_catch_cross_module_precision_loss():
+    """PROVES the integrity gate's blind spot, rather than merely describing it.
+
+    `cross_module_cancellation` delegates its `cos()` call to
+    `helper_module.degraded_cos`, a module `mpmath_bindings` never patches — it only
+    patches the CALLING target's own `__module__`. The gate checks only the RETURNED
+    value's type, and the value returned here IS a genuine `mpf` (the outer
+    `1.0 - float` subtraction, divided by the still-`mpf` `x * x`, re-promotes the
+    float64-degraded intermediate back into an `mpf`), so `run_under_substrate` reports
+    success (`reason is None`) for a "reference" that never actually computed `cos` at
+    50-digit precision.
+    """
+    r = run_under_substrate(targets.cross_module_cancellation, (1e-8,))
+
+    # The gate does NOT catch this: a clean value, not a reason.
+    assert r.reason is None
+    assert isinstance(r.value, mpmath.mpf)
+
+    # Prove the degradation is real: compare against the TRUE high-precision answer,
+    # computed by the identical formula but entirely through mpmath (no cross-module
+    # hop), at the same input.
+    with mpmath.workdps(50):
+        x = mpmath.mpf(1e-8)
+        true_reference = (1 - mpmath.cos(x)) / (x * x)
+
+    degraded = r.value
+    relative_error = abs(degraded - true_reference) / abs(true_reference)
+
+    # Catastrophic cancellation in helper_module's float64 cos() collapses the
+    # numerator to exactly 0.0, so the "reference" the gate approved is 0 where the
+    # true 50-digit answer is ~0.5 -- a relative error of ~1.0, not the ~1e-15 that
+    # ordinary float64 rounding would produce.
+    assert float(degraded) == pytest.approx(0.0)
+    assert float(true_reference) == pytest.approx(0.5, rel=1e-9)
+    assert relative_error > 1e-6
 
 
 def test_bindings_are_restored_after_success():
