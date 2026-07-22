@@ -55,7 +55,8 @@ otherwise.)
 \* `reachability` has no checker of its own — it is subsumed by the repro check (see §3.2). The
 `--claim-type` values `cca_checks check` actually accepts are
 `{ definedness, nullability, type, taint }`; `crash_impact` and `numeric` are settled by the
-separate `repro` and `numeric` subcommands, and `semantic` by the LLM adjudicator.
+separate `repro` and `numeric` subcommands, `substrate` is settled through that same `numeric`
+subcommand rather than a `--claim-type` of its own, and `semantic` by the LLM adjudicator.
 
 ### 3.2 claim_type → checker
 

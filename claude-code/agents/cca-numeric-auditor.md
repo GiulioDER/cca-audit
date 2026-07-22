@@ -82,7 +82,8 @@ fluently, so a second reading is not evidence.
 properties:
   - helper: assert_monotonic_in     # one of: assert_bounded | assert_monotonic_in |
                                     # assert_limit | assert_scale_invariant |
-                                    # assert_sign_symmetric | assert_round_trips
+                                    # assert_sign_symmetric | assert_round_trips |
+                                    # assert_substrate_agrees
     target: expected_log_growth     # the function under test
     args: [mu, vol, t]              # positional argument names, in order
     index: 1                        # which argument the property is about
@@ -122,7 +123,7 @@ to a notional-scale base. If your rationale says a specific term must *move* the
 `assert_round_trips` is the one helper with two callables instead of one target: use
 `forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
 
-The remaining four helpers follow the same `target`/`args`/`domains`/`rationale` shape as
+The remaining five helpers follow the same `target`/`args`/`domains`/`rationale` shape as
 `assert_monotonic_in` above, with these helper-specific keys:
 
 - **`assert_bounded`** — `lo`, `hi` (the required inclusive result range).
