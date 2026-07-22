@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a new claim type, auditor, checker, or pipeline behavior.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing a new auditor or claim type, check `docs/auditor-scopes.md` — every
+        auditor has a non-overlapping scope, and a new one needs to name what it checks that
+        nothing else already covers. See `docs/extending.md` for the mechanics of adding one.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: What part of the pipeline does this touch?
+      options:
+        - A new/changed auditor (agent markdown)
+        - A new claim type or cca_checks checker
+        - Tier selection / dispatch logic
+        - Hunt mode
+        - CLI / install scripts
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's missing or wrong today?
+      description: The gap this closes — a false positive/negative class you've hit, a scope no auditor owns, a tier that dispatches wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: >-
+        What should happen instead. If this is a new claim type, say what verdict asymmetry it
+        should have (can it CONFIRM, refute, both, neither — see property_check.py and
+        semgrep_check.py docstrings for the two existing asymmetries) and whether it needs a new
+        optional extra.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope boundary (if this is a new auditor or claim type)
+      description: What it checks, and — just as important — what it explicitly does NOT check, to keep it non-overlapping with existing auditors.
+    validations:
+      required: false

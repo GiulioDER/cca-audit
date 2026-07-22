@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" width="1200" height="280" role="img" aria-label="CCA-Audit — every finding is verified against your real code before anything is edited. Pipeline: detect, parallel auditors, consolidate, verify, fix, regression diff, architect gate.">
+  <style>
+    .bg     { fill: #0d1219; }
+    .rule   { stroke: #1f2a36; stroke-width: 1; }
+    .wordmk { font: 700 40px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #e6ebf1; letter-spacing: -0.5px; }
+    .tag    { font: 400 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #7b8896; }
+    .lede   { font: 400 17px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #a3b0bd; }
+    .accent { fill: #d9a05b; }
+    .node   { font: 600 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #c6d0da; }
+    .gate   { font: 600 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #d9a05b; }
+    .cap    { font: 400 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #6f7c89; }
+    .box    { fill: #131a22; stroke: #2a3440; stroke-width: 1; }
+    .boxg   { fill: #241d12; stroke: #6b5330; stroke-width: 1; }
+    .arrow  { stroke: #3a4653; stroke-width: 1.5; fill: none; }
+  </style>
+
+  <rect class="bg" width="1200" height="280"/>
+
+  <!-- wordmark -->
+  <text class="wordmk" x="56" y="72">CCA-Audit</text>
+  <text class="tag" x="292" y="72">v0.4.0</text>
+  <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code. Every finding is verified against your</text>
+  <text class="lede" x="56" y="128">real code — mechanically, where a tool can settle it — before a line is edited.</text>
+
+  <line class="rule" x1="56" y1="156" x2="1144" y2="156"/>
+
+  <!-- pipeline -->
+  <g transform="translate(56,182)">
+    <rect class="box" x="0"   y="0" width="118" height="34" rx="3"/>
+    <text class="node" x="59" y="22" text-anchor="middle">auditors ×10</text>
+    <path class="arrow" d="M124 17 H150"/><path class="arrow" d="M144 12 l6 5 -6 5"/>
+
+    <rect class="box" x="156" y="0" width="112" height="34" rx="3"/>
+    <text class="node" x="212" y="22" text-anchor="middle">consolidate</text>
+    <path class="arrow" d="M274 17 H300"/><path class="arrow" d="M294 12 l6 5 -6 5"/>
+
+    <rect class="boxg" x="306" y="0" width="150" height="34" rx="3"/>
+    <text class="gate" x="381" y="22" text-anchor="middle">verify · L2.5</text>
+    <path class="arrow" d="M462 17 H488"/><path class="arrow" d="M482 12 l6 5 -6 5"/>
+
+    <rect class="box" x="494" y="0" width="104" height="34" rx="3"/>
+    <text class="node" x="546" y="22" text-anchor="middle">fix</text>
+    <path class="arrow" d="M604 17 H630"/><path class="arrow" d="M624 12 l6 5 -6 5"/>
+
+    <rect class="boxg" x="636" y="0" width="168" height="34" rx="3"/>
+    <text class="gate" x="720" y="22" text-anchor="middle">regression · L5.5</text>
+    <path class="arrow" d="M810 17 H836"/><path class="arrow" d="M830 12 l6 5 -6 5"/>
+
+    <rect class="boxg" x="842" y="0" width="146" height="34" rx="3"/>
+    <text class="gate" x="915" y="22" text-anchor="middle">architect · L6</text>
+
+    <text class="cap" x="0"   y="58">10 auditors, non-overlapping scopes</text>
+    <text class="cap" x="381" y="58" text-anchor="middle">pyright · semgrep · pytest · hypothesis</text>
+    <text class="cap" x="915" y="58" text-anchor="middle">every finding maps to a fix, or REVISE</text>
+  </g>
+
+  <!-- amber = a gate that can stop the run -->
+  <g transform="translate(56,262)">
+    <rect class="boxg" x="0" y="-9" width="11" height="11" rx="2"/>
+    <text class="cap" x="20" y="1">amber = a gate that can stop the run · verdicts are CONFIRMED / UNCERTAIN, never a silent pass</text>
+  </g>
+</svg>

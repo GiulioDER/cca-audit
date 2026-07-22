@@ -1,0 +1,102 @@
+name: Bug report
+description: Something in the pipeline or cca_checks misbehaved — wrong verdict, crash, false positive/negative.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this. Because `cca_checks` produces verdicts (CONFIRMED / FALSE_POSITIVE /
+        UNCERTAIN) rather than plain pass/fail, "steps to reproduce" alone usually isn't enough to
+        triage — the fields below are what actually let us tell whether the deterministic layer ran
+        at all, and if so, why it disagreed with you.
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which /audit-fix tier ran?
+      description: Auto-selected or forced — see the README's Tiers table if unsure which applied.
+      options:
+        - FAST
+        - STANDARD
+        - DEEP
+        - hunt mode (forces DEEP)
+        - Not sure / didn't run through /audit-fix
+    validations:
+      required: true
+
+  - type: dropdown
+    id: claim-type
+    attributes:
+      label: Claim type involved (if applicable)
+      description: Leave as "N/A" if this isn't about a specific claim verdict.
+      options:
+        - N/A
+        - definedness
+        - type
+        - nullability
+        - taint
+        - numeric
+        - substrate (assert_substrate_agrees)
+        - Not sure
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: "`python --version` — the interpreter that ran cca_checks, not necessarily your project's."
+      placeholder: "3.12.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: extras
+    attributes:
+      label: Which optional extras are installed?
+      description: >-
+        Missing extras change verdicts silently by design (e.g. numeric claims escalate to
+        UNCERTAIN without `[numeric]`) — this is often the actual root cause.
+      multiple: true
+      options:
+        - "none (base install only)"
+        - "numeric (hypothesis, pytest, mpmath)"
+        - "verify (numeric + pyright, semgrep)"
+        - "dev"
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: verdict-json
+    attributes:
+      label: Verdict JSON (if one was produced)
+      description: >-
+        Paste the raw Verdict object(s) from `cca_checks` output — `verdict`, `reason`, `source`,
+        and any artifact fields. If no verdict was produced at all (e.g. the pipeline crashed
+        before reaching fp-check), say so instead.
+      render: json
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: What happened, and how to reproduce it
+      description: >-
+        What you expected, what you got, and the minimal command/diff/target that triggers it.
+        If this involves code the tool executed (pytest/pyright/semgrep subprocess output), include
+        that output — see SECURITY.md if this is instead a report about *unauthorized* code
+        execution against untrusted input, which should go through GitHub Security Advisories
+        instead of a public issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: OS and environment
+      placeholder: "e.g. Windows 11 + PowerShell, or Ubuntu 22.04 in CI"
+    validations:
+      required: false

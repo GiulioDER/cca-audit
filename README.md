@@ -1,64 +1,119 @@
 <p align="center">
-  <img src="banner.jpg" alt="CCA-Audit — multi-agent code audit + fix pipeline for Claude Code" width="100%"/>
+  <img src="docs/banner.svg" alt="CCA-Audit — multi-agent code audit for Claude Code. Pipeline: parallel auditors, consolidate, verify (L2.5), fix, regression diff (L5.5), architect gate (L6)." width="100%"/>
+</p>
+
+<p align="center">
+  <a href="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml"><img src="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
+  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10–3.13"/>
+  <img src="https://img.shields.io/badge/tests-306%20passing-brightgreen" alt="306 tests passing"/>
+  <img src="https://img.shields.io/badge/typed-pyright-informational" alt="Type-checked with pyright"/>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
 </p>
 
 # CCA-Audit
 
-**The multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that doesn't cry wolf.**
+**A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in which no finding reaches your code unverified.**
 
-Every AI reviewer has the same problem: it hallucinates. It flags a null-deref that's guarded three lines up, "fixes" things that were never broken, and buries the one bug that actually matters under a pile of noise. CCA-Audit is built to do the opposite — it **verifies every finding against your real code before it touches a line**, so it catches the expensive bug *and* stays quiet about the fake ones.
+Ten specialised auditors read your diff in parallel. Their findings are deduplicated, then each one is
+**re-derived against the real code** — mechanically, by `pyright`, `semgrep`, `pytest` or `hypothesis`
+wherever a tool can settle the claim, and by adversarial review where none can. Only findings that
+survive that gate are eligible to be fixed. The fix is then checked for scope creep, and the whole
+change is gated on a mapping proving every confirmed finding has a fix and every edit has a finding.
 
-One command — `/audit-fix` — runs specialized auditors in parallel on your changed code, deduplicates their findings, **verifies each one against the real code (anti-hallucination gate)**, auto-fixes what's confirmed, re-verifies, checks the fix introduced no regression, and gates the result through an architect review. Any language, auto-tiered by how risky the diff is.
+The design constraint throughout: **a check that could not run must never be indistinguishable from a
+check that passed.**
 
-## Field results — real bugs, real repos
+---
 
-Not a rigged demo. This is a bug CCA's [hunt mode](#hunt-mode--audit-code-you-didnt-write) found in third-party code it never wrote:
+## Verified in the field
 
-| Repo | Bug it found | Impact | Evidence |
-|------|--------------|--------|----------|
-| **[Polymarket/py-sdk](https://github.com/Polymarket/py-sdk)** &nbsp;·&nbsp; ⭐ 70, active | Client-side price validation checked decimal **places**, not **tick-grid membership**. On a `0.005` / `0.0025` half-tick market an off-grid price like `0.007` passed validation, got EIP-712 **signed**, and could only be rejected downstream by the exchange. Present in *both* the limit and market price paths. | Silent rejection of real-money orders | fix **[merged — PR #1](https://github.com/GiulioDER/py-sdk/pull/1)** · reported upstream: **[issue #162](https://github.com/Polymarket/py-sdk/issues/162)** |
+CCA's [hunt mode](#hunt-mode--auditing-code-you-did-not-write) was pointed at
+[Polymarket/py-sdk](https://github.com/Polymarket/py-sdk) — a third-party SDK, ~70 stars, actively
+maintained — and found a client-side price-validation defect:
 
-**How it got there:** `/audit-fix hunt` surfaced 4 candidates; the adversarial 2-of-3 verifier **killed the flashiest one** (already fixed in an open upstream PR) and one deliberate-by-design finding, leaving a single bug that survived scrutiny — then reproduced it against **~23,000 exhaustive price/tick cases** (zero false accepts, zero false rejects) *before a line was written*.
+> `_resolve_price` and `_resolve_protected_market_price` validated prices by **decimal-place count**
+> rather than **tick-grid membership**. The two agree on power-of-ten ticks and diverge on `0.005`
+> and `0.0025` markets, where a price like `0.007` has three decimals, passes validation, is signed
+> into the EIP-712 order, and is only then rejected by the exchange.
 
-> **Straight about the links:** upstream `py-sdk` accepts issues but locks pull requests to collaborators, so the fix is merged in a **fork** (PR #1) and the bug is filed **upstream as an issue** (#162) — not merged into Polymarket. Both are live links; check them.
+| | |
+|---|---|
+| Reported upstream | [issue #162](https://github.com/Polymarket/py-sdk/issues/162), 14 Jul 2026 |
+| Fixed upstream | [PR #181](https://github.com/Polymarket/py-sdk/pull/181), merged 21 Jul 2026 — body states *"Fixes #162"* |
+| Author of the fix | a Polymarket maintainer, independently |
+| Issue status | closed as **completed** |
 
-## See it work
+**To be precise about what that means:** the upstream fix was written by a Polymarket maintainer, not
+submitted by us. That is the stronger result — an outside bug report was credible and specific enough
+that the maintainers implemented and shipped it themselves. Every link above is checkable in under a
+minute, which is the point.
 
-We planted **one subtle, money-losing bug** in a position sizer — `risk_limit_bps / 100` where basis points require `/ 10_000`, a **100× over-size** that a green test suite sails right past — plus **three false-positive traps** designed to bait a lazy reviewer (a guarded division, a cross-file guard, an off-diff config key).
+How the finding survived to that point: `/audit-fix hunt` surfaced four candidates; the adversarial
+2-of-3 verifier **killed the flashiest one** (already fixed in an open upstream PR) and one
+deliberate-by-design finding; the survivor was reproduced against ~23,000 exhaustive price/tick cases
+before a line was written.
 
-CCA caught the money bug and **refused all three traps:**
+## It audits itself, and the self-audit finds things
 
-<!-- Swap in the animated recording at docs/demo.gif when ready -->
-<p align="center">
-  <img src="docs/demo.svg" alt="CCA-Audit catching a 100x sizing bug while refusing three false-positive traps" width="100%"/>
-</p>
-<p align="center"><sub><strong>&#9654; animated:</strong> open <a href="docs/demo.html"><code>docs/demo.html</code></a> &nbsp;&#183;&nbsp; <strong>full run + real transcripts:</strong> <a href="https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/DEMO.md">the case study</a></sub></p>
+The most recent release, `v3.5`, shipped through five task reviews and a whole-branch review. CCA was
+then pointed at it. It found **two Critical defects that the entire review process had missed**:
 
-- 🎯 **Caught** `NUM-001` (Critical): the 100× sizing bug → **$2,500,000 notional on a $100k account (25:1 leverage)** — while the smoke test stayed green.
-- 🛡️ **Refused every false positive** — the bug, security, and performance auditors each looked straight at the "possible `ZeroDivisionError`" and *declined it* after tracing the validator. Zero hallucinations across the whole fan-out.
-- 🧮 **Self-corrected** — the verification gate re-derived an overstated impact figure *before* any fix was applied.
-- ✂️ **Deduped** 6 raw findings into a **single one-line fix**, then proved it (tests green, architect **APPROVED**).
+- **CI had never executed the feature's test suite.** The workflow installed an extra that omitted
+  `mpmath`; both test files `importorskip` it, so ~25 tests — including the integrity gate, the
+  feature's central safety guarantee — skipped silently on all four Python versions. `2 skipped`
+  became `31 passed`.
+- **One environment variable made correct code confirm as defective.** `CCA_SUBSTRATE_TOL=1e-20` drove
+  the deliberately-correct test fixture to raise a violation at a measured relative error of `8.3e-18`
+  — ordinary float64 noise. That verdict would have been binding: protected from being overturned,
+  exempt from the adversarial panel, and feeding an automated fix plan.
 
-**Reproduce it yourself** — full walkthrough + the real, unedited agent transcripts:
-→ [the case study](https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/DEMO.md) · [the receipts](https://github.com/GiulioDER/cca-audit/blob/demo/bps-sizing/examples/bps-sizing/RECEIPTS.md)
+Both were confirmed by execution rather than by re-reading, and both now carry red→green regression
+tests. The full round is [PR #22](https://github.com/GiulioDER/cca-audit/pull/22).
 
-```bash
-git clone -b demo/bps-sizing https://github.com/GiulioDER/cca-audit
-# install (see below), then in Claude Code, from the repo root:
-/audit-fix commit 1
-```
+## What is actually different
 
-## What makes it different
+Multi-agent review is common. These parts are not:
 
-Multi-agent review is table stakes now. These parts aren't:
+**Mechanical verification, not a second opinion.** A finding is classified into a *claim type* and
+settled by the tool that can actually decide it — `pyright` for definedness/nullability/type,
+`semgrep` for taint, a `pytest` repro for crash impact, `hypothesis` for arithmetic. The verdict
+carries a machine-produced artifact. An LLM may not overturn an artifact-backed verdict; it
+adjudicates only what no tool could settle.
 
-- **Anti-hallucination gate (`fp-check`)** — every P1/P2 finding is re-checked against the actual code *before* it's eligible to be fixed. False positives are dropped **with evidence**; overstated impacts get corrected. Biased to refute.
-- **Anti-regression gate (`differential-review`)** — after fixes, a differential pass confirms the fix diff changed **nothing** beyond the intent of each finding.
-- **Fix→finding mapping** — the architect gate emits a table proving every confirmed finding maps to a fix and every change maps to a finding. An orphan finding or a phantom edit forces a revise.
-- **Non-overlapping auditor scopes** — security is the single authority for security, numeric owns units/sign, etc. No duplicate findings, no turf wars.
-- **Risk-tiered** — trivial diffs stay cheap; money / auth / numeric diffs automatically get the full adversarial treatment.
+**Asymmetric verdicts, stated honestly.** Each settler can only conclude what its evidence supports.
+`semgrep` can prove a sink is absent but never that an injection is real. The numeric checker can
+confirm with a falsifying example but never refute, because a property holding across a bounded
+search is the absence of a counterexample, not proof of correctness. A clean run is `UNCERTAIN`, not
+a green pass.
 
-And it isn't limited to your own diffs. **Hunt mode** (`/audit-fix hunt <paths>`) turns the whole pipeline on a codebase you did **not** write — an OSS dependency, a repo you're evaluating — to find pre-existing bugs, with a target-viability pre-flight that refuses to audit an archived or dead repo. See [Hunt Mode](#hunt-mode--audit-code-you-didnt-write).
+**Anti-regression on the fix itself.** After fixes land, a differential pass verifies each hunk maps
+to its finding and introduced no behaviour change beyond it. Scope creep and regression risk are
+kicked back.
+
+**Fix→finding mapping as a merge gate.** The architect gate emits a table proving every confirmed
+finding has a fix and every edit traces to a finding. An orphan finding or a phantom edit forces
+REVISE.
+
+**Risk-tiered, not user-tiered.** Trivial diffs run cheap; money, auth, and numeric diffs are forced
+to the full adversarial treatment. You do not choose the tier by asserting your change is safe.
+
+## Honest limits
+
+A verification tool that cannot state where it is blind is asking for trust it has not earned. These
+are enforced as **tests**, not disclaimers:
+
+- **The numeric substrate check cannot see sign or formula errors.** It is decorrelated on
+  *evaluation* and correlated on *transcription*: both substrates faithfully compute whatever
+  structure was written down, so a flipped sign survives into both and they agree. That class belongs
+  to the property helpers. `test_sign_trap_does_not_violate` asserts this.
+- **Its integrity gate proves the returned value, not every intermediate.** A target that delegates to
+  an unpatched second module can return a high-precision-typed value carrying float64 precision.
+  Measured: the gate passes a reference of `0.0` where the true answer is `0.5`.
+  `test_gate_does_not_catch_cross_module_precision_loss` asserts this.
+- **A property is authored by the same agent that raised the finding**, so a wrong declared relation
+  produces a real counterexample to a wrong claim. A confirmation obliges you to re-read the relation,
+  not just the verdict.
+- **Deterministic settlers are Python-only.** Other languages fall back to LLM adjudication.
 
 ## Pipeline
 
@@ -77,42 +132,68 @@ flowchart LR
     H --> I["Step 7\nCommit"]
 ```
 
-(FAST tier runs only the 3 core auditors and skips the regression gate — but it still verifies every
-P1 before fixing it. No finding is edited into your code unverified, on any tier.)
+FAST runs three core auditors and skips the regression gate — but still verifies every P1 before
+fixing it. **No finding is edited into your code unverified, on any tier.**
 
-## The Auditors
+## The auditors
 
-Each auditor has a **non-overlapping scope** — no duplicate findings.
+Each has a **non-overlapping scope**, so findings do not duplicate and no auditor arbitrates another's
+domain.
 
-**Core (always run; FAST runs only the first three):**
+**Core** (FAST runs only the first three):
 
-| Auditor | Scope | Does NOT Check |
+| Auditor | Scope | Does NOT check |
 |---------|-------|----------------|
-| **Security** (single authority) | OWASP Top 10, injection, auth, secrets, CVEs | Runtime bugs, code quality |
-| **Bug Scanner** | Null refs, error handling, race conditions, resource leaks | Security vulns, code style |
-| **Code Quality** | Type safety, DRY, complexity, naming, dead code | Security, runtime bugs, performance |
-| **Performance** | Slow queries, hot paths, memory, connection pools | Security, code style |
-| **Documentation** | Missing docs, stale comments, type annotations | TODOs, debug statements |
-| **Environment** | Config completeness, format validation, naming | Secrets (owned by Security) |
+| **Security** *(single authority)* | OWASP Top 10, injection, auth, secrets, CVEs | Runtime bugs, code quality |
+| **Bug** | Null refs, error handling, races, resource leaks | Security, style |
+| **Code Quality** | Type safety, DRY, complexity, naming, dead code | Security, runtime, performance |
+| **Performance** | Slow queries, hot paths, memory, pooling | Security, style |
+| **Documentation** | Missing docs, stale comments contradicting new code | TODOs, debug statements |
+| **Environment** | Config completeness, format validation, naming | Secrets *(Security owns those)* |
 
-**Conditional (dispatched only when the diff touches their concern):**
+**Conditional**, dispatched only when the diff touches their concern:
 
 | Auditor | Runs when | Checks |
 |---------|-----------|--------|
 | **High-Stakes / Safety** | money / auth / delete / irreversible paths | Bounds, guards, kill-switches, idempotency |
 | **Numerical / Units** | non-trivial arithmetic | Sign, units, scaling, rounding, conversions |
 | **Data-Integrity** | migrations / SQL / schema | Migration+grant, type assumptions, safe accessors |
-| **Dependency** | a manifest/lockfile changed | Maintenance health, licenses, unused deps, pin breakers |
-| **Deployability** | deployable code / units / migrations | Generated/protected files, pin/lock breakers, service↔scheduler pairing, migration grants, deploy-target assumptions |
+| **Dependency** | a manifest or lockfile changed | Maintenance health, licences, unused deps, pin breakers |
+| **Deployability** | deployable code / units / migrations | Generated files, pin/lock breakers, service↔scheduler pairing, deploy-target assumptions |
 
-Plus verification agents: **fp-check** (anti-hallucination) and **differential-review** (anti-regression), and the **architect-reviewer** final gate (read-only).
+Plus the verification agents: **fp-check** (anti-hallucination), **differential-review**
+(anti-regression), and the read-only **architect-reviewer** final gate.
+
+## Hunt mode — auditing code you did not write
+
+`/audit-fix` reviews *your* diff. **Hunt mode** turns the same pipeline on a codebase you did not
+write — a dependency, a repo you are evaluating, a legacy service — to find pre-existing defects:
+
+```
+/audit-fix hunt src/payments        # a whole subtree, no diff required
+/audit-fix hunt path/to/file.py     # or specific files
+```
+
+What changes:
+
+- **Whole-file audit.** *"Pre-existing bugs are the target"* replaces *"only audit the diff."* Age is
+  not evidence of correctness.
+- **A target-viability pre-flight runs first**, before a single auditor is spawned: is the repo alive,
+  does it accept contributions, is there a test harness, is the language one this pipeline audits
+  well. An archived or deprecated repo is rejected up front — auditing a corpse burns the run and
+  produces a fix nobody can merge.
+- **Forced DEEP tier**, so every finding faces the adversarial 2-of-3 verifier.
+- **Upstream-duplicate check.** L2.5 searches the target's own issues and PRs; a bug someone already
+  reported is dropped as `DUPLICATE` rather than re-submitted.
+
+The output is a finding you can stand behind: reproduced with a failing test, not already known
+upstream, and survivable under adversarial review. That is the process that produced the Polymarket
+result above.
 
 ## Install
 
-Drop-in agents for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). One command installs, one slash command runs.
-
 ```bash
-# Unix/macOS — install into your project's .claude/ directory (requires git)
+# Unix/macOS — installs into your project's .claude/ directory (requires git)
 curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
 ```
 
@@ -121,131 +202,90 @@ curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-c
 irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.ps1 | iex
 ```
 
-This copies the commands into `.claude/commands/`, the agents into `.claude/agents/`, and installs the **`cca_checks`** helper package (`python -m cca_checks`) that powers the deterministic verifier. Run it from the root of the project you want to audit.
+This copies the commands into `.claude/commands/`, the agents into `.claude/agents/`, and installs the
+**`cca_checks`** helper package (`python -m cca_checks`) that powers the deterministic verifier. Run
+it from the root of the project you want to audit.
 
-**For the deterministic verification layer**, also have `pyright`, `pytest`, and `semgrep` on your `PATH` (`pip install pyright pytest semgrep`). Without `cca_checks` or those tools, the `definedness` / `nullability` / `type` / `taint` claim types **fall back to LLM-only verification** — no crash, no regression. See the [Claude Code README](claude-code/README.md) for local-clone install and details.
+**For the deterministic verification layer**, have `pyright`, `pytest` and `semgrep` on your `PATH`.
+Without them the `definedness` / `nullability` / `type` / `taint` claim types fall back to LLM-only
+verification — no crash, no regression.
 
-**`numeric` is the exception: it fails closed rather than falling back.** On the DEEP tier a `NUM-*`
-P1 may not enter the fix plan on an LLM-sourced verdict — it carries a Hypothesis artifact or it is
-escalated as UNCERTAIN. DEEP is forced for every high-stakes or numeric diff and for all of hunt
-mode, so **without the `numeric` extra, arithmetic findings on money-path code cannot be auto-fixed
-at all.** That is deliberate — a sign error reads fluently, so a second LLM opinion is not evidence —
-but it is a hard stop, not a graceful degradation. Install it from a clone:
+**`numeric` is the exception: it fails closed rather than falling back.** On DEEP, a `NUM-*` P1 may
+not enter the fix plan on an LLM-sourced verdict — it carries a Hypothesis artifact or it is escalated
+as `UNCERTAIN`. DEEP is forced for every high-stakes or numeric diff and for all of hunt mode, so
+**without the `numeric` extra, arithmetic findings on money-path code cannot be auto-fixed at all.**
+That is deliberate — a sign error reads fluently, so a second LLM opinion is not evidence — but it is
+a hard stop, not graceful degradation.
+
+`cca_checks` is not published on PyPI, so install it from a clone:
 
 ```bash
-pip install -e ".[numeric]"
+pip install -e ".[numeric]"     # adds hypothesis + mpmath
+pip install -e ".[verify]"      # the whole deterministic layer in one install
 ```
 
-`cca_checks` is not published on PyPI, so `pip install "cca_checks[numeric]"` will not resolve; use
-the editable install above, or `pip install "<path-to-clone>[numeric]"`. The extra adds the `numeric`
-claim type, which settles arithmetic defects — wrong sign, mixed units, bad scaling — by running
-declared metamorphic properties under Hypothesis. It confirms with a falsifying example and never
-refutes, because properties holding is not proof of correctness. Worked example:
-[`examples/sign-trap`](examples/sign-trap/).
-
-The same extra also brings `mpmath` and a seventh helper, `assert_substrate_agrees`: it runs the
-target twice — once in float64, once against a 50-digit `mpmath` reference — and confirms only
-when the two disagree beyond a fixed tolerance. It has no authored relation to correlate with the
-finding that raised it, which is what makes it independent of the property helpers above.
-
-**Read its scope precisely: it is decorrelated on *evaluation*, correlated on *transcription*.**
-Nobody writes down the disagreement, so no shared assumption can be laundered into how the formula
-is *evaluated* — that is the whole point, and it is why cancellation, accumulation, and
-rounding-direction defects fall out of it for free. But both substrates faithfully compute whatever
-structure you wrote down, so a defect in how the formula was *transcribed* — a flipped sign, a
-wrong term — survives into both runs and they agree perfectly. That class belongs to the property
-helpers above. Pair the two when a finding is about direction; neither one covers the other's
-class. (Framing owed to the author of [the harness post](https://dev.to/egnaro9/i-built-an-ai-dev-harness-that-isnt-allowed-to-trust-itself-53mh)
-that prompted this work.)
-
-See the [design spec](docs/superpowers/specs/2026-07-21-substrate-differential-design.md).
+Worked example: [`examples/sign-trap`](examples/sign-trap/) — a real sign error, the property that
+catches it, and the resulting artifact.
 
 ## Usage
 
-One command, auto-tiered:
-
 ```
-/audit-fix                 # audit + fix all uncommitted changes (tier auto-selected)
-/audit-fix deferred        # second pass: fix deferred P3 items from the previous round
-/audit-fix no-fix          # audit + verify only, no fixes
+/audit-fix                 # audit + fix uncommitted changes (tier auto-selected)
+/audit-fix deferred        # second pass: fix P3 items deferred by the previous round
+/audit-fix no-fix          # audit + verify only
 /audit-fix p1-only         # fix only P1 Critical findings
-/audit-fix fast            # force the cheap 3-auditor tier
-/audit-fix deep            # force the full tier (all domain auditors + adversarial verify)
+/audit-fix fast | deep     # override the auto-selected tier
 /audit-fix commit 3        # audit the last 3 commits
 /audit-fix files src/app.py
-/audit-fix hunt src/       # HUNT MODE: audit code you did NOT write for pre-existing bugs
+/audit-fix hunt src/       # audit code you did NOT write
 ```
 
-You normally don't pick a tier — the pipeline does. High-stakes/numeric diffs always run **DEEP**; trivial low-stakes diffs run **FAST**; everything else runs **STANDARD**. Use `fast` / `deep` only to override.
-
-> `/audit-fix-v2` is kept as a backward-compatible alias that forces the **DEEP** tier. The old
-> v1/v2 split has been merged into this one tiered pipeline.
-
-## Hunt Mode — audit code you didn't write
-
-`/audit-fix` normally reviews *your* diff. **Hunt mode** turns the same pipeline on a codebase you did
-**not** write — an OSS dependency, a repo you're evaluating, a legacy service — to find **pre-existing**
-bugs that ship today:
-
-```
-/audit-fix hunt src/payments        # audit a whole subtree, no diff required
-/audit-fix hunt path/to/file.py     # or specific files
-```
-
-What changes in hunt mode:
-
-- **Whole-file audit, no diff.** Auditors read each file in full; *"pre-existing bugs are the target"*
-  replaces *"only audit the diff."*
-- **A target-viability pre-flight runs first.** Before spawning a single auditor it checks the repo is
-  alive, accepts contributions, has a test harness, and is in a language it audits well. An archived
-  or deprecated repo is **rejected up front** — auditing a corpse wastes the whole run and produces a
-  fix nobody can merge.
-- **Forced DEEP tier.** Every finding faces the adversarial 2-of-3 verifier, so a plausible-but-wrong
-  finding gets killed before you act on it.
-- **Upstream-duplicate check.** L2.5 searches the target's own issues and PRs; a bug someone already
-  reported is dropped as a `DUPLICATE`, not re-submitted.
-
-The result is a bug you can stand behind: reproduced with a failing test, not already known upstream,
-and survivable under an adversarial review — exactly what you need before opening a PR against someone
-else's project.
-
-## Tiers
+You normally do not pick a tier — the pipeline does.
 
 | Tier | When (auto) | Auditors | Verification gates | P1 fix style |
 |------|-------------|----------|--------------------|--------------|
-| **FAST** | trivial, low-stakes, non-deploy diff | security, bug, code | L2.5 on P1 only (P2/P3 reported, not fixed) | direct |
-| **STANDARD** | normal diff | all 6 core + conditional domain/dep/deploy | L2.5 + L5.5 + mapping | red→green test |
-| **DEEP** | high-stakes / numeric / forced | all of STANDARD | + **adversarial 2-of-3** on high-stakes P1 | red→green test |
-
-## Priority Framework
+| **FAST** | trivial, low-stakes, non-deploy diff | 3 core | L2.5 on P1 only | direct |
+| **STANDARD** | normal diff | all 6 core + conditional | L2.5 + L5.5 + mapping | red→green test |
+| **DEEP** | high-stakes / numeric / hunt / forced | all of STANDARD | + adversarial 2-of-3 on high-stakes P1 | red→green test |
 
 | Priority | Criteria | Action |
 |----------|----------|--------|
-| **P1 Critical** | Security vulns, data corruption, auth bypass, injection, unsafe money/irreversible handling | Fix before deploy (with a red→green regression test) |
-| **P2 High** | DRY divergence risk, stale misleading comments, config inconsistencies, unit mismatches | Fix now |
-| **P3 Nice-to-have** | Cosmetic, style, naming, unused params | Deferred to Round 2 |
+| **P1 Critical** | Security, data corruption, auth bypass, injection, unsafe money/irreversible handling | Fix before deploy, with a red→green test |
+| **P2 High** | DRY divergence, stale misleading comments, config inconsistencies, unit mismatches | Fix now |
+| **P3** | Cosmetic, style, naming, unused params | Deferred to round 2 |
 
-## Two-Pass Workflow
+Round 2 (`/audit-fix deferred`) reads the deferred list from the previous commit, re-checks each item
+is still relevant, fixes what remains and marks the rest stale — so no audit leaves a tail.
 
-1. **Round 1** (`/audit-fix`): full audit, fixes P1 Critical + P2 High, defers P3 cosmetic items. Commits with a structured message listing deferred items.
-2. **Round 2** (`/audit-fix deferred`): reads the deferred list from the previous commit, checks each item is still relevant, fixes what remains, marks stale items. Commits separately.
+## Engineering
 
-This ensures every audit is fully closed out — no lingering deferred items across PRs.
+| | |
+|---|---|
+| Tests | 306, on every push and PR |
+| Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
+| Packaging | wheel built and smoke-installed into a clean venv in CI |
+| Lint | `ruff`, zero warnings |
+| Types | `pyright` |
+| Design of record | [`docs/v3-design.md`](docs/v3-design.md), versioned slices v3.0 → v3.5 |
+
+Every deterministic-verification slice ships with a written spec and an implementation plan under
+[`docs/superpowers/`](docs/superpowers/), including the measured dead ends — approaches that were
+tried, failed, and are recorded so they are not re-attempted.
 
 ## Documentation
 
-- [Pipeline Diagram](docs/pipeline-diagram.md) — detailed walkthrough of each step
-- [Auditor Scopes](docs/auditor-scopes.md) — full non-overlapping scope matrix
+- [Pipeline Diagram](docs/pipeline-diagram.md) — a walkthrough of each step
+- [Auditor Scopes](docs/auditor-scopes.md) — the full non-overlapping scope matrix
 - [Configuration](docs/configuration.md) — tiers, domain dispatch, project context
-- [Extending](docs/extending.md) — how to add custom auditors
+- [Extending](docs/extending.md) — adding a custom auditor
 - [v3 Design](docs/v3-design.md) — the design of record for the deterministic verification layer
+- [Security Policy](SECURITY.md) — **this tool executes code from the repository under audit**
+- [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
 
 **Writing**
 
-- [Fluency isn't evidence](docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how the `numeric` claim type settles it with a counterexample instead
-- [Why AI review hallucinates](docs/blog-why-ai-review-hallucinates.md) — the failure mode the verification gate exists to close
-- [The benchmark memorization gap](docs/blog-benchmark-memorization-gap.md) — why benchmark scores overstate real-world bug-finding
-- [Why AI code review hallucinates](docs/blog-why-ai-review-hallucinates.md) — and the two gates that fix it
+- [Fluency isn't evidence](docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how a counterexample settles it
+- [Why AI code review hallucinates](docs/blog-why-ai-review-hallucinates.md) — and the two gates that close it
 - [The benchmark memorization gap](docs/blog-benchmark-memorization-gap.md) — what a passing benchmark score actually measures
 
 ## License
