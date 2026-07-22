@@ -14,6 +14,8 @@ separate *finding a bug* from *remembering a public patch*. Full write-up:
 | **confirmed recall — clean (unrecognized)** | **— (no clean data)** | **3/7 (43%)** |
 | specificity (quiet on the fix) | 12/12 | 9/10 |
 | fp-check drop rate | 17% | **42%** |
+| — **bugs lost to the gate** | 0 | **1** |
+| — false alarms prevented by the gate | 0 | 1 |
 
 **The 40-point gap between memorized (83%) and novel (43%) code is the finding.** Full numbers +
 per-bug detail + caveats: [results/RESULTS.md](results/RESULTS.md) ·
@@ -29,6 +31,14 @@ per-bug detail + caveats: [results/RESULTS.md](results/RESULTS.md) ·
   reproduce its canonical version from memory. Catches on *recognized* files are contaminated
   (recall via memory, not reasoning); the honest number is recall on **unrecognized** files.
 - **fp-check gate**: every raw finding is re-verified against the code; unprovable ones are dropped.
+  Each drop records a structured `drop_reason`, separating a **refutation** ("the code disproves this")
+  from an **inconclusive** ("may be real, this file can't settle it") — they are opposite signals and
+  a bare drop count hides the difference.
+- **Drop adjudication**: a drop rate on its own is uninterpretable, because a gate that correctly
+  suppresses a hallucination and a gate that kills a real bug both just increment it. Ground truth
+  settles it deterministically: a drop landing on a fix hunk in the *buggy* file is a **wrong drop**
+  (and **FATAL** if nothing else caught that bug); a drop landing there in the *fixed* file is a
+  **correct drop** that bought specificity. The gate is scored in both directions.
 
 Measures **detection + localization**, not fix-correctness (that would need each project's tests).
 
@@ -75,5 +85,7 @@ python harness/score.py results/wf_fresh_output.json harness/bugs_fresh_index.js
 ## Honest caveats
 
 Pilot scale (7 clean bugs; 3/7 has wide error bars) · the gate dropped one *real* localized catch
-(satpy #3367) · one false alarm on a 318 KB file (clu-comics) · ±3-line localization tolerance ·
+(satpy #3367 — now flagged `FATAL` automatically, not by hand) · both stored runs predate the
+`drop_reason` field, so their refuted/inconclusive split is **unmeasured**, not zero ·
+one false alarm on a 318 KB file (clu-comics) · ±3-line localization tolerance ·
 detection/localization only, not fix-correctness. See [results/RESULTS.md](results/RESULTS.md).

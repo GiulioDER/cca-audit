@@ -7,11 +7,20 @@
     "specificity_confirmed": "9/10",
     "recall_confirmed_recognized": "2/3",
     "recall_confirmed_clean": "3/7",
+    "recall_raw_clean": "4/7",
     "n_recognized": 3,
     "n_clean": 7,
     "total_raw_findings_buggy": 19,
     "total_confirmed_buggy": 10,
-    "total_dropped_by_fpcheck": 8
+    "total_dropped_by_fpcheck": 8,
+    "wrong_drops_on_ground_truth": 2,
+    "bugs_lost_to_gate": 1,
+    "false_alarms_prevented_by_gate": 1,
+    "drop_reasons": {
+      "unlabeled": 14
+    },
+    "refuted": "0/0 (no drop_reason in this run)",
+    "inconclusive": "0/0 (no drop_reason in this run)"
   },
   "per_bug": {
     "aio-libs/aiohttp#12264": {
@@ -26,7 +35,10 @@
       "dropped_n": 0,
       "catch_lines": [
         673
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "allaboutduncan/clu-comics#389": {
       "project": "allaboutduncan",
@@ -40,7 +52,10 @@
       "dropped_n": 2,
       "catch_lines": [
         694
-      ]
+      ],
+      "wrong_drops": 1,
+      "correct_drops": 0,
+      "drop_verdict": "redundant"
     },
     "fossasia/eventyay#3789": {
       "project": "fossasia",
@@ -55,7 +70,10 @@
       "catch_lines": [
         270,
         275
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 1,
+      "drop_verdict": "-"
     },
     "inventree/InvenTree#12332": {
       "project": "inventree",
@@ -67,7 +85,10 @@
       "raw_n": 3,
       "conf_n": 2,
       "dropped_n": 1,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "neuml/txtai#1125": {
       "project": "neuml",
@@ -79,7 +100,10 @@
       "raw_n": 1,
       "conf_n": 0,
       "dropped_n": 1,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "pallets/click#3678": {
       "project": "pallets",
@@ -91,7 +115,10 @@
       "raw_n": 1,
       "conf_n": 0,
       "dropped_n": 1,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "pyinfra-dev/pyinfra#1858": {
       "project": "pyinfra-dev",
@@ -103,7 +130,10 @@
       "raw_n": 2,
       "conf_n": 1,
       "dropped_n": 1,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "pypa/pipx#1860": {
       "project": "pypa",
@@ -117,7 +147,10 @@
       "dropped_n": 0,
       "catch_lines": [
         183
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "pytroll/satpy#3367": {
       "project": "pytroll",
@@ -129,7 +162,10 @@
       "raw_n": 3,
       "conf_n": 1,
       "dropped_n": 2,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 1,
+      "correct_drops": 0,
+      "drop_verdict": "FATAL"
     },
     "sktime/pytorch-forecasting#2257": {
       "project": "sktime",
@@ -143,7 +179,10 @@
       "dropped_n": 0,
       "catch_lines": [
         145
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     }
   }
 }

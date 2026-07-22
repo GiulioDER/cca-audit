@@ -30,9 +30,28 @@ const RECOG = {
   },
   required: ['recognized'],
 }
+// A drop with no stated reason is not adjudicable: "proven not a defect" and "could
+// not be proven from this file" are opposite signals, and a bare drop count reads as
+// the gate misbehaving in both cases. Keep in sync with DROP_REASONS in score.py.
+const DROP_REASON = {
+  type: 'string',
+  enum: [
+    'refuted_guarded_elsewhere',       // real mechanism, but a guard elsewhere makes it unreachable
+    'refuted_misread_flow',            // the finding misread control/data flow; premise is false
+    'refuted_not_a_defect',            // behaviour is intended/harmless; no wrong output or crash
+    'inconclusive_unprovable_from_file', // may be real; this file alone cannot settle it
+    'duplicate',                       // same defect already present in `confirmed`
+  ],
+}
+// `dropped` requires the reason; `confirmed` must not carry one.
+const DROPPED_FINDING = {
+  type: 'object', additionalProperties: false,
+  properties: { ...FINDING.properties, drop_reason: DROP_REASON },
+  required: [...FINDING.required, 'drop_reason'],
+}
 const FPCHECK = {
   type: 'object', additionalProperties: false,
-  properties: { confirmed: { type: 'array', items: FINDING }, dropped: { type: 'array', items: FINDING } },
+  properties: { confirmed: { type: 'array', items: FINDING }, dropped: { type: 'array', items: DROPPED_FINDING } },
   required: ['confirmed'],
 }
 
@@ -47,7 +66,7 @@ const recog = (path) =>
   `Read this source file fully: ${path}\n\nHonestly report whether you RECOGNIZE this exact file from your training data — i.e. you know which open-source project/version it is and could reproduce its canonical upstream implementation from memory (which would let you find bugs by comparing to the known-correct version rather than reasoning from first principles). Set recognized=true ONLY if you genuinely recognize the specific code, not merely the library name. Give a short note on the evidence.`
 
 const fp = (path, findings) =>
-  `Adversarially verify these candidate bug findings against the ACTUAL code. Read the file fully: ${path}\n\nFor EACH finding decide: is it a TRUE defect provable from the code, or a FALSE POSITIVE (guarded elsewhere, misread control/data flow, or simply not a bug)? Default to DROPPING when you cannot prove the defect from the code itself. Put true positives in "confirmed" and false positives in "dropped" (same fields).\n\nCandidate findings:\n${JSON.stringify(findings)}`
+  `Adversarially verify these candidate bug findings against the ACTUAL code. Read the file fully: ${path}\n\nFor EACH finding decide: is it a TRUE defect provable from the code, or a FALSE POSITIVE (guarded elsewhere, misread control/data flow, or simply not a bug)? Default to DROPPING when you cannot prove the defect from the code itself. Put true positives in "confirmed" and false positives in "dropped" (same fields).\n\nEvery dropped finding MUST carry a "drop_reason":\n- refuted_guarded_elsewhere — the mechanism is real but a guard elsewhere makes it unreachable\n- refuted_misread_flow — the finding misread control/data flow; its premise is false\n- refuted_not_a_defect — the behaviour is intended or harmless; no wrong output, crash, or corruption\n- inconclusive_unprovable_from_file — it may well be real, but THIS FILE alone cannot settle it\n- duplicate — the same defect is already in "confirmed"\n\nBe honest about the difference: use a refuted_* reason only when you can point at the code that DISPROVES the finding. If you are dropping merely because the evidence is not in this file, that is inconclusive_unprovable_from_file, not a refutation. Keep "why" as the prose justification for the reason you chose.\n\nCandidate findings:\n${JSON.stringify(findings)}`
 
 async function auditors(path, numeric, phase, label) {
   const jobs = [() => agent(detect(path, 'bug'), { agentType: 'bug-auditor', schema: FINDINGS_OBJ, phase, label: `bug:${label}` })]
