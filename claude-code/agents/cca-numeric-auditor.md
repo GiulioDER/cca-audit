@@ -123,8 +123,8 @@ to a notional-scale base. If your rationale says a specific term must *move* the
 `assert_round_trips` is the one helper with two callables instead of one target: use
 `forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
 
-The remaining five helpers follow the same `target`/`args`/`domains`/`rationale` shape as
-`assert_monotonic_in` above, with these helper-specific keys:
+The other six helpers all use the `target`/`args`/`domains`/`rationale` shape shown in the
+worked example above. Their helper-specific keys are:
 
 - **`assert_bounded`** — `lo`, `hi` (the required inclusive result range).
 - **`assert_limit`** — `index` (which arg is driven to its degenerate value), `approaching`
