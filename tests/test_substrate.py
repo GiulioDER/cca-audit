@@ -1,3 +1,4 @@
+import dataclasses
 import math
 import sys
 
@@ -128,7 +129,7 @@ def test_mpmath_absent_is_unavailable(monkeypatch):
 
 def test_result_is_frozen():
     r = SubstrateResult(value=None, reason="unavailable")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         r.value = 1
 
 
