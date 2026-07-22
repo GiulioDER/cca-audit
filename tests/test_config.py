@@ -108,6 +108,36 @@ def test_positive_float_rejects_nan_and_inf(monkeypatch):
         assert c.SUBSTRATE_TOL == 1e-9
 
 
+def test_tol_below_float64_noise_floor_falls_back(monkeypatch):
+    """A tolerance tighter than float64's own rounding noise makes CORRECT code
+    CONFIRM. Reproduced directly: with CCA_SUBSTRATE_TOL=1e-20,
+    assert_substrate_agrees(targets.stable, (1e-8,)) used to raise
+    PropertyViolation even though targets.stable's measured relative error
+    (~8.3e-18) is ordinary float64 noise, not a real defect. Model: 1e-20 is below
+    the noise floor and must fall back to the default rather than be honoured.
+    """
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL="1e-20")
+    assert c.SUBSTRATE_TOL == 1e-9
+
+
+def test_tol_above_vacuity_ceiling_falls_back(monkeypatch):
+    """A finite-but-huge tolerance makes the check permanently vacuous.
+    Reproduced directly: CCA_SUBSTRATE_TOL=1e6 is a finite, positive value that
+    _positive_float used to honour outright, so `relative > SUBSTRATE_TOL` could
+    never fire again for any realistic divergence. Must fall back to the default.
+    """
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL="1e6")
+    assert c.SUBSTRATE_TOL == 1e-9
+
+
+def test_tol_at_the_bounds_is_honoured(monkeypatch):
+    # The bounds themselves are valid values, not excluded ones.
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL="1e-15")
+    assert c.SUBSTRATE_TOL == 1e-15
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL="1.0")
+    assert c.SUBSTRATE_TOL == 1.0
+
+
 def test_module_restored_for_other_tests(monkeypatch):
     monkeypatch.delenv("CCA_SUBSTRATE_TOL", raising=False)
     monkeypatch.delenv("CCA_SUBSTRATE_DPS", raising=False)
