@@ -216,9 +216,93 @@ def test_non_callable_target_is_rejected():
         assert_substrate_agrees("not a function", (1.0,))
 
 
+def _fake_reference(value):
+    """Build a stand-in for run_under_substrate that hands back a canned
+    reference, so these tests exercise assert_substrate_agrees's finiteness
+    comparison directly rather than needing arithmetic that happens to diverge
+    identically in both float64 and mpmath (mpmath's exponent range is wide
+    enough that this is not natural to construct)."""
+    return lambda fn, args, dps=None: SubstrateResult(value, None)
+
+
+def test_both_substrates_diverging_to_same_infinity_does_not_violate(monkeypatch):
+    # The false positive named in the audit: a function that legitimately
+    # diverges to +inf, where BOTH substrates agree, must not be flagged.
+    import cca_checks.substrate as sub
+    monkeypatch.setattr(sub, "run_under_substrate", _fake_reference(mpmath.mpf("inf")))
+    assert_substrate_agrees(lambda x: math.inf, (1.0,))  # must not raise
+
+
+def test_opposite_signed_infinities_still_violate(monkeypatch):
+    # Both non-finite is not automatically agreement: opposite signs is a real
+    # divergence and must still raise.
+    import cca_checks.substrate as sub
+    monkeypatch.setattr(sub, "run_under_substrate", _fake_reference(mpmath.mpf("inf")))
+    with pytest.raises(PropertyViolation):
+        assert_substrate_agrees(lambda x: -math.inf, (1.0,))
+
+
+def test_nonfinite_reference_with_finite_observed_violates(monkeypatch):
+    # The false negative named in the audit: this used to fall through to
+    # diff/scale, which evaluates to NaN, and `NaN > SUBSTRATE_TOL` is False --
+    # so a genuine, unbounded divergence silently passed. No existing test
+    # covered this direction.
+    import cca_checks.substrate as sub
+    monkeypatch.setattr(sub, "run_under_substrate", _fake_reference(mpmath.mpf("inf")))
+    with pytest.raises(PropertyViolation):
+        assert_substrate_agrees(lambda x: 1.0, (1.0,))
+
+
+def test_finite_reference_with_nonfinite_observed_still_violates(monkeypatch):
+    # The pre-existing (correct) direction: must keep working after the symmetric
+    # rewrite.
+    import cca_checks.substrate as sub
+    monkeypatch.setattr(sub, "run_under_substrate", _fake_reference(mpmath.mpf(1.0)))
+    with pytest.raises(PropertyViolation):
+        assert_substrate_agrees(lambda x: math.inf, (1.0,))
+
+
+def test_nan_reference_with_nan_observed_still_violates(monkeypatch):
+    # NaN != NaN: two NaNs are not "the same non-finite value" the way two
+    # matching infinities are, so this must still raise rather than agree.
+    import cca_checks.substrate as sub
+    monkeypatch.setattr(sub, "run_under_substrate", _fake_reference(mpmath.mpf("nan")))
+    with pytest.raises(PropertyViolation):
+        assert_substrate_agrees(lambda x: math.nan, (1.0,))
+
+
 def test_helper_is_reexported_from_properties():
     from cca_checks import properties
     assert properties.assert_substrate_agrees is assert_substrate_agrees
+
+
+def test_substrate_tol_is_reexported_from_properties():
+    from cca_checks import properties
+    from cca_checks.config import SUBSTRATE_TOL
+    assert properties.SUBSTRATE_TOL == SUBSTRATE_TOL
+
+
+def test_absurdly_tight_tol_env_var_does_not_confirm_correct_code(monkeypatch):
+    """End-to-end reproduction of the P1-2 bug, at the level it was actually
+    demonstrated: CCA_SUBSTRATE_TOL=1e-20 used to make assert_substrate_agrees
+    raise PropertyViolation against `targets.stable` -- the fixture's
+    deliberately-correct counterpart to `unstable` -- whose measured relative
+    error against the mpmath reference (~8.3e-18) is ordinary float64 noise, not a
+    defect. A CONFIRMED here is binding (no-overturn rule, no adversarial panel),
+    so the env var must degrade to the default rather than be honoured.
+    """
+    import importlib
+
+    from cca_checks import config as _config
+
+    monkeypatch.setenv("CCA_SUBSTRATE_TOL", "1e-20")
+    importlib.reload(_config)
+    try:
+        assert _config.SUBSTRATE_TOL == 1e-9  # fell back, did not adopt 1e-20
+        assert_substrate_agrees(targets.stable, (1e-8,))  # must not raise
+    finally:
+        monkeypatch.delenv("CCA_SUBSTRATE_TOL", raising=False)
+        importlib.reload(_config)
 
 
 def test_properties_imports_without_mpmath(monkeypatch):

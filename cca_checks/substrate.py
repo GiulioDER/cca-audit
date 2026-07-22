@@ -179,12 +179,37 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
     reference = result.value
     assert isinstance(reference, mpmath.mpf)
 
-    if not math.isfinite(observed):
-        # A non-finite float against a finite reference is a defect, not a
-        # tolerance question.
+    # Finiteness is checked SYMMETRICALLY, mirroring properties.py::_close. Checking
+    # only `observed` (as this used to) is one-directional and wrong in both
+    # directions: a legitimate divergence to the same infinity in both substrates
+    # would be flagged (false positive), and -- the worse failure -- a non-finite
+    # `reference` against a finite `observed` fell through to `diff/scale`, which
+    # evaluates to NaN, and `NaN > SUBSTRATE_TOL` is False, so a genuine unbounded
+    # divergence silently passed (false negative).
+    observed_finite = math.isfinite(observed)
+    reference_finite = mpmath.isfinite(reference)
+
+    if observed_finite != reference_finite:
+        # Exactly one side is non-finite: a real divergence, not a tolerance
+        # question, regardless of which side it is.
         raise PropertyViolation(
             "substrate_agrees", tuple(args), observed,
-            f"finite result (reference is {mpmath.nstr(reference, 12)})",
+            f"finiteness matching the reference (reference is "
+            f"{mpmath.nstr(reference, 12)})",
+        )
+
+    if not observed_finite:
+        # Both non-finite. Agreement requires the SAME non-finite value: two
+        # substrates that both diverge to +inf are a legitimate limit (mirroring
+        # `_close`'s `a == b` rule for two infinities), not a defect -- but +inf
+        # vs -inf, or NaN paired with anything (NaN != NaN, by the comparison's
+        # own semantics), is still a genuine mismatch.
+        if observed == reference:
+            return
+        raise PropertyViolation(
+            "substrate_agrees", tuple(args), observed,
+            f"the same non-finite value as the reference "
+            f"({mpmath.nstr(reference, 12)})",
         )
 
     diff = abs(mpmath.mpf(observed) - reference)

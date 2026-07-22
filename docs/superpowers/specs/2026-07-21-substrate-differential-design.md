@@ -173,7 +173,7 @@ gate (Hypothesis banner **and** our own violation line) covers it unchanged.
 | Within tolerance across 200 examples | `UNCERTAIN` | "no counterexample" — unchanged |
 | Result returned as `float`, not `mpf` | `UNCERTAIN` | `substrate_lost` in the escalated tail |
 | Target module not introspectable | `UNCERTAIN` | `not_patchable` |
-| Target raised under the substrate but not under float | `UNCERTAIN` | `raised` — an mpmath-specific failure is not evidence about the code |
+| Target raises while evaluated under the substrate (float path is never evaluated on this branch — the exception short-circuits `run_under_substrate` before `assert_substrate_agrees` calls `fn` under float) | `UNCERTAIN` | `raised` — an mpmath-specific failure is not evidence about the code |
 | `mpmath` not installed | `UNCERTAIN` | `unavailable` |
 
 **A lost substrate must never read as agreement.** Because `ValueError` is not a

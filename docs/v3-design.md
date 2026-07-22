@@ -50,7 +50,7 @@ Findings stop being prose. Each auditor finding emits:
 (`cca_checks/claim.py`. `sink_class` names the taint sink category for `taint` claims and is empty
 otherwise.)
 
-`claim_type ∈ { definedness, type, nullability, reachability*, crash_impact, taint, numeric (incl. the `substrate`† helper), semantic }`
+``claim_type ∈ { definedness, type, nullability, reachability*, crash_impact, taint, numeric (incl. the `substrate`† helper), semantic }``
 
 \* `reachability` has no checker of its own — it is subsumed by the repro check (see §3.2). The
 `--claim-type` values `cca_checks check` actually accepts are

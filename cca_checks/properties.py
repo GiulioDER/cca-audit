@@ -13,7 +13,9 @@ buggy code.
 import math
 from collections.abc import Callable, Sequence
 
-from .config import MAX_EXAMPLES  # noqa: F401  (re-exported: hypo.py imports it from here)
+# noqa: F401 -- both re-exported: MAX_EXAMPLES so hypo.py imports it from here,
+# SUBSTRATE_TOL so the substrate vocabulary (import below) is one import too.
+from .config import MAX_EXAMPLES, SUBSTRATE_TOL  # noqa: F401
 
 # Comparison tolerance. Numeric audit targets are floating point; an exact
 # equality test would produce counterexamples that are artifacts of
