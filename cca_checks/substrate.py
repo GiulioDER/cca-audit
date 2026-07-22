@@ -128,3 +128,47 @@ def run_under_substrate(fn: Callable, args: Sequence,
     if not isinstance(value, mpmath.mpf):
         return SubstrateResult(None, "substrate_lost")
     return SubstrateResult(value, None)
+
+
+def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
+    """float64 must agree with the high-precision reference to within SUBSTRATE_TOL.
+
+    Raises PropertyViolation on divergence — a real defect in the code under test.
+    Raises ValueError when the check could not run, which `property_check` maps to
+    UNCERTAIN. The distinction is the whole safety property: a substrate that was
+    never applied must not be able to produce agreement OR a confirmation.
+    """
+    from .config import SUBSTRATE_TOL
+    from .properties import PropertyViolation
+
+    if not callable(fn):
+        raise ValueError(f"target must be callable, got {type(fn).__name__}")
+
+    result = run_under_substrate(fn, args)
+    if result.reason is not None:
+        raise ValueError(
+            f"substrate check could not run ({result.reason}); "
+            f"this proves nothing about the code under test"
+        )
+
+    observed = fn(*args)
+    reference = result.value
+
+    if not math.isfinite(observed):
+        # A non-finite float against a finite reference is a defect, not a
+        # tolerance question.
+        raise PropertyViolation(
+            "substrate_agrees", tuple(args), observed,
+            f"finite result (reference is {mpmath.nstr(reference, 12)})",
+        )
+
+    diff = abs(mpmath.mpf(observed) - reference)
+    scale = abs(reference)
+    relative = diff / scale if scale != 0 else diff
+    if relative > SUBSTRATE_TOL:
+        raise PropertyViolation(
+            "substrate_agrees", tuple(args),
+            (observed, mpmath.nstr(reference, 17), mpmath.nstr(relative, 4)),
+            f"float64 within {SUBSTRATE_TOL} relative of the "
+            f"{SUBSTRATE_DPS}-digit reference",
+        )

@@ -93,3 +93,60 @@ def test_result_is_frozen():
     r = SubstrateResult(value=None, reason="unavailable")
     with pytest.raises(Exception):
         r.value = 1
+
+
+from cca_checks.properties import PropertyViolation  # noqa: E402
+from cca_checks.substrate import assert_substrate_agrees  # noqa: E402
+
+
+def test_cancellation_is_a_violation():
+    with pytest.raises(PropertyViolation) as e:
+        assert_substrate_agrees(targets.unstable, (1e-8,))
+    msg = str(e.value)
+    assert msg.startswith("PROPERTY ")
+    assert "substrate_agrees" in msg
+    assert "inputs=" in msg
+
+
+def test_stable_variant_does_not_violate():
+    # Same maths, no cancellation. Proves the check discriminates rather than
+    # flagging every float function.
+    assert_substrate_agrees(targets.stable, (1e-8,))
+
+
+def test_arithmetic_only_does_not_violate():
+    assert_substrate_agrees(targets.arithmetic_only, (1.0, 2.0))
+
+
+def test_sign_trap_does_not_violate():
+    # THE BLINDNESS PROBE. The GBM sign defect is real and present, and both
+    # substrates compute the same wrong formula, so they agree perfectly. This
+    # layer cannot see formula errors; properties cover that class. Asserting it
+    # keeps the documented division of labour honest.
+    assert_substrate_agrees(targets.sign_trap, (0.1, 0.3, 1.0))
+
+
+def test_substrate_failure_raises_value_error_not_violation():
+    # ValueError emits no "PROPERTY ... violated" line, so property_check maps it
+    # to UNCERTAIN. A PropertyViolation here would let a lost substrate CONFIRM.
+    with pytest.raises(ValueError) as e:
+        assert_substrate_agrees(targets.loses_substrate, (0.5,))
+    assert "substrate_lost" in str(e.value)
+    assert not isinstance(e.value, PropertyViolation)
+
+
+def test_non_callable_target_is_rejected():
+    with pytest.raises(ValueError):
+        assert_substrate_agrees("not a function", (1.0,))
+
+
+def test_helper_is_reexported_from_properties():
+    from cca_checks import properties
+    assert properties.assert_substrate_agrees is assert_substrate_agrees
+
+
+def test_properties_imports_without_mpmath(monkeypatch):
+    # properties.py must stay importable when the optional extra is absent.
+    import importlib
+    monkeypatch.setitem(sys.modules, "mpmath", None)
+    importlib.reload(importlib.import_module("cca_checks.properties"))

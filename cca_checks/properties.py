@@ -273,3 +273,11 @@ def assert_round_trips(fwd: Callable, inv: Callable, value: float,
         raise PropertyViolation(
             "round_trip", (value,), y,
             f"inv(fwd(x)) == x (within quantum={quantum}) for x == {value}")
+
+
+# Re-exported so the vocabulary is one import. A module-level import is safe here
+# even though `substrate` deals with an optional extra: substrate.py sets
+# `mpmath = None` on ImportError rather than failing, so this succeeds whether or
+# not the extra is installed, and `properties.assert_substrate_agrees` is the same
+# object as `substrate.assert_substrate_agrees`.
+from .substrate import assert_substrate_agrees  # noqa: E402,F401  (re-exported)

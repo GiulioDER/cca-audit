@@ -36,10 +36,10 @@ Issues = "https://github.com/GiulioDER/cca-audit/issues"
 # every numeric claim escalating to UNCERTAIN -- and on the DEEP tier a NUM-* P1
 # cannot be fixed at all without a hypothesis artifact. An extra that half-enables
 # a feature is worse than one that does not exist, because the failure is silent.
-numeric = ["hypothesis>=6.0", "pytest>=7"]
+numeric = ["hypothesis>=6.0", "pytest>=7", "mpmath>=1.3"]
 # The whole deterministic layer in one install, so it is reproducible from the
 # manifest rather than from a sentence in the README.
-verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50"]
+verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50", "mpmath>=1.3"]
 dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4"]
 
 [tool.setuptools.packages.find]
