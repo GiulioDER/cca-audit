@@ -206,3 +206,35 @@ def test_numeric_is_not_a_check_claim_type():
     # `check` settles a static claim at a file:line; `numeric` executes a test
     # file. Conflating them would put an unusable --file/--line on the numeric path.
     assert "numeric" not in cli.CLAIM_TYPES
+
+
+def test_clock_leak_is_an_accepted_claim_type():
+    assert "clock_leak" in cli.CLAIM_TYPES
+
+
+def test_check_clock_leak_routes_to_the_ast_checker(capsys, monkeypatch):
+    captured = {}
+
+    def spy(claim):
+        captured["claim"] = claim
+        return make_verdict(claim.finding_id, "CONFIRMED",
+                            "ast: parameter 'now' is declared and NEVER referenced", "ast")
+
+    monkeypatch.setattr(cli, "verdict_for_clock_leak", spy)
+    out = run(capsys, ["check", "--claim-type", "clock_leak",
+                       "--finding-id", "C-1", "--file", "svc.py", "--line", "9"])
+    assert captured["claim"].claim_type == "clock_leak"
+    assert out["verdict"] == "CONFIRMED"
+    assert out["source"] == "ast"
+
+
+def test_clock_leak_end_to_end_without_mocks(capsys, tmp_path):
+    # The routing tests above mock the checker; this one does not, so a broken
+    # import or signature in clock_check cannot hide behind a monkeypatch.
+    (tmp_path / "leak.py").write_text(
+        "from datetime import datetime\n\n\ndef f(now):\n    return datetime.now()\n",
+        encoding="utf-8")
+    out = run(capsys, ["check", "--claim-type", "clock_leak",
+                       "--finding-id", "C-2", "--file", "leak.py", "--line", "5"])
+    assert out["verdict"] == "CONFIRMED"
+    assert out["source"] == "ast"

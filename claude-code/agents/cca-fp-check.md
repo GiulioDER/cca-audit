@@ -98,6 +98,11 @@ run TWO phases in order:
   `sql`, `command`, `code_exec`, `path`; if it fits none of those, omit `--sink-class` and
   the checker will escalate.
   `python -m cca_checks check --claim-type taint --sink-class <CLASS> --finding-id <ID> --file <FILE> --line <LINE>`
+- **`clock_leak`** — the finding asserts that code which should run on an INJECTED clock
+  (a `now=` / `as_of=` / `clock=` parameter, threaded through so callers can simulate time)
+  reads the wall clock instead: `datetime.now()`, `datetime.utcnow()`, `time.time()`.
+  Settled from the syntax tree, resolving through import aliases.
+  `python -m cca_checks check --claim-type clock_leak --finding-id <ID> --file <FILE> --line <LINE>`
 - **`numeric`** — the finding asserts an arithmetic defect: wrong sign, mixed units, bad scaling,
   wrong rounding direction, a conversion that does not invert. FIRST write a property file
   `t_<ID>_props.py` from the finding's `properties:` block, applying `@cca_settings` and
@@ -206,6 +211,14 @@ semgrep found a source-to-sink path but **cannot distinguish a real injection fr
 parameterized call** — read the code, adjudicate, cite the match plus what you read, and emit
 `source: llm`. An `UNCERTAIN` that says "possible unrecognized sink" means the sink is not in
 our vetted catalog: investigate, do not drop.
+
+**Clock-leak `CONFIRMED` is narrow on purpose.** It fires only when a clock parameter is
+declared, **never referenced** in the scope, and the body reads the wall clock — the caller
+was promised injectable time and does not get it. The far commoner shape, where the injected
+clock IS used *and* the wall clock is read, returns `UNCERTAIN`, because co-occurrence is not
+a defect: stamping an audit log with the real time while the logic runs on `as_of` is correct
+code. Read those and adjudicate; do not treat the `UNCERTAIN` as a refutation. A
+`FALSE_POSITIVE` here means no clock read of any kind sits in the enclosing scope.
 
 An `UNCERTAIN` verdict reading "no type information in the enclosing scope" means pyright
 was blind, not that the code is safe. Treat it exactly as you would an unverified finding:
