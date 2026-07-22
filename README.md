@@ -143,6 +143,23 @@ declared metamorphic properties under Hypothesis. It confirms with a falsifying 
 refutes, because properties holding is not proof of correctness. Worked example:
 [`examples/sign-trap`](examples/sign-trap/).
 
+The same extra also brings `mpmath` and a seventh helper, `assert_substrate_agrees`: it runs the
+target twice — once in float64, once against a 50-digit `mpmath` reference — and confirms only
+when the two disagree beyond a fixed tolerance. It has no authored relation to correlate with the
+finding that raised it, which is what makes it independent of the property helpers above.
+
+**Read its scope precisely: it is decorrelated on *evaluation*, correlated on *transcription*.**
+Nobody writes down the disagreement, so no shared assumption can be laundered into how the formula
+is *evaluated* — that is the whole point, and it is why cancellation, accumulation, and
+rounding-direction defects fall out of it for free. But both substrates faithfully compute whatever
+structure you wrote down, so a defect in how the formula was *transcribed* — a flipped sign, a
+wrong term — survives into both runs and they agree perfectly. That class belongs to the property
+helpers above. Pair the two when a finding is about direction; neither one covers the other's
+class. (Framing owed to the author of [the harness post](https://dev.to/egnaro9/i-built-an-ai-dev-harness-that-isnt-allowed-to-trust-itself-53mh)
+that prompted this work.)
+
+See the [design spec](docs/superpowers/specs/2026-07-21-substrate-differential-design.md).
+
 ## Usage
 
 One command, auto-tiered:

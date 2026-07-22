@@ -21,13 +21,22 @@ from .config import MAX_EXAMPLES, TIMEOUT_S
 
 SOURCE = "hypothesis"
 
+# Hypothesis's banner for a shrunk counterexample. Renamed once already --
+# "Falsifying example:" through 6.158.x, "Failing test case:" from 6.159.0 --
+# with no deprecation window, so this is an alternation, not a single literal,
+# and every regex below builds off this one constant rather than repeating
+# either wording (drift between copies is exactly how the original defect
+# happened). A future rename widens this constant; see
+# test_property_check_banner_matches_installed_hypothesis in
+# tests/test_property_check.py for the guard that catches the next one.
+_BANNER = r"(?:Falsifying example|Failing test case)"
 # Hypothesis prints the shrunk input under this banner, up to a blank line or the
 # start of a pytest separator/summary block. Terminating on the separator matters:
 # pytest's grouped-exception output has no blank line before the summary, so a
 # bare `(?=\n\s*\n|\Z)` runs to end-of-output and swallows the short test summary
 # and timing footer into the evidence.
 _FALSIFYING = re.compile(
-    r"Falsifying example:.*?"
+    _BANNER + r":.*?"
     r"(?=\n\s*\n|\n=+[ =]|\n-+[ -]|\n\+-+|\n(?:E\s+)?\d+ \w+ in \d|\Z)", re.S)
 # Our own violation message, which names the property and the required relation.
 _PROPERTY_LINE = re.compile(r"^.*PROPERTY .+ violated \|.*$", re.M)
@@ -40,7 +49,8 @@ def _uncertain(finding_id: str, why: str) -> Verdict:
 
 
 def _distinct_falsifying(out: str) -> list[str]:
-    """Deduplicated "Falsifying example:" blocks.
+    """Deduplicated banner blocks (either "Falsifying example:" or "Failing test
+    case:", depending on the installed Hypothesis version -- see _BANNER).
 
     A raw occurrence count is NOT a bug count. Depending on the pytest/Hypothesis
     versions in play, the same banner is echoed in more than one place -- the
@@ -59,7 +69,7 @@ def _distinct_falsifying(out: str) -> list[str]:
     for block in _FALSIFYING.findall(out):
         flat = re.sub(r"^E\s+", "", block, flags=re.M)
         flat = re.sub(r"\s+", " ", flat).strip()
-        args = re.search(r"Falsifying example:\s*[\w.]+\((.*?)\)", flat)
+        args = re.search(_BANNER + r":\s*[\w.]+\((.*?)\)", flat)
         # Fall back to the whole flattened block if the banner is in a shape we do
         # not recognise: erring toward "distinct" escalates, which is the safe side.
         seen.setdefault(args.group(1).strip() if args else flat, block)
@@ -114,11 +124,12 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
                           f"property test failed without a falsifying example "
                           f"(not a property violation); escalated:\n{tail}")
 
-    # Hypothesis prints "Falsifying example:" for ANY exception raised inside
+    # Hypothesis prints its banner (_BANNER above) for ANY exception raised inside
     # a @given test -- not just PropertyViolation. An incidental crash (e.g. a
     # ZeroDivisionError in the code under test) shrinks and banners exactly
     # like a real property violation, so the banner alone is not sufficient
-    # evidence. Only the six helpers in cca_checks/properties.py emit the
+    # evidence. Only the seven helpers across cca_checks/properties.py (six)
+    # and cca_checks/substrate.py (assert_substrate_agrees) emit the
     # "PROPERTY ... violated" line, so requiring BOTH matches also enforces
     # that vocabulary: an auditor who writes a raw `assert` instead of calling
     # a helper can no longer reach CONFIRMED. That is the anti-tautology

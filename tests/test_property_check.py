@@ -1,6 +1,8 @@
 import subprocess
 import sys
 
+import pytest
+
 from cca_checks import property_check as pcheck
 from cca_checks.property_check import run_properties
 
@@ -151,3 +153,92 @@ def test_invocation_is_hardened(monkeypatch):
     assert argv[-1] == "t.py"
     assert kw.get("encoding") == "utf-8"
     assert kw.get("timeout") == pcheck.TIMEOUT_S
+
+
+# --- banner rename (Hypothesis 6.159.0 renamed "Falsifying example:" to
+# "Failing test case:" with no deprecation window) ---------------------------
+
+@pytest.mark.parametrize("banner", ["Falsifying example", "Failing test case"])
+def test_both_banner_wordings_are_recognised(monkeypatch, banner):
+    # Same fixture as FALSIFYING above, just with the banner literal swapped --
+    # this is what pinning to one wording actually broke: a real property
+    # violation on Hypothesis >=6.159 read as UNCERTAIN instead of CONFIRMED,
+    # silently, because rc==1 and the PROPERTY line were both present but the
+    # banner regex missed.
+    out = (
+        "E   cca_checks.properties.PropertyViolation: PROPERTY monotonic violated "
+        "| inputs=(0.1, 0.3) | observed=(0.145, 0.26) | required=result "
+        "non-increasing in arg 1\n"
+        "E\n"
+        f"E   {banner}: test_growth(\n"
+        "E       mu=0.1,\n"
+        "E       vol=0.3,\n"
+        "E   )\n"
+    )
+    monkeypatch.setattr(subprocess, "run", fake(1, out))
+    v = run_properties("NUM-1", "t_NUM-1_props.py")
+    assert v.verdict == "CONFIRMED"
+    assert v.source == "hypothesis"
+    assert banner in v.evidence
+
+
+def test_mixed_banner_wordings_still_escalate_as_ambiguous(monkeypatch):
+    # The multi-distinct-banner escalation (see test_selfaudit_hardening.py)
+    # must fire regardless of which wording each banner uses -- e.g. a repo
+    # audited across a Hypothesis upgrade, or two dependencies pinning
+    # different Hypothesis versions inside the same collection. Two distinct
+    # shrunk inputs, one of each literal wording, must still be UNCERTAIN --
+    # not a guessed pairing between an old-style and a new-style banner.
+    out = (
+        "Falsifying example: test_bounded(x=6.0,)\n"
+        "ZeroDivisionError: division by zero\n"
+        "\n"
+        "Failing test case: test_bounded(x=4.0,)\n"
+        "PROPERTY bounded violated | inputs=(4.0,) | observed=9.0 | "
+        "required=0 <= result <= 1\n"
+    )
+    monkeypatch.setattr(subprocess, "run", fake(1, out))
+    v = run_properties("NUM-1", "t.py")
+    assert v.verdict == "UNCERTAIN"
+    assert v.verdict != "CONFIRMED"
+    assert "multiple falsifying examples reported" in v.evidence
+
+
+def test_property_check_banner_matches_installed_hypothesis(tmp_path):
+    """Guard against the next rename: run a real, always-failing property
+    through the ACTUALLY INSTALLED Hypothesis and assert its banner is one
+    _BANNER recognises.
+
+    This is deliberately not mocked. If Hypothesis renames the banner again,
+    this test fails loudly -- pointing straight at pcheck._BANNER -- instead
+    of every CONFIRMED silently degrading to UNCERTAIN with no test noticing,
+    which is exactly what happened between 6.158.0 and 6.159.0.
+    """
+    pytest.importorskip("hypothesis", reason="numeric extra not installed")
+    fixture = tmp_path / "t_banner_guard_props.py"
+    fixture.write_text(
+        "from hypothesis import given, strategies as st\n"
+        "\n"
+        "@given(st.integers())\n"
+        "def test_always_fails(x):\n"
+        "    assert False\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         "--", str(fixture)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=pcheck.TIMEOUT_S,
+    )
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 1, (
+        "fixture did not fail the way this guard expects; output:\n" + out
+    )
+    match = pcheck._FALSIFYING.search(out)
+    assert match, (
+        "Hypothesis's banner no longer matches pcheck._BANNER "
+        f"({pcheck._BANNER!r}) -- it has been renamed again. Update _BANNER "
+        "in cca_checks/property_check.py to add the new wording, or every "
+        "CONFIRMED numeric finding degrades to UNCERTAIN silently. Captured "
+        "output:\n" + out
+    )

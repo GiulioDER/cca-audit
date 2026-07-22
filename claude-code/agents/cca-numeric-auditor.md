@@ -82,7 +82,8 @@ fluently, so a second reading is not evidence.
 properties:
   - helper: assert_monotonic_in     # one of: assert_bounded | assert_monotonic_in |
                                     # assert_limit | assert_scale_invariant |
-                                    # assert_sign_symmetric | assert_round_trips
+                                    # assert_sign_symmetric | assert_round_trips |
+                                    # assert_substrate_agrees
     target: expected_log_growth     # the function under test
     args: [mu, vol, t]              # positional argument names, in order
     index: 1                        # which argument the property is about
@@ -122,8 +123,8 @@ to a notional-scale base. If your rationale says a specific term must *move* the
 `assert_round_trips` is the one helper with two callables instead of one target: use
 `forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
 
-The remaining four helpers follow the same `target`/`args`/`domains`/`rationale` shape as
-`assert_monotonic_in` above, with these helper-specific keys:
+The other six helpers all use the `target`/`args`/`domains`/`rationale` shape shown in the
+worked example above. Their helper-specific keys are:
 
 - **`assert_bounded`** — `lo`, `hi` (the required inclusive result range).
 - **`assert_limit`** — `index` (which arg is driven to its degenerate value), `approaching`
@@ -146,6 +147,14 @@ The remaining four helpers follow the same `target`/`args`/`domains`/`rationale`
   scales that argument by `factor**k`, which falsifies a genuinely invariant function.
 - **`assert_sign_symmetric`** — `index` (the arg to negate), `kind` (`odd` — negate the arg,
   negate the result; or `even` — negate the arg, result unchanged; defaults to `odd`).
+- **`assert_substrate_agrees`** — `target`, `args`, `domains` only. **No tolerance key
+  exists, deliberately.** This is the one helper with no authored relation: it compares
+  float64 against a 50-digit reference, so nothing about it comes from whoever raised the
+  finding. Letting a finding carry its own threshold would reintroduce exactly the
+  correlation this helper exists to escape. Use it for precision loss, catastrophic
+  cancellation, accumulation error, and rounding direction. It is **blind to sign and
+  formula errors** — both substrates compute the same wrong formula — so pair it with
+  `assert_monotonic_in` or `assert_limit` when the finding is about direction.
 
 State the property as the **intended relation**, derived from what the function is supposed to
 mean — never from what the code does. A property read off the implementation is a tautology: it

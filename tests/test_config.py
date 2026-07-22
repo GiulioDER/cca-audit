@@ -70,3 +70,46 @@ def test_timeout_message_quotes_the_configured_value(monkeypatch):
     v = rr.run_repro("R", "t.py", expected_error=None)
     assert v.verdict == "UNCERTAIN"
     assert "7s" in v.evidence
+
+
+def test_substrate_defaults(monkeypatch):
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL=None, CCA_SUBSTRATE_DPS=None)
+    assert c.SUBSTRATE_TOL == 1e-9
+    assert c.SUBSTRATE_DPS == 50
+
+
+def test_substrate_tol_env_override(monkeypatch):
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL="1e-6")
+    assert c.SUBSTRATE_TOL == 1e-6
+
+
+def test_malformed_tol_falls_back_not_crashes(monkeypatch):
+    # A bad env value must never take the deterministic layer down.
+    c = _reload(monkeypatch, CCA_SUBSTRATE_TOL="loose")
+    assert c.SUBSTRATE_TOL == 1e-9
+
+
+def test_non_positive_tol_falls_back(monkeypatch):
+    # A zero or negative tolerance would make every comparison a violation.
+    for bad in ("0", "-1e-9"):
+        c = _reload(monkeypatch, CCA_SUBSTRATE_TOL=bad)
+        assert c.SUBSTRATE_TOL == 1e-9
+
+
+def test_malformed_dps_falls_back(monkeypatch):
+    c = _reload(monkeypatch, CCA_SUBSTRATE_DPS="lots")
+    assert c.SUBSTRATE_DPS == 50
+
+
+def test_positive_float_rejects_nan_and_inf(monkeypatch):
+    # NaN compares false against everything; inf makes the check vacuous.
+    for bad in ("nan", "inf", "-inf"):
+        c = _reload(monkeypatch, CCA_SUBSTRATE_TOL=bad)
+        assert c.SUBSTRATE_TOL == 1e-9
+
+
+def test_module_restored_for_other_tests(monkeypatch):
+    monkeypatch.delenv("CCA_SUBSTRATE_TOL", raising=False)
+    monkeypatch.delenv("CCA_SUBSTRATE_DPS", raising=False)
+    c = importlib.reload(config)
+    assert c.SUBSTRATE_TOL == 1e-9

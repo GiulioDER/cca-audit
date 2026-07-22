@@ -1,5 +1,8 @@
+import re
+
 import pytest
 
+from cca_checks import property_check as pcheck
 from cca_checks.property_check import run_properties
 
 pytest.importorskip("hypothesis", reason="numeric extra not installed")
@@ -13,7 +16,9 @@ def test_sign_trap_is_confirmed_with_a_falsifying_example():
     v = run_properties("NUM-ACC-1", VIOLATED)
     assert v.verdict == "CONFIRMED"
     assert v.source == "hypothesis"
-    assert "Falsifying example" in v.evidence
+    # Not a fixed literal: Hypothesis's banner wording depends on the
+    # installed version (see cca_checks/property_check.py:_BANNER).
+    assert re.search(pcheck._BANNER, v.evidence)
     assert "monotonic" in v.evidence
 
 
