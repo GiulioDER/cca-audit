@@ -73,19 +73,32 @@ class SubstrateResult:
     reason: str | None
 
 
+_MATH_TO_MP_CACHE: dict | None = None
+
+
 def _math_to_mp() -> dict:
     """Map each `math` function object to its mpmath counterpart.
 
     Keyed by the function object itself, so a name bound via `from math import cos`
     can be recognised wherever it was rebound to.
+
+    Built once and cached: `mpmath_bindings` runs on every generated Hypothesis
+    example, and both `math` and `mpmath` are immutable module namespaces for the
+    life of the process, so rebuilding the table per call re-walked `dir(math)`
+    a few hundred times per property for an identical result. Cached on first use
+    rather than at import so the module stays importable with mpmath absent.
     """
+    global _MATH_TO_MP_CACHE
+    if _MATH_TO_MP_CACHE is not None:
+        return _MATH_TO_MP_CACHE
     if mpmath is None:
-        return {}
+        return {}          # not cached: mpmath may be monkeypatched in by a test
     out = {}
     for name in dir(math):
         fn = getattr(math, name)
         if callable(fn) and hasattr(mpmath, name):
             out[fn] = getattr(mpmath, name)
+    _MATH_TO_MP_CACHE = out
     return out
 
 
@@ -152,6 +165,12 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
     UNCERTAIN. The distinction is the whole safety property: a substrate that was
     never applied must not be able to produce agreement OR a confirmation.
     """
+    # Imported inside the function, not at module scope, to keep the dependency
+    # one-directional: properties.py imports this function at ITS module scope
+    # (the re-export at the bottom of that file), so a module-level
+    # `from .properties import PropertyViolation` here would close the cycle.
+    # SUBSTRATE_TOL is read here rather than bound at import so that a test
+    # reloading cca_checks.config changes this function's behaviour at call time.
     from .config import SUBSTRATE_TOL
     from .properties import PropertyViolation
 
@@ -212,6 +231,13 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
             f"({mpmath.nstr(reference, 12)})",
         )
 
+    # Deliberately NOT properties._close(). That helper combines a relative and an
+    # absolute term because it compares two float64 values, where neither side is
+    # authoritative. Here the reference is a 50-digit mpf, so relative error against
+    # it is the meaningful quantity and an absolute floor would only mask real
+    # divergence on small-magnitude results. SUBSTRATE_TOL's default coinciding with
+    # properties.REL_TOL is convergence on float64's noise floor, not a shared knob —
+    # the two are tuned independently.
     diff = abs(mpmath.mpf(observed) - reference)
     scale = abs(reference)
     relative = diff / scale if scale != 0 else diff

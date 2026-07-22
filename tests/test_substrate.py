@@ -6,9 +6,11 @@ import sys
 import pytest
 
 import cca_checks.properties as _properties_module
+from cca_checks.properties import PropertyViolation
 from cca_checks.substrate import (
     MIN_DPS,
     SubstrateResult,
+    assert_substrate_agrees,
     mpmath_bindings,
     run_under_substrate,
 )
@@ -171,8 +173,6 @@ def test_result_is_frozen():
         r.value = 1
 
 
-from cca_checks.properties import PropertyViolation  # noqa: E402
-from cca_checks.substrate import assert_substrate_agrees  # noqa: E402
 
 
 def test_cancellation_is_a_violation():
