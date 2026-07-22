@@ -7,11 +7,20 @@
     "specificity_confirmed": "12/12",
     "recall_confirmed_recognized": "10/12",
     "recall_confirmed_clean": "0/0",
+    "recall_raw_clean": "0/0",
     "n_recognized": 12,
     "n_clean": 0,
     "total_raw_findings_buggy": 23,
     "total_confirmed_buggy": 19,
-    "total_dropped_by_fpcheck": 4
+    "total_dropped_by_fpcheck": 4,
+    "wrong_drops_on_ground_truth": 1,
+    "bugs_lost_to_gate": 0,
+    "false_alarms_prevented_by_gate": 0,
+    "drop_reasons": {
+      "unlabeled": 4
+    },
+    "refuted": "0/0 (no drop_reason in this run)",
+    "inconclusive": "0/0 (no drop_reason in this run)"
   },
   "per_bug": {
     "PySnooper/3": {
@@ -26,7 +35,10 @@
       "dropped_n": 0,
       "catch_lines": [
         26
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "ansible/9": {
       "project": "ansible",
@@ -41,7 +53,10 @@
       "catch_lines": [
         518,
         842
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "black/7": {
       "project": "black",
@@ -53,7 +68,10 @@
       "raw_n": 1,
       "conf_n": 1,
       "dropped_n": 0,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "cookiecutter/4": {
       "project": "cookiecutter",
@@ -68,7 +86,10 @@
       "catch_lines": [
         263,
         92
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "fastapi/7": {
       "project": "fastapi",
@@ -82,7 +103,10 @@
       "dropped_n": 0,
       "catch_lines": [
         22
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "keras/32": {
       "project": "keras",
@@ -97,7 +121,10 @@
       "catch_lines": [
         981,
         981
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "luigi/25": {
       "project": "luigi",
@@ -111,7 +138,10 @@
       "dropped_n": 0,
       "catch_lines": [
         166
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "matplotlib/3": {
       "project": "matplotlib",
@@ -126,7 +156,10 @@
       "catch_lines": [
         235,
         235
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "pandas/17": {
       "project": "pandas",
@@ -142,7 +175,10 @@
         863,
         863,
         991
-      ]
+      ],
+      "wrong_drops": 1,
+      "correct_drops": 0,
+      "drop_verdict": "redundant"
     },
     "sanic/3": {
       "project": "sanic",
@@ -154,7 +190,10 @@
       "raw_n": 1,
       "conf_n": 0,
       "dropped_n": 1,
-      "catch_lines": []
+      "catch_lines": [],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "tornado/5": {
       "project": "tornado",
@@ -168,7 +207,10 @@
       "dropped_n": 0,
       "catch_lines": [
         1220
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     },
     "youtube-dl/11": {
       "project": "youtube-dl",
@@ -182,7 +224,10 @@
       "dropped_n": 0,
       "catch_lines": [
         3522
-      ]
+      ],
+      "wrong_drops": 0,
+      "correct_drops": 0,
+      "drop_verdict": "-"
     }
   }
 }
