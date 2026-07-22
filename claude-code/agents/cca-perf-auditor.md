@@ -7,7 +7,10 @@ model: inherit
 
 # Performance Audit
 
-Analyze application for performance bottlenecks. Output to `.claude/audits/AUDIT_PERF.md`.
+Analyze application for performance bottlenecks.
+
+Output to `.claude/audits/AUDIT_PERF.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -85,6 +88,15 @@ Detect the project type first, then apply relevant checks.
 Report findings grouped by severity: Critical > High > Medium > Low.
 Each finding: `### PERF-NNN: Title` with Severity, File:line, Estimated Impact (quantify if possible), Fix.
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`PERF-NNN`), `auditor` (`perf-auditor`), `severity`, `priority`, `category`,
+`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -95,8 +107,8 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_PERF.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No performance issues detected" (not empty file)
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
+2. Optional trail: if you wrote `.claude/audits/AUDIT_PERF.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No performance issues detected" (not empty file)
 
 Focus on issues with measurable impact. Include before/after expectations for fixes.

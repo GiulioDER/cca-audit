@@ -7,7 +7,10 @@ model: inherit
 
 # Dependency Audit
 
-Analyze project dependencies for maintenance health, license compliance, and bloat. Output to `.claude/audits/AUDIT_DEPS.md`.
+Analyze project dependencies for maintenance health, license compliance, and bloat.
+
+Output to `.claude/audits/AUDIT_DEPS.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -77,6 +80,15 @@ Detect the package manager first, then run appropriate commands.
 Report findings grouped by severity: Critical > High > Medium > Low.
 Each finding: `### DEP-NNN: Title` with Severity, Package, Current/Latest versions, Issue, Fix command.
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`DEP-NNN`), `auditor` (`dep-auditor`), `severity`, `priority`, `category`,
+`file` (the manifest), `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -87,8 +99,8 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_DEPS.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No dependency issues detected" (not empty file)
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
+2. Optional trail: if you wrote `.claude/audits/AUDIT_DEPS.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No dependency issues detected" (not empty file)
 
 Focus on actionable findings. Include specific commands to fix issues.

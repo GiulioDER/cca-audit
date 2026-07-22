@@ -131,6 +131,28 @@ Set flags (fail toward coverage — when in doubt, set the flag):
 `RUN_DAT = FILES ∩ DATA_PATHS ≠ ∅` · `RUN_DEP = FILES ∩ DEP_PATHS ≠ ∅` ·
 `RUN_DEPLOY = FILES ∩ DEPLOY_PATHS ≠ ∅`.
 
+**CONTENT check (required — the path globs above are not sufficient).** The lists are filename
+patterns, but the riskiest files in most codebases are not named after their risk: `engine.py`,
+`sizer.py`, `executor.py`, `ledger.py`, `settle.py`, `book.py` match none of the globs, and
+`NUMERIC_PATHS` says "any file doing non-trivial arithmetic" while supplying no way to detect it.
+Deciding how much verification a change receives from a *string* is how a money-path diff ends up on
+the unverified FAST path. So also grep the DIFF itself, and set the flag on any hit:
+
+```
+RUN_STAKES |= diff matches (?i)\b(transfer|withdraw|deposit|payout|refund|charge|settle|
+                                   execute|submit|sign|approve|grant|revoke|drop|truncate|
+                                   delete|destroy|purge)\b
+RUN_NUM    |= diff matches (?i)\b(price|qty|quantity|amount|notional|balance|rate|ratio|pct|
+                                   percent|bps|decimal|round|floor|ceil|scale|convert)\b
+           OR the diff contains non-trivial arithmetic on a named quantity
+RUN_DAT    |= diff matches (?i)\b(CREATE TABLE|ALTER TABLE|GRANT|INSERT INTO|UPDATE .* SET|
+                                   migration)\b
+```
+
+These are heuristics, and they are meant to over-trigger: a false HIGH_STAKES costs one deeper run,
+a false low-stakes ships an unverified fix to a money path. **When detection is inconclusive, fail
+toward DEEP.**
+
 ## Step 0.6: Tier Selection
 
 Pick the tier. Explicit `fast` / `deep` args override auto-selection.
@@ -156,10 +178,20 @@ ELSE:                TIER = STANDARD
 | L1 domain (STAKES/NUM/DAT) | — | if flag set | if flag set |
 | L1 dep-auditor | — | if RUN_DEP | if RUN_DEP |
 | L1 deploy-auditor | — | if RUN_DEPLOY | if RUN_DEPLOY |
-| L2.5 findings verification | — | single fp-check | fp-check + **adversarial 2-of-3 on high-stakes P1** + **`numeric` artifact required on NUM-\* P1** |
+| L2.5 findings verification | **P1 only** (single fp-check) | single fp-check, P1+P2 | fp-check + **adversarial 2-of-3 on high-stakes P1** + **`numeric` artifact required on NUM-\* P1** |
 | L4 P1 fix style | direct | red→green test | red→green test |
 | L5.5 regression diff | — | yes | yes |
 | L6 architect gate | yes (verdict only) | yes + mapping | yes + mapping |
+
+**No finding is ever edited into the code unverified — including on FAST.** FAST is auto-selected,
+not opt-in, so "the user chose speed" is not available as a justification; a P1 reaching Step 4
+straight from raw auditor output would mean the product's central claim — *verifies every finding
+against your real code before it touches a line* — is false on the default path for small diffs.
+A single `fp-check` over the P1s costs one agent on a ≤40-line diff. P2/P3 on FAST are reported
+rather than fixed.
+
+Whatever the tier, the run summary must state what was NOT verified — e.g. `P2 findings reported
+unverified (FAST tier)`. A gate that was skipped and a gate that passed must never render the same.
 
 Report: `Tier=<T> | MODE=<DIFF|HUNT> | <N> files (<LANGUAGES>) | domains STAKES=<…> NUM=<…> DAT=<…> DEP=<…> DEPLOY=<…> | size=<SIZE>L`
 
@@ -353,24 +385,38 @@ For each finding, verify against ACTUAL code via Read/Grep:
       (MODE=DIFF: yours — decision log / memory.  MODE=HUNT: the UPSTREAM project's.)
 Verdict per finding: CONFIRMED | FALSE_POSITIVE (give evidence) | DUPLICATE (cite URL) | UNCERTAIN.
 For UNCERTAIN where a quick test would settle it, PROPOSE a one-line assertion test (do not run blind).
+DUPLICATE requires a URL you OPENED and confirmed describes the same defect in the same place — a
+keyword match is not a duplicate. A search that errors, is unauthenticated, is rate-limited, or that
+you could not reach is NOT a duplicate: keep the finding and say the check could not run.
 ```
 
 **P1 on a high-stakes path (`high_stakes=true`)** — DEEP only: adversarial **2-of-3**.
-Launch 3 independent skeptics in ONE message (parallel), each:
+
+**First, the artifact exemption.** A finding whose verdict `source` is a TOOL — `pyright`,
+`semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
+resting on an `llm`-sourced verdict.
+
+This is not a numeric special case; it is the same rule `cca-fp-check.md` states ("you may not
+overturn a CONFIRMED or a FALSE_POSITIVE that carries a tool artifact — the checker read the code,
+you are guessing"). Routing an artifact-backed finding to three refute-biased LLMs asks them to do
+precisely what that rule forbids, and a majority re-reading a fluent-looking expression is the
+failure mode the artifact exists to prevent. The panel exists to test *judgement*, not to re-litigate
+*execution*. (Note the skeptics are themselves `subagent_type: fp-check`, so they inherit the
+no-overturn rule — without this exemption the panel prompt and their own system prompt disagree.)
+
+For the remainder — a high-stakes P1 backed only by LLM judgement — launch 3 independent skeptics
+in ONE message (parallel), each:
 ```
 subagent_type: fp-check
 Try to REFUTE this finding. Default verdict = FALSE_POSITIVE unless you can prove the bug is real,
-in changed code, and has real impact. Provide the file:line evidence for your verdict.
+in scope for this run's MODE, and has real impact. Provide the file:line evidence for your verdict.
 ```
-A high-stakes P1 is CONFIRMED only if **≥2 of 3** skeptics fail to refute it. Otherwise → FALSE_POSITIVE
-(or UNCERTAIN if split with low confidence → escalate to human, never fix blind).
+CONFIRMED if **≥2 of 3** skeptics fail to refute it. Otherwise → **UNCERTAIN**, escalated to a human.
 
-**Exception: a `NUM-*` P1 carrying a `hypothesis` artifact is NOT subject to this skeptic vote.**
-The artifact settles it — do not spawn the 2-of-3 panel for it. An LLM majority re-reading a sign
-error is exactly the failure mode the artifact exists to prevent; three skeptics failing to refute
-a fluent-looking expression would drop a CONFIRMED finding that a mechanical check already proved.
-This numeric finding still goes through the ordinary `fp-check` path (which re-reads the declared
-relation per the `numeric` section rule), just never through the adversarial panel.
+**The panel's tie-break is UNCERTAIN, never FALSE_POSITIVE.** These are by construction the
+irreversible findings — money, auth, deletion. Three refute-biased models failing to agree is not
+evidence the bug is absent; it is evidence the question is hard, which is exactly when a human should
+look. Silently dropping it there converts "we could not agree" into "we checked and it was fine."
 
 Apply verdicts: CONFIRMED → fix plan · FALSE_POSITIVE → drop (record with evidence) ·
 DUPLICATE → drop (record the upstream URL; it is someone else's find, not yours) ·
@@ -409,12 +455,23 @@ A P1 fix without a red→green test is incomplete (the architect gate will flag 
 
 1. `{TEST_CMD}` on the relevant test file(s) — baseline + any new P1 tests must pass.
 2. `{LINT_CMD}` on changed files — clean (pre-existing warnings OK).
-If tests fail: diagnose, fix, re-run. Do NOT skip.
+If tests fail: diagnose, fix, re-run. Do NOT skip. Bound the loop at **3 attempts**, then escalate.
+
+**A failing baseline test may not be weakened, skipped, `xfail`ed, deleted, or have its assertions
+loosened to make this step pass.** "Diagnose, fix, re-run" means fix the code. If a baseline test is
+genuinely wrong, that is a finding in its own right and a BLOCKED-for-human decision, not a repair
+you make silently inside a green-the-suite loop — a red test you edited into a green one is
+indistinguishable in the final diff from a bug you fixed.
+
+Changing an existing test's expectations IS legitimate when a CONFIRMED fix deliberately changes a
+contract (a test pinning the defect). Say so explicitly, name the finding ID, and keep a control test
+covering the behaviour that did NOT change.
 
 ## Step 5.5: Layer 5.5 — Regression Diff (ANTI-REGRESSION) — STANDARD/DEEP
 
-If zero fixes were applied, skip. Otherwise one `differential-review` agent over ONLY the audit-fix
-diff (Layer 4 changes, not the original feature):
+If zero fixes were applied, skip. Otherwise one `differential-review` agent over the **whole
+working-tree diff since Layer 4 began** — the audit fixes, not the original feature, but including
+anything the Step 5 repair loop touched:
 ```
 subagent_type: differential-review
 For each fix hunk, the intended change is to resolve a specific finding. Verify:
@@ -423,7 +480,12 @@ For each fix hunk, the intended change is to resolve a specific finding. Verify:
   - no new path silently bypasses an existing guard.
 Map each hunk → finding. Verdict per hunk: SAFE | SCOPE_CREEP | REGRESSION_RISK (file:line + reasoning).
 ```
-REGRESSION_RISK → revert/correct, re-run L5. SCOPE_CREEP → trim to minimal, re-run L5. All SAFE → proceed.
+REGRESSION_RISK → revert/correct, re-run L5 **then L5.5 again**. SCOPE_CREEP → trim to minimal,
+re-run L5 **then L5.5 again**. All SAFE → proceed.
+
+Scoping this gate to "Layer 4 changes" alone would leave a hole in exactly the place edits are made
+under pressure: a Step 5 repair, or a correction made in response to this gate's own verdict, would
+never be reviewed. Re-run it until it comes back clean on the diff as it actually stands.
 
 ## Step 6: Layer 6 — Architect Gate + Fix→Finding Mapping
 

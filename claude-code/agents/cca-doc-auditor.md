@@ -7,7 +7,10 @@ model: inherit
 
 # Documentation Audit
 
-Find documentation gaps. Output to `.claude/audits/AUDIT_DOCS.md`.
+Find documentation gaps.
+
+Output to `.claude/audits/AUDIT_DOCS.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -72,6 +75,15 @@ Construct patterns based on the project's detected language.
 Report findings grouped by severity: Critical > High > Medium > Low.
 Each finding: `### DOC-NNN: Title` with Severity, File:line, Issue, Recommendation.
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`DOC-NNN`), `auditor` (`doc-auditor`), `severity`, `priority`, `category`,
+`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -82,6 +94,6 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_DOCS.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No documentation issues detected" (not empty file)
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
+2. Optional trail: if you wrote `.claude/audits/AUDIT_DOCS.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No documentation issues detected" (not empty file)

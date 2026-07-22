@@ -5,6 +5,13 @@ Drop-in agents for [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 ## Prerequisites
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI installed and authenticated
+- `git` — both installers shallow-clone the repo when run as a one-liner
+- `python` + `pip` — the installers pip-install the `cca_checks` helper package
+- **For the deterministic verification layer**: `pyright`, `pytest`, and `semgrep` on your `PATH`
+  (`pip install pyright pytest semgrep`). Without them `/audit-fix` gracefully falls back to
+  LLM-only verification — no crash, no regression.
+- **For numeric findings**: the `numeric` extra (`pip install "cca_checks[numeric]"`), which adds
+  the `hypothesis`-backed `numeric` claim type.
 
 ## Installation
 
@@ -36,6 +43,9 @@ This copies the agent and command files into your project's `.claude/` directory
 - `.claude/commands/audit-fix-v2.md` — backward-compatible alias that forces the DEEP tier
 - `.claude/agents/cca-*.md` — the specialized agents
 
+It also installs the **`cca_checks`** helper package (`python -m cca_checks`) that powers the
+deterministic verification layer.
+
 ## Usage
 
 One command, auto-tiered. The pipeline auto-selects **FAST / STANDARD / DEEP** by diff size and
@@ -50,6 +60,7 @@ risk — you only pass a tier to override it.
 /audit-fix commit 1           # Audit the last commit
 /audit-fix commit 3           # Audit the last 3 commits
 /audit-fix files src/app.py   # Audit specific files
+/audit-fix hunt src/          # HUNT MODE: audit code you did NOT write for pre-existing bugs
 /audit-fix deferred           # Second pass for deferred P3 items
 ```
 
@@ -69,17 +80,19 @@ High-stakes diffs (money, auth, data migrations, numeric-heavy code) always run 
 ## What Happens
 
 1. **Step 0**: Detects changed files from git (tracked + untracked).
-2. **Step 0.5**: Auto-detects languages, test/lint tools, and which domains the diff touches.
-3. **Step 0.6**: Selects the tier (FAST / STANDARD / DEEP).
-4. **Step 1**: Launches the applicable auditors in parallel (core + conditional domain/dep/deploy).
-5. **Step 2**: Consolidates and deterministically deduplicates findings (structured JSON return values).
-6. **Step 2.5** *(STANDARD/DEEP)*: Re-verifies P1/P2 findings against the real code — drops false
+2. **Step 0.4** *(hunt mode only, blocking)*: Target-viability pre-flight — any REJECT stops the run
+   before a single auditor is spawned.
+3. **Step 0.5**: Auto-detects languages, test/lint tools, and which domains the diff touches.
+4. **Step 0.6**: Selects the tier (FAST / STANDARD / DEEP).
+5. **Step 1**: Launches the applicable auditors in parallel (core + conditional domain/dep/deploy).
+6. **Step 2**: Consolidates and deterministically deduplicates findings (structured JSON return values).
+7. **Step 2.5** *(STANDARD/DEEP)*: Re-verifies P1/P2 findings against the real code — drops false
    positives, escalates uncertain ones; high-stakes P1 get adversarial 2-of-3 verification.
-7. **Step 3–4**: Prioritized fix plan; implements P1+P2 (each P1 gets a red→green regression test).
-8. **Step 5**: Re-runs tests and linter.
-9. **Step 5.5** *(STANDARD/DEEP)*: Differential review confirms the fix diff stayed in scope.
-10. **Step 6**: Architect-reviewer (read-only) gives the final verdict + fix→finding mapping.
-11. **Step 7**: Commits the fixes.
+8. **Step 3–4**: Prioritized fix plan; implements P1+P2 (each P1 gets a red→green regression test).
+9. **Step 5**: Re-runs tests and linter.
+10. **Step 5.5** *(STANDARD/DEEP)*: Differential review confirms the fix diff stayed in scope.
+11. **Step 6**: Architect-reviewer (read-only) gives the final verdict + fix→finding mapping.
+12. **Step 7**: Commits the fixes.
 
 ## Output
 

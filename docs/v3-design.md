@@ -44,10 +44,18 @@ auditor (semantic suspicion)
 Findings stop being prose. Each auditor finding emits:
 
 ```
-{ id, file, line, claim_type, proposition, predicted_impact, suggested_check }
+{ finding_id, file, line, claim_type, proposition, predicted_impact, sink_class }
 ```
 
-`claim_type ∈ { definedness, type, nullability, reachability, crash_impact, taint, numeric, semantic }`
+(`cca_checks/claim.py`. `sink_class` names the taint sink category for `taint` claims and is empty
+otherwise.)
+
+`claim_type ∈ { definedness, type, nullability, reachability*, crash_impact, taint, numeric, semantic }`
+
+\* `reachability` has no checker of its own — it is subsumed by the repro check (see §3.2). The
+`--claim-type` values `cca_checks check` actually accepts are
+`{ definedness, nullability, type, taint }`; `crash_impact` and `numeric` are settled by the
+separate `repro` and `numeric` subcommands, and `semantic` by the LLM adjudicator.
 
 ### 3.2 claim_type → checker
 

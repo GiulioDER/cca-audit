@@ -7,7 +7,10 @@ model: inherit
 
 # Security Audit (Comprehensive)
 
-**Single source of truth for ALL security checks.** Output to `.claude/audits/AUDIT_SECURITY.md`.
+**Single source of truth for ALL security checks.**
+
+Output to `.claude/audits/AUDIT_SECURITY.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -142,6 +145,16 @@ Include a risk summary table:
 | Deps | X | X | X | X |
 ```
 
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`SEC-NNN`), `auditor` (`security-auditor`), `severity`, `priority`, `category`,
+`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`. **Never put a
+secret value in `claim` or `evidence`** — reference the name and location only.
+
 ## Execution Logging
 
 After completing, append to `.claude/audits/EXECUTION_LOG.md`:
@@ -152,8 +165,8 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_SECURITY.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No security issues detected" (not empty file)
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
+2. Optional trail: if you wrote `.claude/audits/AUDIT_SECURITY.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No security issues detected" (not empty file)
 
 **This agent is the SINGLE SOURCE for security findings. Other agents must NOT duplicate these checks.**

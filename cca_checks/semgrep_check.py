@@ -2,10 +2,11 @@ import json
 import os
 import subprocess
 from importlib import resources
-from typing import Optional
 
 from .claim import Claim, Verdict, make_verdict
+from .config import TIMEOUT_S
 from .scope import enclosing_span
+from .toolpath import resolve_tool
 
 SUPPORTED_SINK_CLASSES = frozenset({"sql", "command", "code_exec", "path"})
 
@@ -37,19 +38,32 @@ def rule_name(check_id) -> str:
     return check_id.rsplit(".", 1)[-1]
 
 
-def run_semgrep(config: str, path: str) -> Optional[list[dict]]:
+def run_semgrep(config: str, path: str) -> list[dict] | None:
     """Run semgrep offline over one file.
 
     None  = could not tell (missing binary, timeout, crash, unparseable output,
             semgrep reported errors, or nothing was scanned) -> escalate.
     list  = semgrep ran; possibly empty, meaning it genuinely matched nothing.
     Never conflate the two.
+
+    `--disable-nosem` and `--no-git-ignore` exist because an empty result set is
+    what licenses a FALSE_POSITIVE, and both suppression mechanisms are controlled
+    by the repo under audit. A `# nosemgrep` comment on a backdoored line, or a
+    crafted `.gitignore` / `.semgrepignore`, would otherwise let that repo delete
+    the evidence against itself and collect a refutation carrying an authoritative
+    `source: semgrep`. A refutation may only rest on a scan the audited repo could
+    not influence.
     """
-    cmd = ["semgrep", "--config", config, "--json", "--metrics=off",
-           "--disable-version-check", "--quiet", os.path.abspath(path)]
+    exe = resolve_tool("semgrep")
+    if exe is None:
+        # Missing from PATH, or resolved inside the audited tree (hijack attempt).
+        return None
+    cmd = [exe, "--config", config, "--json", "--metrics=off",
+           "--disable-version-check", "--quiet", "--disable-nosem", "--no-git-ignore",
+           os.path.abspath(path)]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=120)
+                              encoding="utf-8", errors="replace", timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return None
     except OSError:  # includes FileNotFoundError

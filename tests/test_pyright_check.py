@@ -76,14 +76,33 @@ def test_missing_pyright_escalates_to_llm():
     assert "unavailable" in v.evidence
 
 
-def test_null_range_does_not_crash():
+# An in-rule-set diagnostic whose location cannot be read must ESCALATE, not
+# refute. These two cases previously returned FALSE_POSITIVE: the diagnostic was
+# silently dropped, and the resulting emptiness was then read as "pyright was
+# silent" -- i.e. a diagnostic that positively exists became evidence that nothing
+# is wrong. That is the inverse of the escalate-don't-drop policy the codebase
+# applies in `hits_in_span` and `pyright_is_blind_at`, and it sat on the refutation
+# path. The "does not crash" guarantee these tests were written for still holds.
+
+def test_null_range_escalates_rather_than_refuting():
     diags = [{"range": None, "rule": "reportUndefinedVariable", "message": "m"}]
     v = verdict_for_claim(claim(), diags, DEFINEDNESS_RULES)
-    assert v.verdict == "FALSE_POSITIVE"
+    assert v.verdict == "UNCERTAIN"
+    assert "location could not be determined" in v.evidence
 
 
-def test_missing_range_key_does_not_crash():
+def test_missing_range_key_escalates_rather_than_refuting():
     diags = [{"rule": "reportUndefinedVariable", "message": "m"}]
+    v = verdict_for_claim(claim(), diags, DEFINEDNESS_RULES)
+    assert v.verdict == "UNCERTAIN"
+    assert "location could not be determined" in v.evidence
+
+
+def test_unreadable_diagnostic_outside_the_rule_set_still_refutes():
+    # The escalation above is scoped to rules we care about. A malformed
+    # diagnostic under an unrelated rule carries no evidence about this claim and
+    # must not block an otherwise-clean refutation.
+    diags = [{"range": None, "rule": "reportUnusedImport", "message": "m"}]
     v = verdict_for_claim(claim(), diags, DEFINEDNESS_RULES)
     assert v.verdict == "FALSE_POSITIVE"
 

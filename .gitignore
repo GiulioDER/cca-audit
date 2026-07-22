@@ -2,5 +2,15 @@ __pycache__/
 *.pyc
 .pytest_cache/
 build/
+dist/
 *.egg-info/
 .hypothesis/
+.ruff_cache/
+.venv/
+venv/
+
+# CCA-Audit self-installs its agents and commands into .claude/ when this repo is
+# the audit target, and audit runs write trails to .claude/audits/. None of that
+# belongs in the repo -- without this line an agent running `git add -A` commits a
+# self-install of all 13 agents.
+.claude/

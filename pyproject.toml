@@ -1,18 +1,52 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cca_checks"
 version = "0.4.0"
 description = "Deterministic verification helpers for CCA-Audit's fp-check gate"
+readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Giulio D'Erme" }]
+keywords = ["static-analysis", "code-review", "verification", "claude-code", "llm"]
+dependencies = []
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Security",
+]
+
+[project.urls]
+Homepage = "https://github.com/GiulioDER/cca-audit"
+Repository = "https://github.com/GiulioDER/cca-audit"
+Issues = "https://github.com/GiulioDER/cca-audit/issues"
 
 [project.optional-dependencies]
-numeric = ["hypothesis>=6.0"]
+# pytest belongs in `numeric`, not just hypothesis: the numeric claim type runs its
+# generated property file THROUGH pytest, so installing hypothesis alone leaves
+# every numeric claim escalating to UNCERTAIN -- and on the DEEP tier a NUM-* P1
+# cannot be fixed at all without a hypothesis artifact. An extra that half-enables
+# a feature is worse than one that does not exist, because the failure is silent.
+numeric = ["hypothesis>=6.0", "pytest>=7"]
+# The whole deterministic layer in one install, so it is reproducible from the
+# manifest rather than from a sentence in the README.
+verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50"]
+dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4"]
 
-[tool.setuptools]
-packages = ["cca_checks"]
+[tool.setuptools.packages.find]
+# Glob, not a hand-maintained list: a literal `packages = ["cca_checks"]` silently
+# drops any future subpackage from the wheel, and that failure surfaces only as an
+# ImportError in installed use -- never in a repo-root test run.
+include = ["cca_checks*"]
 
 [tool.setuptools.package-data]
 cca_checks = ["rules/*.yaml"]
@@ -22,3 +56,30 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+# tests/fixtures/ is sample code that is deliberately imperfect, and its LINE
+# NUMBERS are part of the test contract -- the suite settles claims at specific
+# coordinates in these files. Auto-formatting them silently moves the defect: a
+# `ruff --fix` pass rewrote `Optional[Card]` to `Card | None`, dropped the
+# now-unused import, shifted every line up by one, and turned a CONFIRMED
+# acceptance test into an UNCERTAIN. Never lint the fixtures.
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# E731: tests use short throwaway lambdas as stand-in callables; a def per stub
+#       would obscure more than it clarifies.
+# E501: several fixtures embed VERBATIM pyright/Hypothesis output, which the
+#       parsers under test match against. Reflowing them to satisfy a line-length
+#       rule would change the data the assertion depends on.
+"tests/*" = ["E731", "E501"]
+
+[tool.pyright]
+# A tool whose product is "pyright as evidence" should pass its own check.
+include = ["cca_checks"]
+typeCheckingMode = "standard"

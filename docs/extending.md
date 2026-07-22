@@ -18,7 +18,32 @@ model: inherit
 
 # My Custom Audit
 
-Output to `.claude/audits/AUDIT_MY.md`.
+## Return Value (Required)
+
+Return a JSON array as the FIRST thing in your response — this is the **authoritative** output the
+orchestrator consumes. Use the canonical Findings Schema from `audit-fix.md`:
+
+\```json
+[
+  {
+    "id": "MY-001",
+    "auditor": "my-auditor",
+    "severity": "High",
+    "priority": "P2",
+    "category": "my-domain",
+    "file": "src/thing.py",
+    "line": 42,
+    "claim": "What is wrong, in one sentence.",
+    "evidence": "What in the code proves it",
+    "suggested_fix": "The minimal change",
+    "confidence": 0.8,
+    "high_stakes": false
+  }
+]
+\```
+
+Optionally also write a human-readable trail to `.claude/audits/AUDIT_MY.md`. The pipeline does
+**not** depend on that file.
 
 ## Status Block (Required)
 
@@ -47,10 +72,11 @@ skipped_checks: []
 
 [Describe the checks, organized by category]
 
-## Output Format
+## Output Format (optional trail)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### MY-NNN: Title` with Severity, File:line, Issue, Fix.
+If you write `.claude/audits/AUDIT_MY.md`, report findings grouped by severity:
+Critical > High > Medium > Low. Each finding: `### MY-NNN: Title` with Severity, File:line,
+Issue, Fix. This mirrors the JSON return value; it never replaces it.
 
 ## Execution Logging
 
@@ -62,22 +88,32 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_MY.md` was created
-2. Verify file has content beyond headers
-3. If no issues found, write "No issues detected" (not empty file)
+1. Verify the JSON array is the first thing in your response and parses
+2. If no issues found, return an empty array `[]` — never omit the return value
+3. If you wrote the optional `.claude/audits/AUDIT_MY.md` trail, verify it has content beyond
+   headers, writing "No issues detected" rather than leaving it empty
 ```
 
 ### 2. Register in the orchestrator
 
-Edit `.claude/commands/audit-fix.md`, Step 1. Add a new agent block:
+Edit `.claude/commands/audit-fix.md`, Step 1.
+
+A **generic** auditor (always applicable) gets a row in the "Generic auditors" table:
 
 ```
-### Agent N: My Auditor
+| N | My Auditor | `my-auditor` | `MY-` | [scope — what it exclusively checks]. *(STANDARD/DEEP)* |
+```
+
+A **conditional** domain auditor gets its own block under "Domain & infra auditors (conditional)":
+
+```
+#### Agent N — My Domain (run if RUN_MY)
 \```
-subagent_type: my-auditor
+subagent_type: my-auditor   |   Prefix: MY-
 Scope: [description]
-Focus: ONLY new/changed code.
-Output: Finding IDs MY-001..N, severity, file:line, fix.
+       - [check]
+       - [check]
+Output: MY- findings per schema, high_stakes=false.
 \```
 ```
 
@@ -96,7 +132,8 @@ Add your auditor's scope to `docs/auditor-scopes.md` and ensure no overlap with 
 2. **Status blocks**: Every auditor output starts with a structured status block
 3. **Finding IDs**: Unique prefix per auditor (CODE-, BUG-, SEC-, etc.)
 4. **Severity levels**: Critical, High, Medium, Low
-5. **Output verification**: Every auditor verifies its output file was created
+5. **Structured return**: Every auditor returns its findings as the canonical JSON array — that
+   return value is authoritative; the `.claude/audits/*.md` trail is optional
 6. **Language agnostic**: Checks adapt to detected languages
 
 ## Examples of Custom Auditors

@@ -1,13 +1,15 @@
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 
-from .claim import Claim, Verdict
+from .claim import Claim, Verdict, make_verdict
 from .property_check import run_properties
 from .pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from .repro_runner import run_repro
 from .semgrep_check import verdict_for_taint
+from .toolpath import _is_inside
 
 CLAIM_TYPES = sorted(set(RULES_BY_CLAIM) | {"taint"})
 
@@ -25,7 +27,50 @@ def _add_claim_args(parser):
     parser.add_argument("--sink-class", default="")
 
 
+def _validate_coordinate(file: str, line: int, finding_id: str) -> Verdict | None:
+    """Reject a claim coordinate that cannot be settled. None means "usable".
+
+    A coordinate no diagnostic can ever match must NOT reach the checkers, because
+    every checker reads "no diagnostic here" as evidence and issues a confident
+    FALSE_POSITIVE carrying an authoritative `source`. A hallucinated line number --
+    the exact failure this gate exists to catch -- would therefore be rewarded with
+    a refutation on a file that provably contains the defect. Escalating instead
+    keeps "we could not check" distinct from "we checked and found nothing".
+
+    Directories are refused for a second reason: pyright analyzes a directory
+    happily and returns diagnostics for every file in it, while diagnostic matching
+    is line-based, so a directory argument lets one file's diagnostic confirm a
+    claim about another.
+    """
+    def bad(why: str) -> Verdict:
+        return make_verdict(finding_id, "UNCERTAIN", f"{why}; escalated", "llm")
+
+    if not os.path.exists(file):
+        return bad(f"claim file {file!r} does not exist")
+    if os.path.isdir(file):
+        return bad(f"claim file {file!r} is a directory, not a file")
+    resolved = os.path.realpath(file)
+    if not _is_inside(resolved, os.path.realpath(os.getcwd())):
+        # Analyzing outside the audit root is never something a finding about this
+        # repo needs, and the file path originates from LLM output derived from
+        # untrusted repo content.
+        return bad(f"claim file {file!r} resolves outside the audit root")
+    if line < 1:
+        return bad(f"claim line {line} is not a valid 1-based line number")
+    try:
+        with open(file, "rb") as fh:
+            total = sum(1 for _ in fh)
+    except OSError as exc:
+        return bad(f"claim file {file!r} could not be read ({exc.__class__.__name__})")
+    if line > total:
+        return bad(f"claim line {line} is past the end of {file!r} ({total} lines)")
+    return None
+
+
 def _check(claim_type: str, args) -> Verdict:
+    invalid = _validate_coordinate(args.file, args.line, args.finding_id)
+    if invalid is not None:
+        return invalid
     claim = Claim(args.finding_id, args.file, args.line, claim_type,
                   proposition=args.symbol, sink_class=args.sink_class)
     if claim_type == "taint":

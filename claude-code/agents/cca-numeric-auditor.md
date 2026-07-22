@@ -13,7 +13,8 @@ recurring "the math looks right but the units/sign are wrong" class. Used by the
 
 **NOT for general runtime bugs** (use bug-auditor) or performance (use perf-auditor).
 
-Output to `.claude/audits/AUDIT_NUMERIC.md`.
+Output to `.claude/audits/AUDIT_NUMERIC.md` (optional trail). **Return value is authoritative** — see
+Return value below.
 
 ## Status Block (Required)
 
@@ -87,6 +88,7 @@ properties:
     index: 1                        # which argument the property is about
     direction: decreasing           # helper-specific parameters
     delta: 0.1
+    strict: true                    # the term's PRESENCE is the claim (see below)
     domains:                        # REQUIRED — unbounded floats are not allowed
       mu: [-0.5, 0.5]
       vol: [0.01, 1.0]
@@ -97,10 +99,25 @@ properties:
     forward: to_minor_units         # one direction of the conversion under test
     inverse: from_minor_units       # the other direction — either side may carry the defect
     value: amount                   # the bare scalar being round-tripped (no `args`/`index`)
+    quantum: 0.01                   # REQUIRED whenever the conversion quantizes
     domains:                        # REQUIRED even here — the value still needs a domain
       amount: [0.01, 1000000.0]
     rationale: converting to minor units and back must recover the original amount
 ```
+
+**`quantum` is not optional for a lossy conversion.** Money held as integer minor units,
+token decimals and tick-size grids all lose information *by design*: `1.625 → 162 cents →
+1.62`. Declared without a `quantum`, that CORRECT converter is falsified within a handful of
+examples, and the resulting `CONFIRMED` is binding. Set `quantum` to the granularity the
+forward direction lands on (`0.01` for cents, the tick size for a price grid); omit it only
+for a genuinely exact, information-preserving round trip.
+
+**`strict: true` when the term's presence is the claim.** The default monotonicity test is
+non-strict and uses a magnitude-relative tolerance, so it passes on the two defects this
+auditor most exists to catch: a term dropped entirely (`mu - 0.5*vol**2` collapsing to `mu`
+via a missing multiply or a zeroed unit factor) and a wrong-signed term that is small relative
+to a notional-scale base. If your rationale says a specific term must *move* the result, say
+`strict: true` — otherwise the property cannot fail on the bug you are describing.
 
 `assert_round_trips` is the one helper with two callables instead of one target: use
 `forward`/`inverse`/`value` in place of `target`/`args`/`index`, as shown above.
@@ -116,8 +133,17 @@ The remaining four helpers follow the same `target`/`args`/`domains`/`rationale`
   against correct code (see Failure modes in the design spec): if the true limit actually
   depends on the surviving arguments, a literal collapses that dependency and manufactures
   a counterexample out of a wrong declared relation, not a real bug.
+- **`assert_monotonic_in`** — `index`, `direction`, `delta`, plus two optional keys:
+  `domain_hi` (the declared upper bound of `domains[args[index]]`) and `strict`. **Always set
+  `domain_hi`** when the domain has an upper bound: the helper probes at `args[index] + delta`,
+  which steps *outside* the domain you declared, so a function that is correct on its domain but
+  behaves differently past the boundary yields a counterexample production can never reach.
+  With `domain_hi` the probe steps downward at the boundary instead.
 - **`assert_scale_invariant`** — `factor` (the multiplier), `indices` (which args get scaled
-  by it; the rest are held fixed).
+  by it; the rest are held fixed). `factor` must differ from `0` and from `1`, and `indices`
+  must be non-empty and free of duplicates — a unit factor or an empty index list makes the
+  assertion `fn(args) == fn(args)`, which is vacuously true on any code, and a repeated index
+  scales that argument by `factor**k`, which falsifies a genuinely invariant function.
 - **`assert_sign_symmetric`** — `index` (the arg to negate), `kind` (`odd` — negate the arg,
   negate the result; or `even` — negate the arg, result unchanged; defaults to `odd`).
 
@@ -127,6 +153,21 @@ passes on buggy code and proves nothing.
 
 Declare `domains` from the values the function actually receives in production. A counterexample
 found outside that range is an artifact, not a defect.
+
+## Return value (authoritative)
+
+Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
+command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
+the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+
+Each object: `id` (`NUM-NNN`), `auditor` (`numeric-auditor`), `severity`, `priority`, `category`,
+`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes` (always `true` on
+this auditor's paths).
+
+Because the trail is not read back, each finding's `properties:` block must travel in the **reply**
+too — either as a `properties` key on the finding object or in the prose immediately following the
+array, keyed by finding ID. A finding whose properties never reach the orchestrator cannot be
+settled by execution at L2.5.
 
 ## Execution Logging
 
@@ -138,9 +179,10 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 ## Output Verification
 
 Before completing:
-1. Verify `.claude/audits/AUDIT_NUMERIC.md` was created.
-2. Verify file has content beyond headers.
-3. If no issues found, write "No numerical/units issues detected" (not an empty file).
+1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean), and
+   that every finding's `properties:` block is present in the reply.
+2. Optional trail: if you wrote `.claude/audits/AUDIT_NUMERIC.md`, verify it has content beyond headers.
+3. If no issues found, return `[]` and write "No numerical/units issues detected" (not an empty file).
 
 Focus on units, scaling, and sign. **Do NOT duplicate generic runtime-bug checks** — those
 belong in bug-auditor.
