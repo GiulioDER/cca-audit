@@ -39,8 +39,8 @@ first, too.
 
 | Version | Supported |
 |---------|-----------|
-| 0.4.x   | Yes — current release line |
-| < 0.4   | No — upgrade; the DEEP self-audit (PRs #18–#20, #22) fixed real security findings (see `CHANGELOG.md`) that are not backported |
+| 0.5.x   | Yes — current release line |
+| < 0.5   | No — upgrade; the DEEP self-audit (PRs #18–#20, #22) fixed real security findings (see `CHANGELOG.md`) that are not backported |
 
 ## Reporting a vulnerability
 
