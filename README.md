@@ -143,6 +143,15 @@ declared metamorphic properties under Hypothesis. It confirms with a falsifying 
 refutes, because properties holding is not proof of correctness. Worked example:
 [`examples/sign-trap`](examples/sign-trap/).
 
+The same extra also brings `mpmath` and a seventh helper, `assert_substrate_agrees`: it runs the
+target twice — once in float64, once against a 50-digit `mpmath` reference — and confirms only
+when the two disagree beyond a fixed tolerance. It has no authored relation to correlate with the
+finding that raised it, which is what makes it independent of the property helpers above, but by
+the same token it's blind to sign and formula errors by construction — both substrates compute the
+same wrong formula and agree perfectly. Use it for cancellation, accumulation, and rounding-direction
+defects; pair it with a property helper when the finding is also about direction. See the
+[design spec](docs/superpowers/specs/2026-07-21-substrate-differential-design.md).
+
 ## Usage
 
 One command, auto-tiered:

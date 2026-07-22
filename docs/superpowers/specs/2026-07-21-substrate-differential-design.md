@@ -228,7 +228,8 @@ This is not a caveat in prose; it is a test. It converts the division-of-labor c
 
 | Mode | Handling |
 |---|---|
-| Patch misses a binding | Integrity gate → `substrate_lost`, never agreement |
+| Patch misses a binding in the target's OWN module | Integrity gate → `substrate_lost`, never agreement |
+| Target delegates to a helper in a SECOND, unpatched module | Integrity gate does NOT catch this — the helper's `float` return gets re-promoted to `mpf` by the outer arithmetic, so the gate sees a genuine `mpf` and passes with a float64-degraded reference. Bounded: this can only bias toward a false UNCERTAIN (no divergence found), never a false CONFIRMED. Proven, not just documented, by `test_gate_does_not_catch_cross_module_precision_loss` in `tests/test_substrate.py` |
 | Target is not pure | Runs twice ⇒ side effects fire twice. **Out of scope, documented** — the auditor must not point this at impure code |
 | mpmath at dps=50 × 200 examples is slow | Existing 120s timeout → UNCERTAIN, never a pass |
 | Patching module globals is not thread-safe | Single-threaded under `pytest -x`; documented as a constraint, not defended against |

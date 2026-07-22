@@ -159,8 +159,16 @@ run TWO phases in order:
       assert_substrate_agrees(<target>, (x,))
   ```
 
-  An `UNCERTAIN` whose evidence names `substrate_lost`, `not_patchable`, `raised`, or
-  `unavailable` means the reference substrate never ran — the two values compared would
+  The `@given` strategy bounds shown (`st.floats(1e-9, 1e-6)`) are illustrative only — you MUST
+  replace them with the finding's declared `domains`. This helper carries no authored relation
+  (that is its entire point), so `domains` is the ONLY auditor-supplied input to this template;
+  copying the placeholder verbatim hands Hypothesis a search domain the auditor never declared. A
+  `CONFIRMED` found there is binding — the no-overturn rule protects it and the DEEP adversarial
+  panel is told to skip it — so a magnitude production never sees can freeze a false CONFIRMED in
+  place with no downstream check.
+
+  An `UNCERTAIN` whose evidence names `substrate_lost`, `not_patchable`, `raised`, `unavailable`,
+  or `bad_dps` means the reference substrate never ran — the two values compared would
   have been float64 against float64. That is NOT agreement and NOT a refutation:
   investigate or escalate, never drop the finding.
 

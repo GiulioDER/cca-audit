@@ -66,6 +66,11 @@ That's an artifact, not a judgment. And it reproduces — runs are derandomized,
 
 The helper vocabulary is fixed and small: `assert_bounded`, `assert_monotonic_in`, `assert_limit`, `assert_scale_invariant`, `assert_sign_symmetric`, `assert_round_trips`. Every one takes the intended relation as an explicit argument, which is what makes a tautological property — one that merely restates the implementation — impossible to write through it.
 
+> *Update:* this post describes v3.4. v3.5 added a seventh helper, `assert_substrate_agrees` —
+> no authored relation at all, just the same target run twice (float64 vs a 50-digit `mpmath`
+> reference) so the substrates disagree where an author couldn't. See the
+> [design spec](superpowers/specs/2026-07-21-substrate-differential-design.md).
+
 ## The asymmetry is the point
 
 The checker can confirm. It can never refute.
