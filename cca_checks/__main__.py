@@ -5,13 +5,14 @@ import sys
 from dataclasses import asdict
 
 from .claim import Claim, Verdict, make_verdict
+from .clock_check import verdict_for_clock_leak
 from .property_check import run_properties
 from .pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from .repro_runner import run_repro
 from .semgrep_check import verdict_for_taint
 from .toolpath import _is_inside
 
-CLAIM_TYPES = sorted(set(RULES_BY_CLAIM) | {"taint"})
+CLAIM_TYPES = sorted(set(RULES_BY_CLAIM) | {"taint", "clock_leak"})
 
 
 def _add_claim_args(parser):
@@ -75,6 +76,8 @@ def _check(claim_type: str, args) -> Verdict:
                   proposition=args.symbol, sink_class=args.sink_class)
     if claim_type == "taint":
         return verdict_for_taint(claim)
+    if claim_type == "clock_leak":
+        return verdict_for_clock_leak(claim)
     return verdict_for_claim(claim, run_pyright(args.file), RULES_BY_CLAIM[claim_type])
 
 

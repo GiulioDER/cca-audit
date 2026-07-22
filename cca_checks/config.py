@@ -103,3 +103,34 @@ SUBSTRATE_TOL = _positive_float(
 
 # Decimal digits of precision for the reference substrate.
 SUBSTRATE_DPS = _positive_int("CCA_SUBSTRATE_DPS", _DEFAULT_SUBSTRATE_DPS)
+
+
+def _name_set(name: str, default: frozenset[str]) -> frozenset[str]:
+    """A comma-separated identifier set, overridable. Empty/blank -> default.
+
+    Same degrade-safely contract as the numeric knobs: a malformed override must
+    not take the checker down. An override that parsed to the EMPTY set would be
+    worse than malformed for CLOCK_STRONG_PARAMS -- it silently makes CONFIRMED
+    unreachable, so the check keeps running and simply stops finding anything.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    parts = frozenset(p.strip() for p in raw.split(",") if p.strip())
+    return parts or default
+
+
+# Parameter names that mean "the caller injects the clock here". STRONG names are
+# specific enough that a DEAD one sitting next to a wall-clock read is a proven
+# defect (see clock_check). WEAK names are as often plain data as an injected
+# clock -- `timestamp` is usually a value, not a clock -- so they only ever raise
+# the question. Keeping the two tiers separate is what stops a name-based
+# heuristic from licensing an automated edit.
+CLOCK_STRONG_PARAMS = _name_set("CCA_CLOCK_STRONG_PARAMS", frozenset({
+    "now", "as_of", "asof", "as_of_time", "as_of_ts", "as_of_date",
+    "clock", "current_time", "sim_time", "simulated_time",
+    "reference_time", "ref_time", "time_provider", "time_func", "timefunc",
+}))
+CLOCK_WEAK_PARAMS = _name_set("CCA_CLOCK_WEAK_PARAMS", frozenset({
+    "ts", "timestamp", "at", "when", "today", "date", "start_time", "end_time",
+}))
