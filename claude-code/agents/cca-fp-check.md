@@ -145,6 +145,25 @@ run TWO phases in order:
   converter within a few examples and the resulting `CONFIRMED` is binding. Omit it only for an
   exact, information-preserving round trip.
 
+  Third template, for `assert_substrate_agrees` (no tolerance argument — the threshold is
+  fixed in `cca_checks.config`):
+  ```python
+  from hypothesis import given, strategies as st
+  from cca_checks.hypo import cca_settings
+  from cca_checks.substrate import assert_substrate_agrees
+  from <module> import <target>
+
+  @cca_settings
+  @given(x=st.floats(1e-9, 1e-6))
+  def test_property(x):
+      assert_substrate_agrees(<target>, (x,))
+  ```
+
+  An `UNCERTAIN` whose evidence names `substrate_lost`, `not_patchable`, `raised`, or
+  `unavailable` means the reference substrate never ran — the two values compared would
+  have been float64 against float64. That is NOT agreement and NOT a refutation:
+  investigate or escalate, never drop the finding.
+
   **Numeric verdicts are asymmetric, the mirror of taint.** The checker never returns
   `FALSE_POSITIVE` for a `numeric` claim: properties holding across a bounded search is not proof
   of correctness, only the absence of a counterexample. A `CONFIRMED` carries a falsifying example

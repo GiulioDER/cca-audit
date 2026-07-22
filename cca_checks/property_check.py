@@ -118,7 +118,8 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
     # a @given test -- not just PropertyViolation. An incidental crash (e.g. a
     # ZeroDivisionError in the code under test) shrinks and banners exactly
     # like a real property violation, so the banner alone is not sufficient
-    # evidence. Only the six helpers in cca_checks/properties.py emit the
+    # evidence. Only the seven helpers across cca_checks/properties.py (six)
+    # and cca_checks/substrate.py (assert_substrate_agrees) emit the
     # "PROPERTY ... violated" line, so requiring BOTH matches also enforces
     # that vocabulary: an auditor who writes a raw `assert` instead of calling
     # a helper can no longer reach CONFIRMED. That is the anti-tautology

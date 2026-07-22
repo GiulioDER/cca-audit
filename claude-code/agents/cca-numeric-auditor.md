@@ -146,6 +146,14 @@ The remaining four helpers follow the same `target`/`args`/`domains`/`rationale`
   scales that argument by `factor**k`, which falsifies a genuinely invariant function.
 - **`assert_sign_symmetric`** — `index` (the arg to negate), `kind` (`odd` — negate the arg,
   negate the result; or `even` — negate the arg, result unchanged; defaults to `odd`).
+- **`assert_substrate_agrees`** — `target`, `args`, `domains` only. **No tolerance key
+  exists, deliberately.** This is the one helper with no authored relation: it compares
+  float64 against a 50-digit reference, so nothing about it comes from whoever raised the
+  finding. Letting a finding carry its own threshold would reintroduce exactly the
+  correlation this helper exists to escape. Use it for precision loss, catastrophic
+  cancellation, accumulation error, and rounding direction. It is **blind to sign and
+  formula errors** — both substrates compute the same wrong formula — so pair it with
+  `assert_monotonic_in` or `assert_limit` when the finding is about direction.
 
 State the property as the **intended relation**, derived from what the function is supposed to
 mean — never from what the code does. A property read off the implementation is a tautology: it
