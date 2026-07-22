@@ -3,6 +3,7 @@ import sys
 
 import pytest
 
+import cca_checks.properties as _properties_module
 from cca_checks.substrate import (
     MIN_DPS,
     SubstrateResult,
@@ -14,6 +15,42 @@ pytest.importorskip("mpmath", reason="substrate extra not installed")
 
 sys.path.insert(0, "tests/fixtures/substrate")
 import targets  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _restore_properties_module():
+    """Undo the global-state damage `test_properties_imports_without_mpmath` does.
+
+    That test calls `importlib.reload(cca_checks.properties)`. A `class` statement
+    mints a brand-new class object every time it executes, so the reload leaves
+    `cca_checks.properties.PropertyViolation` pointing at a NEW class -- call it
+    C1 -- distinct from the original, C0. `cca_checks.substrate` is never
+    reloaded; `assert_substrate_agrees` does `from .properties import
+    PropertyViolation` INSIDE the function body, so after the reload every call
+    raises a C1 instance. Meanwhile this file (and test_properties.py,
+    test_selfaudit_hardening.py) did `from cca_checks.properties import
+    PropertyViolation` at MODULE scope -- all executed at collection time, before
+    any test runs, so all of them are stuck holding C0 forever. Once that split
+    exists, `isinstance`/`pytest.raises(PropertyViolation)` against the C0 name
+    silently stops matching C1 exceptions, for the rest of the pytest session,
+    nowhere near the test that caused it -- and it is invisible today only because
+    this file happens to sort/run last, so nothing downstream observes the drift.
+
+    A second reload in teardown would NOT fix this: re-executing the module body
+    again mints yet another class, C2, still mismatched against the C0 already
+    captured by every module-scope import. The only way back is to put the
+    *original* objects back, verbatim -- so snapshot this module's namespace
+    before the test and restore it byte-for-byte after. This mirrors the autouse
+    `_restore` fixture in tests/test_config.py, generalised from "a reload
+    reproduces an equal value" (true there -- config holds plain ints/floats,
+    compared by value) to "a reload must be undone with the identical object"
+    (required here -- classes are compared by identity, and reload cannot recreate
+    an existing identity, only mint a new one).
+    """
+    snapshot = vars(_properties_module).copy()
+    yield
+    vars(_properties_module).clear()
+    vars(_properties_module).update(snapshot)
 
 
 def test_arithmetic_only_survives():

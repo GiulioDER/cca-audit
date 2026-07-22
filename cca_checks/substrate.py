@@ -151,8 +151,19 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
             f"this proves nothing about the code under test"
         )
 
+    # `SubstrateResult` guarantees "never both": reason is None here, so
+    # `run_under_substrate` took the success path, which only returns a value
+    # when it is a real `mpmath.mpf` (the `isinstance` check right before its
+    # `return SubstrateResult(value, None)`) -- and mpmath itself was
+    # importable, or that path could not have been reached at all. That
+    # invariant lives across two functions and a dataclass field typed
+    # `object | None`, which is invisible to a type checker looking at this
+    # function alone -- assert it locally so pyright can narrow both names for
+    # every access below, rather than suppressing the check.
+    assert mpmath is not None
     observed = fn(*args)
     reference = result.value
+    assert isinstance(reference, mpmath.mpf)
 
     if not math.isfinite(observed):
         # A non-finite float against a finite reference is a defect, not a
