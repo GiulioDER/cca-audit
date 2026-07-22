@@ -8,8 +8,9 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
-Shipped after the 0.4.0 version bump, still on 0.4.0 — no version bump has accompanied this
-work yet, which is itself accurate: these slices landed as PRs, not as a new release.
+Nothing yet.
+
+## [0.5.0] - 2026-07-22
 
 - **v3.5 — substrate-differential checks** (2026-07-22, PR #21). Adds `assert_substrate_agrees`,
   a seventh property helper that runs a numeric target twice — once at float64, once against a

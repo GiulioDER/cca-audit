@@ -92,6 +92,45 @@ concern:
 - **Deploy auditor**: "this dependency bump breaks a pinned/locked constraint" (deploy-time)
 - **Dep auditor**: "this package is unmaintained" (health) — **Security**: "this package has a CVE"
 
+## The verification gate's evidence rule
+
+Auditors *propose*. They do not decide. Every P1/P2 finding is re-derived at Layer 2.5 by
+`fp-check`, and that gate runs on one rule:
+
+> **A decisive verdict must carry evidence. Without it, the verdict is `UNCERTAIN`.**
+
+This is enforced in code, not by prompt discipline — `cca_checks.claim.make_verdict` downgrades any
+`CONFIRMED` or `FALSE_POSITIVE` that arrives with an empty evidence string:
+
+```python
+if verdict in ("CONFIRMED", "FALSE_POSITIVE") and not evidence.strip():
+    return Verdict(finding_id, "UNCERTAIN", "no evidence artifact; escalated", source)
+```
+
+**Why the gate is not merely a second opinion.** If the model that raised a finding also verifies
+it, it shares the prior that produced the false positive, so re-asking tends to confirm its own
+hallucination. Refutation bias only helps when the verifier gets evidence the generator did not
+have. The gate therefore classifies each finding into a *claim type* and settles it with a tool
+wherever one exists:
+
+| Claim type | Settled by | Evidence produced |
+|---|---|---|
+| `definedness`, `nullability`, `type` | `pyright` | the diagnostic, at a resolved `file:line` |
+| `taint` | `semgrep` | sink presence or absence in the enclosing scope |
+| `crash_impact` | a `pytest` repro | a failing test reproducing the predicted error |
+| `numeric` | `hypothesis` | a falsifying example |
+| `semantic` | LLM adjudication | cited facts gathered from source |
+
+The LLM is demoted to adjudicating the residue — whatever no tool could settle. It **may not
+overturn a verdict carrying a tool artifact**: the checker read the code, the model is guessing.
+
+Each settler concludes only what its evidence supports, so the reachable verdicts differ by tool.
+`semgrep` can prove a sink is absent but never that an injection is real. The `numeric` checker can
+confirm with a counterexample but never refute, because a property holding across a bounded search
+is the absence of a counterexample, not proof of correctness.
+
+Full design: [v3-design.md](v3-design.md).
+
 ## Adding a New Auditor
 
 When adding a custom auditor, you MUST:
