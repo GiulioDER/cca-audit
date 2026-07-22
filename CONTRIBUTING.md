@@ -62,7 +62,9 @@ without applying fixes.
 ### Tunables
 
 `CCA_TIMEOUT_S` (default 120) and `CCA_MAX_EXAMPLES` (default 200) override the external-tool
-timeout and the Hypothesis example budget. A malformed value falls back to the default rather than
+timeout and the Hypothesis example budget. `CCA_SUBSTRATE_TOL` (default `1e-9`, bounded to
+`[1e-15, 1.0]`) and `CCA_SUBSTRATE_DPS` (default 50, floored at 30) tune the `assert_substrate_agrees`
+reference-precision check. A malformed value falls back to the default rather than
 raising — a checker that refused to start would silently degrade every claim to LLM-only
 adjudication.
 
