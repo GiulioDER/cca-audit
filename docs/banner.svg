@@ -18,7 +18,7 @@
 
   <!-- wordmark -->
   <text class="wordmk" x="56" y="72">CCA-Audit</text>
-  <text class="tag" x="292" y="72">v0.5.0</text>
+  <text class="tag" x="292" y="72">v0.6.0</text>
   <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code. Every finding is verified against your</text>
   <text class="lede" x="56" y="128">real code — mechanically, where a tool can settle it — before a line is edited.</text>
 

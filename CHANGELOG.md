@@ -8,6 +8,10 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.6.0] - 2026-07-23
+
 - **v3.6 — `clock_leak` claims** (2026-07-22, PR #29). A new claim type for "code that should run
   on injected time reads the wall clock anyway" — the defect that passes review because both
   halves look correct in isolation, and only misbehaves once simulated and real time diverge.
