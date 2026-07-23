@@ -8,7 +8,16 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
-Nothing yet.
+- **v3.6 — `clock_leak` claims** (2026-07-22, PR #29). A new claim type for "code that should run
+  on injected time reads the wall clock anyway" — the defect that passes review because both
+  halves look correct in isolation, and only misbehaves once simulated and real time diverge.
+  Settled from the syntax tree by `cca_checks/clock_check.py`, through import aliases, with no
+  external tool and no new dependency. `CONFIRMED` needs a *dead parameter*: a STRONG
+  injected-time parameter (`CCA_CLOCK_STRONG_PARAMS`) never referenced in the scope **and** a
+  real wall-clock read — mere co-occurrence of a clock parameter and a `datetime.now()` is
+  `UNCERTAIN`, since stamping an audit log with real time while the logic runs on `as_of` is
+  correct code. `FALSE_POSITIVE` only on an absence the file cannot have hidden, so a
+  `from x import *` or a clock function named but never called blocks refutation.
 
 ## [0.5.0] - 2026-07-22
 

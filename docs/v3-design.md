@@ -165,3 +165,16 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
   authored by the same agent that raised the finding, whereas nobody authors a substrate
   disagreement. Requires the `numeric` or `verify` extra (`mpmath>=1.3`); absent ⇒
   `UNCERTAIN`. See `docs/superpowers/specs/2026-07-21-substrate-differential-design.md`.
+- **v3.6 (shipped)** — `clock_leak` claims: "code that should run on injected time reads the
+  wall clock anyway", settled from the syntax tree by `cca_checks/clock_check.py` with **no
+  external tool and no new dependency**, since the question is decidable through import aliases
+  and should not be put to a model that can be talked out of it. The discriminator is a *dead
+  parameter*: `CONFIRMED` requires a STRONG injected-time parameter (`CCA_CLOCK_STRONG_PARAMS`)
+  that is never referenced in the scope **and** a real wall-clock read — the obvious rule, "a
+  clock parameter and a `datetime.now()` are both present", is deliberately not used, being far
+  too weak to license the auto-fix a `CONFIRMED` verdict feeds. An injected clock that **is**
+  also used is `UNCERTAIN`, never a defect. `FALSE_POSITIVE` is held to the taint checker's
+  standard — only an absence the audited file cannot have hidden refutes, so a `from x import *`
+  or a clock function named but never called blocks refutation rather than being ignored. WEAK
+  names (`CCA_CLOCK_WEAK_PARAMS`) only ever raise the question. No separate spec document; the
+  design record is the module docstring of `cca_checks/clock_check.py`.
