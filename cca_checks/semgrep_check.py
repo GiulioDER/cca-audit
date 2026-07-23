@@ -10,6 +10,9 @@ from .toolpath import resolve_tool
 
 SUPPORTED_SINK_CLASSES = frozenset({"sql", "command", "code_exec", "path"})
 
+# The Python backend's catalog. Kept as module constants because the packaging job
+# in ci.yml asserts these files reached the wheel; `catalog_for` is what the checker
+# itself uses, so a second language does not touch these names.
 SINKS_RULES = "python_sinks.yaml"
 TAINT_RULES = "python_taint.yaml"
 
@@ -23,6 +26,23 @@ TAINT_RULES = "python_taint.yaml"
 def rules_path(name: str) -> str:
     """Filesystem path to a bundled rule file, working from an installed wheel."""
     return str(resources.files("cca_checks") / "rules" / name)
+
+
+def catalog_for(path: str) -> tuple[str, str] | None:
+    """(sinks, taint) rule filenames for `path`'s language, or None if uncovered.
+
+    None means "escalate", for either reason: no backend covers the file at all, or a
+    backend covers it but ships no sink catalog. Both must be loud, because running
+    one language's sink patterns over another's source matches nothing, and an empty
+    result set is precisely what licenses a FALSE_POSITIVE here.
+    """
+    from . import languages
+
+    backend = languages.resolve(path)
+    catalog = getattr(backend, "semgrep_catalog", None)
+    if catalog is None:
+        return None
+    return catalog("sinks"), catalog("taint")
 
 
 def rule_name(check_id) -> str:
@@ -125,16 +145,30 @@ def verdict_for_taint(claim: Claim, sinks=None, taint=None) -> Verdict:
 
     `sinks`/`taint` are injectable result lists. When both are omitted, semgrep runs.
     """
-    if claim.sink_class not in SUPPORTED_SINK_CLASSES or not claim.file.endswith(".py"):
+    # Two things must be covered before a scan means anything: the sink CLASS an
+    # agent named, and the LANGUAGE the file is written in. The class check is
+    # unchanged. The language check no longer hardcodes `.endswith(".py")` -- it asks
+    # the registry which catalog covers the file, so a second language is picked up
+    # here without editing this module.
+    #
+    # It stays at the TOP rather than beside the `run_semgrep` calls below, because
+    # `sinks`/`taint` are injectable: with results supplied, the scan is skipped and
+    # a language check further down would be skipped with it. The caller would then
+    # fall through to `enclosing_span`, which fails for its own reasons and escalates
+    # with "could not determine the enclosing scope" -- still safe, but it tells the
+    # reader to go looking at the file's syntax instead of at the missing catalog.
+    catalog = catalog_for(claim.file)
+    if claim.sink_class not in SUPPORTED_SINK_CLASSES or catalog is None:
         return make_verdict(
             claim.finding_id, "UNCERTAIN",
             f"sink class {claim.sink_class!r} / language not covered by the bundled "
             f"catalog; escalated", "llm")
 
     if sinks is None and taint is None:
-        sinks = run_semgrep(rules_path(SINKS_RULES), claim.file)
+        sink_rules, taint_rules = catalog
+        sinks = run_semgrep(rules_path(sink_rules), claim.file)
         if sinks is not None:
-            taint = run_semgrep(rules_path(TAINT_RULES), claim.file) or []
+            taint = run_semgrep(rules_path(taint_rules), claim.file) or []
 
     if sinks is None:
         return make_verdict(claim.finding_id, "UNCERTAIN",

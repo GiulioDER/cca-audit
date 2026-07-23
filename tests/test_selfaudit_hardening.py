@@ -16,6 +16,10 @@ from cca_checks import repro_runner as rr
 from cca_checks import semgrep_check as sc
 from cca_checks import toolpath
 from cca_checks.claim import Claim
+
+# See the note in tests/test_cli.py: the CLI now dispatches through the language
+# backend, so a checker is stood down there rather than on the CLI module.
+from cca_checks.languages import python as pyb
 from cca_checks.properties import (
     PropertyViolation,
     assert_bounded,
@@ -453,8 +457,7 @@ def test_file_outside_the_audit_root_escalates(audit_root, tmp_path_factory, cap
 
 def test_a_valid_coordinate_still_reaches_the_checker(audit_root, capsys, monkeypatch):
     """The gate must not swallow legitimate claims."""
-    from cca_checks import __main__ as cli
-    monkeypatch.setattr(cli, "run_pyright", lambda path: [])
+    monkeypatch.setattr(pyb, "run_pyright", lambda path: [])
     out = _cli(["check", "--claim-type", "definedness", "--finding-id", "X",
                 "--file", "target.py", "--line", "3"], capsys)
     assert out["verdict"] == "FALSE_POSITIVE"

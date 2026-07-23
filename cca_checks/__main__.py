@@ -4,15 +4,32 @@ import os
 import sys
 from dataclasses import asdict
 
+from . import languages
 from .claim import Claim, Verdict, make_verdict
-from .clock_check import verdict_for_clock_leak
 from .property_check import run_properties
-from .pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from .repro_runner import run_repro
-from .semgrep_check import verdict_for_taint
 from .toolpath import _is_inside
 
-CLAIM_TYPES = sorted(set(RULES_BY_CLAIM) | {"taint", "clock_leak"})
+# Derived from the registry rather than restated, so a backend that adds a claim type
+# reaches the CLI without a second edit here. A hand-maintained list would let
+# `--claim-type panic_path` exit with an argparse usage error on a repo where the
+# backend settles it perfectly well -- and a usage error is not a verdict, so the
+# finding leaves the pipeline through a path that renders no evidence at all.
+CLAIM_TYPES = sorted({ct for b in languages.BACKENDS for ct in b.claim_types})
+
+# WHY THE LANGUAGE IS RESOLVED HERE AND NOT PER-CHECKER. It used to be per-checker,
+# and it was enforced in two places out of five: `clock_check` and `semgrep_check`
+# test `.endswith(".py")`, `type`/`nullability` fail closed only because the
+# blindness probe escalates when `ast.parse` chokes on non-Python, and `definedness`
+# -- exempt from that probe by TYPE_DEPENDENT_CLAIMS -- had nothing. pyright parses a
+# `.rs` file as Python, emits syntax errors that fall under no rule we match, and
+# `verdict_for_claim` falls through to a confident FALSE_POSITIVE carrying
+# `source: pyright`. That artifact may not be overturned downstream, so a real defect
+# is dropped and the file is closed on it.
+#
+# A guarantee each checker has to remember to implement is one the next checker ships
+# without. Resolving the language once, here, is what makes it structural: see
+# `cca_checks/languages/__init__.py`, which owns the extension table.
 
 
 def _add_claim_args(parser):
@@ -68,17 +85,48 @@ def _validate_coordinate(file: str, line: int, finding_id: str) -> Verdict | Non
     return None
 
 
+def _resolve_backend(file: str, claim_type: str, finding_id: str):
+    """(backend, None) when this claim can be settled, (None, Verdict) when it cannot.
+
+    Two distinct refusals, because they mean different things to whoever reads the
+    escalation: no backend covers the language at all, versus a backend that covers
+    the language but does not claim to settle THIS claim type. The second is the one
+    that keeps a future claim type safe -- it is unsupported by every backend until
+    its author opts each one in, rather than defaulting into a checker built for a
+    different language.
+    """
+    def bad(why: str):
+        return None, make_verdict(finding_id, "UNCERTAIN", f"{why}; escalated", "llm")
+
+    backend = languages.resolve(file)
+    if backend is None:
+        ext = languages.extension_of(file) or "extension-less"
+        return bad(f"no deterministic backend covers the {ext} language "
+                   f"({os.path.basename(file)}); a tool that cannot read this file "
+                   f"cannot be meaningfully silent about it either")
+    if claim_type not in backend.claim_types:
+        return bad(f"the {backend.name} backend does not settle {claim_type!r} claims "
+                   f"(it settles: {', '.join(sorted(backend.claim_types))})")
+    return backend, None
+
+
 def _check(claim_type: str, args) -> Verdict:
+    # Coordinate first, language second, and the order is load-bearing for the
+    # MESSAGE rather than the verdict -- both gates escalate, so either order is
+    # equally safe, but a directory or a missing file has no meaningful extension
+    # and would otherwise be reported as an unsupported language, which sends the
+    # reader looking for a backend to install instead of at the typo in the path.
+    # Neither gate runs an analyzer, so nothing is executed against an unsupported
+    # language by checking the coordinate first.
     invalid = _validate_coordinate(args.file, args.line, args.finding_id)
     if invalid is not None:
         return invalid
+    backend, unsupported = _resolve_backend(args.file, claim_type, args.finding_id)
+    if unsupported is not None:
+        return unsupported
     claim = Claim(args.finding_id, args.file, args.line, claim_type,
                   proposition=args.symbol, sink_class=args.sink_class)
-    if claim_type == "taint":
-        return verdict_for_taint(claim)
-    if claim_type == "clock_leak":
-        return verdict_for_clock_leak(claim)
-    return verdict_for_claim(claim, run_pyright(args.file), RULES_BY_CLAIM[claim_type])
+    return backend.settle(claim)
 
 
 def main(argv=None) -> int:

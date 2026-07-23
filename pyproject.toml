@@ -37,15 +37,28 @@ Issues = "https://github.com/GiulioDER/cca-audit/issues"
 # cannot be fixed at all without a hypothesis artifact. An extra that half-enables
 # a feature is worse than one that does not exist, because the failure is silent.
 numeric = ["hypothesis>=6.0", "pytest>=7", "mpmath>=1.3"]
+# The Rust backend's PARSER. Not its diagnostics: `panic_path`, `overflow`,
+# `error_swallow` and `unsafe_op` are settled by clippy, which is part of the target's
+# own toolchain and cannot be pip-installed. Splitting them is deliberate -- a grammar
+# wheel always works, so `clock_leak` and enclosing-span resolution keep working on a
+# crate that does not build, which is exactly when an auditor most needs them.
+rust = ["tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 # The whole deterministic layer in one install, so it is reproducible from the
 # manifest rather than from a sentence in the README.
-verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50", "mpmath>=1.3"]
+verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50", "mpmath>=1.3",
+          "tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 # mpmath belongs here for the same reason pytest belongs in `numeric`: CI installs
 # `.[dev]`, and both tests/test_substrate.py and tests/acceptance/test_substrate_suite.py
 # `pytest.importorskip("mpmath")` at module scope -- without it here, ~25 substrate
 # tests (including the integrity gate, the feature's central safety guarantee) skip
 # on every CI run instead of executing, and a regression there merges with green CI.
-dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4", "mpmath>=1.3"]
+# tree-sitter belongs here for exactly the reason mpmath does: tests/test_treesitter.py
+# and tests/test_clock_check_rust.py `pytest.importorskip` it at module scope, and CI
+# installs `.[dev]` -- so without it here the entire Rust parsing layer would skip
+# silently on every CI run and a regression in it would merge green.
+# test_dev_extra_completeness.py asserts this invariant rather than this list.
+dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4", "mpmath>=1.3",
+       "tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 
 [tool.setuptools.packages.find]
 # Glob, not a hand-maintained list: a literal `packages = ["cca_checks"]` silently

@@ -32,6 +32,21 @@ def _line(name: str, number: int) -> str:
     ("unguarded_optional.py", 9, "return card.token"),
     # The guarded counterpart the same suite expects to be refuted at line 11.
     ("guarded_optional.py", 11, "return card.token"),
+    # --- Rust clock-leak coordinates. Same contract, enforced by rustfmt.toml's
+    # `disable_all_formatting` rather than by ruff's extend-exclude.
+    ("rust/src/clock.rs", 12, "let stamp = Utc::now().timestamp();"),
+    ("rust/src/clock.rs", 26, "amount * 2 + as_of"),
+    ("rust/src/clock.rs", 31, "let stamp = L::now().timestamp();"),
+    ("rust/src/clock.rs", 71, "let stamp = Utc::now().timestamp();"),
+    ("rust/src/clock_blockers.rs", 14, "amount * 2 + as_of"),
+    ("rust/src/clock_blockers.rs", 20, 'log_event!("settling {}", amount);'),
+    # --- clippy-backend coordinates, mirrored as constants in test_clippy_check.py.
+    ("rust_clippy/src/lib.rs", 20, "let head = fills.first().unwrap();"),
+    ("rust_clippy/src/lib.rs", 27, "Some(head) => *head,"),
+    ("rust_clippy/src/lib.rs", 35, "qty * price"),
+    ("rust_clippy/src/lib.rs", 48, "qty.saturating_mul(price)"),
+    ("rust_clippy/src/lib.rs", 54, "let _ = write_ledger(amount);"),
+    ("rust_clippy/src/lib.rs", 60, "write_ledger(amount)?;"),
 ])
 def test_fixture_defect_is_on_the_expected_line(name, number, expected):
     assert _line(name, number) == expected, (
@@ -39,6 +54,18 @@ def test_fixture_defect_is_on_the_expected_line(name, number, expected):
         f"rewrite has shifted the fixture; the acceptance tests settle claims at "
         f"these exact coordinates."
     )
+
+
+@pytest.mark.parametrize("crate", ["rust", "rust_clippy"])
+def test_the_rust_fixtures_forbid_formatting(crate):
+    """rustfmt is the Rust half of the ruff `extend-exclude` rule in pyproject.toml.
+
+    Without it, a `cargo fmt` over the workspace reflows these files and moves every
+    defect off its coordinate -- the same failure a `ruff --fix` pass already caused
+    once on the Python side, and just as silent.
+    """
+    config = (FIXTURES / crate / "rustfmt.toml").read_text(encoding="utf-8")
+    assert "disable_all_formatting = true" in config
 
 
 def test_optional_fixtures_keep_the_typing_import_form():

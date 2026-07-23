@@ -1,0 +1,10 @@
+# NEVER format this crate. Its LINE NUMBERS are part of the test contract -- the
+# suite settles claims at specific coordinates in these files, and a formatter that
+# moves a defect down one line turns a CONFIRMED acceptance test into an UNCERTAIN
+# without touching an assertion.
+#
+# This is the Rust half of the rule pyproject.toml states for tests/fixtures on the
+# Python side, where a `ruff --fix` pass did exactly that: it rewrote `Optional[Card]`
+# to `Card | None`, dropped the now-unused import, shifted every line up by one, and
+# silently broke the fixture contract.
+disable_all_formatting = true
