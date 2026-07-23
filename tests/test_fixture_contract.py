@@ -40,6 +40,11 @@ def _line(name: str, number: int) -> str:
     ("rust/src/clock.rs", 71, "let stamp = Utc::now().timestamp();"),
     ("rust/src/clock_blockers.rs", 14, "amount * 2 + as_of"),
     ("rust/src/clock_blockers.rs", 20, 'log_event!("settling {}", amount);'),
+    # --- Rust taint coordinates, mirrored as constants in test_rust_taint.py.
+    ("rust/src/taint.rs", 12, 'let out = Command::new("sh").arg("-c").arg(name).status();'),
+    ("rust/src/taint.rs", 19, "amount.saturating_add(fee)"),
+    ("rust/src/taint.rs", 24, "fs::read_to_string(name).unwrap_or_default()"),
+    ("rust/src/taint.rs", 30, "exec_command(name)"),
     # --- clippy-backend coordinates, mirrored as constants in test_clippy_check.py.
     ("rust_clippy/src/lib.rs", 20, "let head = fills.first().unwrap();"),
     ("rust_clippy/src/lib.rs", 27, "Some(head) => *head,"),

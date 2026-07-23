@@ -3,8 +3,24 @@ from pathlib import Path
 
 import pytest
 
+from cca_checks import languages
+
 RULES = Path(__file__).resolve().parent.parent / "cca_checks" / "rules"
 CLASSES = ["sql", "command", "code_exec", "path"]
+
+# Derived from the registry, not restated. A backend that ships a catalog is a
+# backend whose refutations rest on it, so it must be held to the same two-tier
+# contract -- and a hand-maintained list here would let the next language's catalog
+# arrive untested, which is exactly when a missing sink turns real findings into
+# confident refutations.
+LANGUAGES = sorted(
+    b.name for b in languages.BACKENDS if hasattr(b, "semgrep_catalog")
+)
+
+
+def catalog(language: str, kind: str) -> str:
+    backend = next(b for b in languages.BACKENDS if b.name == language)
+    return backend.semgrep_catalog(kind)
 
 
 def read(name):
@@ -29,27 +45,43 @@ def has_exact_rule_id(catalog_text, rule_id):
     return re.search(pattern, catalog_text, re.MULTILINE) is not None
 
 
-def test_rule_files_exist():
-    assert (RULES / "python_sinks.yaml").is_file()
-    assert (RULES / "python_taint.yaml").is_file()
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_rule_files_exist(language):
+    assert (RULES / catalog(language, "sinks")).is_file()
+    assert (RULES / catalog(language, "taint")).is_file()
 
 
+@pytest.mark.parametrize("language", LANGUAGES)
 @pytest.mark.parametrize("cls", CLASSES)
-def test_every_class_has_both_tiers(cls):
-    sinks = read("python_sinks.yaml")
+def test_every_class_has_both_tiers(cls, language):
+    sinks = read(catalog(language, "sinks"))
     assert has_exact_rule_id(sinks, f"sink-strict-{cls}")
     assert has_exact_rule_id(sinks, f"sink-loose-{cls}")
 
 
+@pytest.mark.parametrize("language", LANGUAGES)
 @pytest.mark.parametrize("cls", CLASSES)
-def test_every_class_has_a_taint_rule(cls):
-    assert has_exact_rule_id(read("python_taint.yaml"), f"taint-{cls}")
+def test_every_class_has_a_taint_rule(cls, language):
+    assert has_exact_rule_id(read(catalog(language, "taint")), f"taint-{cls}")
 
 
-def test_sinks_file_declares_no_taint_rules():
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_sinks_file_declares_no_taint_rules(language):
     # The sink catalog answers "does a sink occur here", nothing more. A taint rule
     # here would silently turn a presence check into a dataflow claim.
-    assert "mode: taint" not in read("python_sinks.yaml")
+    assert "mode: taint" not in read(catalog(language, "sinks"))
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_every_rule_declares_its_own_language(language):
+    """A catalog scanned against the wrong language matches nothing, and nothing is
+    what licenses a FALSE_POSITIVE. A rule left with the language it was copied from
+    would be silently inert."""
+    text = read(catalog(language, "sinks")) + read(catalog(language, "taint"))
+    declared = set(re.findall(r"^\s*languages:\s*\[([^\]]*)\]", text, re.MULTILINE))
+    assert declared, f"{language}: no rule declares a language"
+    for entry in declared:
+        assert language in entry, f"{language} catalog declares languages: [{entry}]"
 
 
 def test_suffixed_id_would_not_satisfy_the_catalog():

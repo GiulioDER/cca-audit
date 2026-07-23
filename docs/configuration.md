@@ -37,6 +37,51 @@ P3 Nice-to-have: [your criteria]
 
 `/audit-fix-v2` is a backward-compatible alias that just forces the DEEP tier.
 
+## Deterministic layer
+
+### Which languages are covered
+
+Ask the installation, don't assume:
+
+```
+python -m cca_checks capabilities --file src/engine.rs
+→ {"language": "rust",
+   "claim_types": ["clock_leak", "error_swallow", "overflow", "panic_path", "taint", "unsafe_op"],
+   "unavailable": {}}
+```
+
+`"language": null` means no backend covers that extension and every finding in the file rides LLM
+adjudication. A claim type under `unavailable` is one whose tool is missing *here* — install it, or
+expect those findings to escalate. Adding a language is documented in [extending.md](extending.md).
+
+### Installing the tools
+
+| extra | pulls in | enables |
+|---|---|---|
+| `pip install cca_checks[verify]` | everything below | the whole deterministic layer |
+| `pip install cca_checks[numeric]` | `hypothesis`, `pytest`, `mpmath` | `numeric` claims |
+| `pip install cca_checks[rust]` | `tree-sitter`, `tree-sitter-rust` | Rust `clock_leak` + span resolution |
+
+`pyright`, `semgrep` and `cargo`/`clippy` are **not** pip extras — the first two are installed
+separately, and the Rust toolchain belongs to the target project. Missing any of them escalates the
+affected claim types; it never silently passes them.
+
+### Environment knobs
+
+| variable | default | what it bounds |
+|---|---|---|
+| `CCA_TIMEOUT_S` | 120 | each pyright / semgrep / pytest invocation |
+| `CCA_RUST_TIMEOUT_S` | 600 | each `cargo clippy` invocation — a **cold** build of a crate and all its dependencies, which routinely exceeds the 120s above |
+| `CCA_MAX_EXAMPLES` | 200 | Hypothesis examples per property |
+| `CCA_SUBSTRATE_TOL` | 1e-9 | relative divergence that confirms a numeric finding (bounded to [1e-15, 1.0]) |
+| `CCA_SUBSTRATE_DPS` | 50 | decimal digits of the reference substrate |
+| `CCA_CLOCK_STRONG_PARAMS` | `now,as_of,clock,…` | parameter names whose *dead* presence can confirm a clock leak — shared by the Python and Rust checkers |
+| `CCA_CLOCK_WEAK_PARAMS` | `ts,timestamp,at,…` | names that only raise the question |
+
+A malformed value falls back to the default rather than crashing the checker: refusing to start
+would take the whole deterministic layer down, and a layer that is down is indistinguishable from
+one that found nothing.
+
 ## Output Reports
 
 ### Output directory

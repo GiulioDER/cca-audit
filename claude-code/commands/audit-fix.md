@@ -73,14 +73,21 @@ table. If any REJECT fires, **STOP** — do not audit.
 | **Alive** | default branch pushed within ~90d, AND the newest commits are not an archive/deprecation notice, AND the README carries no archive banner | REJECT |
 | **Accepts contributions** | `CONTRIBUTING.md` exists, OR ≥1 merged PR from a non-org author in the last 6 months | REJECT |
 | **Test harness** | a runnable test suite exists — you need somewhere to put the red→green repro | REJECT |
-| **Language** | the language is one this pipeline audits well (not transpiled / generated output) | REJECT |
+| **Language** | `python -m cca_checks capabilities --file <a representative source file>` returns a non-null `language` (and not transpiled / generated output) | REJECT |
 | **Money / irreversible surface** | order, payment, signing, auth, or destructive paths exist | Not a reject — this only decides whether the STAKES/NUM domain auditors dispatch |
 
 ```bash
 gh repo view <owner>/<repo> --json isArchived,pushedAt,description
 gh pr list --repo <owner>/<repo> --state merged --limit 10 --json author,title
 head -20 README.md | grep -iE 'archiv|deprecat|no longer maintained|do not use'
+python -m cca_checks capabilities --file <a representative source file>
 ```
+
+> **The Language gate is a command, not a judgement.** Hunt mode reports pre-existing defects in a
+> stranger's repository, so a finding has to survive contact with a maintainer — which means it needs
+> a mechanical artifact behind it, not a model's opinion. `capabilities` answers exactly that: a
+> `null` language means every finding in this repo would rest on LLM adjudication alone. Do not talk
+> yourself past it because the code looks readable.
 
 **Why this gate exists.** Every signal can look perfect on a dead repository: real code, a real test
 suite, exactly the right bug class — and an archive banner in the README that says "no longer
@@ -194,6 +201,20 @@ Whatever the tier, the run summary must state what was NOT verified — e.g. `P2
 unverified (FAST tier)`. A gate that was skipped and a gate that passed must never render the same.
 
 Report: `Tier=<T> | MODE=<DIFF|HUNT> | <N> files (<LANGUAGES>) | domains STAKES=<…> NUM=<…> DAT=<…> DEP=<…> DEPLOY=<…> | size=<SIZE>L`
+
+**Also report DETERMINISTIC COVERAGE.** Run `python -m cca_checks capabilities --file <F>` on one
+representative file per detected language and report a line per language:
+
+```
+COVERAGE: python → definedness, nullability, type, taint, clock_leak
+          rust   → clock_leak, taint, panic_path, error_swallow, unsafe_op   (overflow: cargo not on PATH)
+          typescript → none (no deterministic backend)
+```
+
+A language with no backend, or a claim type listed as unavailable, means every finding of that
+kind rides LLM adjudication for this run. **Say so in the final report.** A verification tool that
+cannot state where it is blind is asking for trust it has not earned — and the reader needs to know
+whether the answer is "install something" or "stop expecting coverage here".
 
 **In HUNT mode, also log every file under TARGETS that no auditor reached.** A hunt that silently
 truncates its own coverage reads as "audited everything" when it did not.
@@ -392,8 +413,8 @@ you could not reach is NOT a duplicate: keep the finding and say the check could
 
 **P1 on a high-stakes path (`high_stakes=true`)** — DEEP only: adversarial **2-of-3**.
 
-**First, the artifact exemption.** A finding whose verdict `source` is a TOOL — `pyright`,
-`semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
+**First, the artifact exemption.** A finding whose verdict `source` is a TOOL — `pyright`, `clippy`,
+`ast`, `semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
 resting on an `llm`-sourced verdict.
 
 This is not a numeric special case; it is the same rule `cca-fp-check.md` states ("you may not

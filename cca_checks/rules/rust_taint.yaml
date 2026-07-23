@@ -1,0 +1,72 @@
+# These taint rules exist ONLY to enrich the evidence attached to an UNCERTAIN.
+# They never set a verdict. A semgrep taint hit does not prove a bug: the pattern
+# cannot see that a value arrives as a bound parameter, so it fires on safely
+# parameterized calls exactly as the Python rules do.
+rules:
+  - id: taint-sql
+    mode: taint
+    languages: [rust]
+    severity: WARNING
+    message: user-controlled input reaches a sql sink
+    pattern-sources:
+      - pattern: std::env::args()
+      - pattern: std::env::var(...)
+      - pattern: env::var(...)
+      - pattern: $R.query_string()
+      - pattern: $R.body()
+      - pattern: $R.headers()
+    pattern-sanitizers:
+      # A successful integer parse cannot carry SQL syntax through.
+      - pattern: $X.parse::<i64>()
+      - pattern: $X.parse::<u64>()
+      - pattern: $X.parse::<i32>()
+      - pattern: $X.parse::<u32>()
+    pattern-sinks:
+      - pattern: sqlx::query(...)
+      - pattern: diesel::sql_query(...)
+      - pattern: $C.execute($Q, ...)
+      - pattern: $C.batch_execute(...)
+
+  - id: taint-command
+    mode: taint
+    languages: [rust]
+    severity: WARNING
+    message: user-controlled input reaches a command sink
+    pattern-sources:
+      - pattern: std::env::args()
+      - pattern: std::env::var(...)
+      - pattern: env::var(...)
+      - pattern: $R.body()
+    pattern-sinks:
+      - pattern: Command::new(...)
+      - pattern: std::process::Command::new(...)
+      - pattern: $C.arg(...)
+
+  - id: taint-path
+    mode: taint
+    languages: [rust]
+    severity: WARNING
+    message: user-controlled input reaches a path sink
+    pattern-sources:
+      - pattern: std::env::args()
+      - pattern: std::env::var(...)
+      - pattern: env::var(...)
+      - pattern: $R.body()
+    pattern-sinks:
+      - pattern: std::fs::read_to_string(...)
+      - pattern: std::fs::write(...)
+      - pattern: File::open(...)
+      - pattern: $P.join(...)
+
+  - id: taint-code_exec
+    mode: taint
+    languages: [rust]
+    severity: WARNING
+    message: user-controlled input reaches a code-execution sink
+    pattern-sources:
+      - pattern: std::env::args()
+      - pattern: std::env::var(...)
+      - pattern: env::var(...)
+    pattern-sinks:
+      - pattern: libloading::Library::new(...)
+      - pattern: Library::new(...)

@@ -90,6 +90,12 @@ Auto-detects from file extensions and project files:
 It also maps the diff to **domains** (high-stakes, numeric, data, dependency, deployability) to decide
 which conditional auditors to dispatch.
 
+**Detecting a language is not the same as being able to settle claims about it.** The table above
+drives the auditors, which read code as text and work on anything. The *deterministic* layer covers
+only Python and Rust, and it says so per file: `python -m cca_checks capabilities --file <F>` returns
+the claim types settleable there, plus any whose tool is missing locally. Step 0.5 reports that as a
+`COVERAGE:` line, so a run in which everything rode LLM adjudication is visible rather than inferred.
+
 ### Step 0.6: Tier Selection
 
 Picks the tier from the diff:
@@ -118,7 +124,7 @@ already reported/fixed upstream? Verdict per finding: CONFIRMED / FALSE_POSITIVE
 mode — cite the upstream URL) / UNCERTAIN. False positives and duplicates are dropped; uncertain ones
 are escalated to the user (never fixed blind). **High-stakes P1 findings** get an adversarial **2-of-3**
 check (three independent skeptics, default-to-refute) on the DEEP tier — **except** findings whose
-verdict already rests on a tool artifact (`pyright`, `semgrep`, `pytest`, `hypothesis`), notably a
+verdict already rests on a tool artifact (`pyright`, `clippy`, `ast`, `semgrep`, `pytest`, `hypothesis`), notably a
 `NUM-*` P1 carrying a `hypothesis` artifact. The artifact settles it; an LLM majority does not get to
 outvote a falsifying example. Conversely, on DEEP a `NUM-*` P1 may **not** enter the fix plan without
 that artifact.

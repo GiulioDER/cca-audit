@@ -15,10 +15,16 @@
 **A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in which no finding reaches your code unverified.**
 
 Ten specialised auditors read your diff in parallel. Their findings are deduplicated, then each one is
-**re-derived against the real code** — mechanically, by `pyright`, `semgrep`, `pytest` or `hypothesis`
-wherever a tool can settle the claim, and by adversarial review where none can. Only findings that
-survive that gate are eligible to be fixed. The fix is then checked for scope creep, and the whole
-change is gated on a mapping proving every confirmed finding has a fix and every edit has a finding.
+**re-derived against the real code** — mechanically, by `pyright`, `clippy`, `semgrep`, `pytest` or
+`hypothesis` wherever a tool can settle the claim, and by adversarial review where none can. Only
+findings that survive that gate are eligible to be fixed. The fix is then checked for scope creep,
+and the whole change is gated on a mapping proving every confirmed finding has a fix and every edit
+has a finding.
+
+**Python and Rust** have deterministic settlers. Each language gets the claim vocabulary that
+actually carries information in it — Rust does not get `nullability`, because the code compiled;
+it gets `panic_path`, `overflow` and `error_swallow` instead. Any other language, and any claim type
+a backend does not declare, escalates rather than being settled by a tool built for something else.
 
 The design constraint throughout: **a check that could not run must never be indistinguishable from a
 check that passed.**
@@ -113,7 +119,44 @@ are enforced as **tests**, not disclaimers:
 - **A property is authored by the same agent that raised the finding**, so a wrong declared relation
   produces a real counterexample to a wrong claim. A confirmation obliges you to re-read the relation,
   not just the verdict.
-- **Deterministic settlers are Python-only.** Other languages fall back to LLM adjudication.
+- **Deterministic coverage is per-language, and a language without a backend gets none.** Ask the
+  tool rather than trusting this table — `python -m cca_checks capabilities --file <F>` reports what
+  it can settle *on your machine*, including which tools are missing.
+
+  | | settled deterministically | by |
+  |---|---|---|
+  | **Python** | `definedness` · `nullability` · `type` · `taint` · `clock_leak` | `ast` + `pyright` + `semgrep` |
+  | **Rust** | `clock_leak` · `panic_path` · `overflow` · `error_swallow` · `unsafe_op` · `taint` | tree-sitter + `clippy` + `semgrep` |
+  | **everything else** | nothing — every claim escalates to LLM adjudication | — |
+
+  A claim about a file no backend covers, or a claim type the covering backend does not declare,
+  returns `UNCERTAIN` before any checker runs. It cannot be refuted by a tool built for another
+  language: `test_language_guard.py` asserts this over every claim type.
+
+- **Rust does not get `definedness`, `type` or `nullability`, and that is not a gap.** Those defects
+  do not survive to review in a language that compiled — the name resolved, the types checked, and
+  `Option` is not a nullable pointer. Porting them would have doubled the claim vocabulary while
+  refuting almost everything by construction.
+
+- **The Rust clock check reads syntax, not semantics.** tree-sitter does not expand macros. A clock
+  read inside a `macro_rules!` body is invisible to it, as is one reaching the file through a glob
+  `use`. Both therefore **block refutation** rather than being ignored — a file must not earn a
+  `FALSE_POSITIVE` carrying an authoritative `source` precisely by being hard to read.
+  `test_clock_check_rust.py` asserts both.
+
+- **clippy needs the crate to build.** A crate that does not compile produces no lint diagnostics at
+  all, which reads exactly like a clean crate — so an un-buildable crate is `UNCERTAIN` everywhere,
+  never a refutation. `test_clippy_check.py::test_a_stream_that_proves_nothing_returns_none` asserts
+  the whole cascade.
+
+- **Release-mode wrapping overflow is not provable by a debug test.** Rust panics on overflow in
+  debug and wraps silently in release; a `cargo test` artifact can only demonstrate the first. The
+  second is the more dangerous half and is disclosed rather than claimed.
+
+- **A `panic_path` or `unsafe_op` finding can never be CONFIRMED by clippy.** A lint sees the
+  construct, not whether it is reachable with a value the caller controls — `.unwrap()` on a value
+  built two lines above is correct code. Those two mirror `taint`: they refute a false premise and
+  inform adjudication, and a confirmation has to come from a repro that actually panics.
 
 ## Pipeline
 
@@ -221,8 +264,14 @@ a hard stop, not graceful degradation.
 
 ```bash
 pip install -e ".[numeric]"     # adds hypothesis + mpmath
+pip install -e ".[rust]"        # adds the tree-sitter Rust grammar
 pip install -e ".[verify]"      # the whole deterministic layer in one install
 ```
+
+`pyright`, `semgrep` and the Rust toolchain are **not** pip extras: the first two install
+separately, and `cargo`/`clippy` belong to the project you are auditing. Check what you actually
+have with `python -m cca_checks capabilities --file <a source file>` — it names the missing tool for
+any claim type it cannot settle here, rather than leaving you to infer it from an escalation.
 
 Worked example: [`examples/sign-trap`](examples/sign-trap/) — a real sign error, the property that
 catches it, and the resulting artifact.

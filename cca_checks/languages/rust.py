@@ -34,6 +34,7 @@ from ..clippy_check import LINTS_BY_CLAIM, run_clippy
 from ..clippy_check import verdict_for_claim as verdict_for_clippy
 from ..config import CLOCK_STRONG_PARAMS, CLOCK_WEAK_PARAMS
 from ..semgrep_check import verdict_for_taint
+from ..toolpath import resolve_tool
 
 LANGUAGE = "rust"
 
@@ -431,6 +432,27 @@ class RustBackend:
 
     def semgrep_catalog(self, kind: str) -> str:
         return f"rust_{kind}.yaml"
+
+    def unavailable_claim_types(self) -> dict[str, str]:
+        """Claim types whose tool is missing on THIS machine, with the reason.
+
+        The Rust backend has three independent tool dependencies, and they fail
+        independently -- which is the whole reason the parser and the diagnostics are
+        separate layers. A machine with the grammar but no cargo still settles
+        `clock_leak` perfectly well, and reporting that precisely is what stops an
+        agent either skipping a check that works or running one that cannot.
+        """
+        out = {}
+        try:
+            ts._parser(LANGUAGE)
+        except ts.GrammarUnavailable as exc:
+            out["clock_leak"] = str(exc)
+        if resolve_tool("cargo") is None:
+            for claim_type in LINTS_BY_CLAIM:
+                out[claim_type] = "cargo is not on PATH, so clippy cannot run"
+        if resolve_tool("semgrep") is None:
+            out["taint"] = "semgrep is not on PATH"
+        return out
 
     def settle(self, claim: Claim) -> Verdict:
         if claim.claim_type == "clock_leak":

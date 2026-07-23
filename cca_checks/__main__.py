@@ -5,6 +5,7 @@ import sys
 from dataclasses import asdict
 
 from . import languages
+from .cargo_repro import run_repro as run_cargo_repro
 from .claim import Claim, Verdict, make_verdict
 from .property_check import run_properties
 from .repro_runner import run_repro
@@ -129,6 +130,63 @@ def _check(claim_type: str, args) -> Verdict:
     return backend.settle(claim)
 
 
+#: Which repro runner drives a generated test, by the test file's own extension.
+#: Keyed on the TEST rather than looked up through the language registry, because a
+#: repro is a file the caller wrote -- there is no claim coordinate to resolve, and a
+#: `.rs` test is run by cargo whatever the finding was about.
+_REPRO_RUNNERS = {".py": run_repro, ".rs": run_cargo_repro}
+
+
+def _repro(args) -> Verdict:
+    """Dispatch a repro to the runner for the test file's language.
+
+    An unrecognised extension escalates rather than defaulting to pytest. Handing a
+    `.rs` file to `python -m pytest` yields a collection error, and a collection
+    error is a non-zero exit -- which the pytest runner would then have to tell apart
+    from a genuine failure. Refusing up front is both clearer and safer.
+    """
+    ext = os.path.splitext(args.test)[1].lower()
+    runner = _REPRO_RUNNERS.get(ext)
+    if runner is None:
+        return make_verdict(
+            args.finding_id, "UNCERTAIN",
+            f"no repro runner for a {ext or 'extension-less'} test file "
+            f"({os.path.basename(args.test)}); supported: "
+            f"{', '.join(sorted(_REPRO_RUNNERS))}; escalated", "llm")
+    return runner(args.finding_id, args.test, args.expect_error)
+
+
+def _capabilities(file: str) -> dict:
+    """What this installation can settle about `file`, and what is missing.
+
+    WHY THIS EXISTS. `cca-fp-check.md` is a PROMPT, and it used to enumerate the
+    claim types in prose. That is a copy of the routing table living beside the real
+    one, and the two drift -- the back-compat `definedness` alias below exists
+    because they already did once. With a second language the copy also has to encode
+    which claim types apply to which extension, and a prompt that says "Rust settles
+    panic_path" on a machine with no cargo produces an agent confidently running a
+    check that cannot run.
+
+    So the prompt asks instead. `claim_types` is what the backend declares;
+    `unavailable` names the ones whose tool is missing RIGHT HERE, with the reason.
+    Both are reported, never silently subtracted: an agent that sees `overflow` listed
+    as unavailable knows to escalate it, whereas an agent that never sees it at all
+    cannot tell that from a claim type nobody supports.
+    """
+    backend = languages.resolve(file)
+    if backend is None:
+        return {"file": file, "language": None, "claim_types": [], "unavailable": {},
+                "reason": f"no deterministic backend covers "
+                          f"{languages.extension_of(file) or 'this extension'}"}
+    unavailable = {}
+    check = getattr(backend, "unavailable_claim_types", None)
+    if check is not None:
+        unavailable = check()
+    return {"file": file, "language": backend.name,
+            "claim_types": sorted(backend.claim_types),
+            "unavailable": unavailable}
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     p = argparse.ArgumentParser(prog="cca_checks")
@@ -152,7 +210,16 @@ def main(argv=None) -> int:
     n.add_argument("--finding-id", required=True)
     n.add_argument("--test", required=True)
 
+    k = sub.add_parser("capabilities",
+                       help="which claim types can be settled about a file, here")
+    k.add_argument("--file", required=True)
+
     a = p.parse_args(argv)
+    if a.cmd == "capabilities":
+        # Not a Verdict: this reports what the installation can do, not what is true
+        # of the code, and giving it a verdict shape would let it be mistaken for one.
+        print(json.dumps(_capabilities(a.file)))
+        return 0
     if a.cmd == "check":
         v = _check(a.claim_type, a)
     elif a.cmd == "definedness":
@@ -160,7 +227,7 @@ def main(argv=None) -> int:
     elif a.cmd == "numeric":
         v = run_properties(a.finding_id, a.test)
     else:
-        v = run_repro(a.finding_id, a.test, a.expect_error)
+        v = _repro(a)
     print(json.dumps(asdict(v)))
     return 0
 

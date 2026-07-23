@@ -37,7 +37,7 @@ import json
 import pytest
 
 from cca_checks import __main__ as cli
-from cca_checks import semgrep_check
+from cca_checks import languages, semgrep_check
 from cca_checks.languages import python as pyb
 
 DECISIVE = ("CONFIRMED", "FALSE_POSITIVE")
@@ -100,16 +100,29 @@ def test_no_decisive_verdict_on_a_language_without_a_backend(
     )
 
 
-@pytest.mark.parametrize("claim_type", sorted(set(cli.CLAIM_TYPES) - {"clock_leak"}))
+def _undeclared_by(filename):
+    """Claim types the CLI accepts that this file's backend does NOT settle.
+
+    Derived from the registry rather than listed. A hardcoded exclusion here silently
+    stops testing anything the backend later adopts -- which is exactly what happened
+    when the Rust backend grew its clippy claim types: the list still said "everything
+    but clock_leak", so five claim types the backend now settles were being asserted
+    to escalate, and the test failed for a reason that was not a defect.
+    """
+    backend = languages.resolve(filename)
+    return sorted(set(cli.CLAIM_TYPES) - set(backend.claim_types))
+
+
+@pytest.mark.parametrize("claim_type", _undeclared_by(COVERED_RUST[0]))
 def test_a_covered_language_still_escalates_an_undeclared_claim_type(
     claim_type, capsys, in_tmp, silent_tools
 ):
     """The second half of the guard, and the half that protects the NEXT language.
 
-    The Rust backend covers `.rs` but settles only `clock_leak`. Nothing else may be
-    routed to a Python checker just because the extension resolved -- `definedness`
-    on a `.rs` file is precisely the leak this file was opened for, and it must stay
-    closed now that `.rs` HAS a backend.
+    The Rust backend covers `.rs`, but not every claim type. Nothing it does not
+    declare may be routed to a Python checker just because the extension resolved --
+    `definedness` on a `.rs` file is precisely the leak this file was opened for, and
+    it must stay closed now that `.rs` HAS a backend.
     """
     out = _verdict(capsys, [
         "check", "--claim-type", claim_type, "--sink-class", "sql",
