@@ -50,11 +50,11 @@ Findings stop being prose. Each auditor finding emits:
 (`cca_checks/claim.py`. `sink_class` names the taint sink category for `taint` claims and is empty
 otherwise.)
 
-``claim_type ∈ { definedness, type, nullability, reachability*, crash_impact, taint, numeric (incl. the `substrate`† helper), semantic }``
+``claim_type ∈ { definedness, type, nullability, reachability*, crash_impact, taint, numeric (incl. the `substrate`† helper), clock_leak, semantic }``
 
 \* `reachability` has no checker of its own — it is subsumed by the repro check (see §3.2). The
 `--claim-type` values `cca_checks check` actually accepts are
-`{ definedness, nullability, type, taint }`; `crash_impact` and `numeric` are settled by the
+`{ clock_leak, definedness, nullability, type, taint }`; `crash_impact` and `numeric` are settled by the
 separate `repro` and `numeric` subcommands, and `semantic` by the LLM adjudicator.
 
 † `substrate` is NOT a peer claim_type — there is no `--claim-type substrate`, no `substrate`
@@ -75,6 +75,7 @@ same `numeric` subcommand, exactly like the other six `properties.py` helpers �
 | `taint` | "untrusted source reaches sink" | `semgrep`, over a bundled two-tier sink catalog — **shipped in v3.2**. Refutes a false premise and informs adjudication; never confirms (its taint rule fires on safely-parameterized calls). |
 | `numeric` | "the arithmetic is wrong: bad sign, mixed units, bad scaling" | auditor-declared metamorphic properties run under `hypothesis` — **shipped in v3.4**. Mirror-image asymmetry of taint: a violated property is a `CONFIRMED` falsifying example; properties holding is never `FALSE_POSITIVE`, only `UNCERTAIN` (absence of a counterexample is not proof of correctness). |
 | ↳ `substrate`† (a `numeric` helper, not a peer claim_type) | "float64 loses precision here: cancellation, accumulation, rounding" | the target run twice — float64 vs a 50-digit `mpmath` reference with the module's `math` bindings swapped — **shipped in v3.5**, via `assert_substrate_agrees` alongside the other six `properties.py` helpers, same `numeric` subcommand. Confirms only on divergence beyond `CCA_SUBSTRATE_TOL`; a lost substrate is `UNCERTAIN`, never agreement. Blind to sign and formula errors by construction. |
+| `clock_leak` | "code on injected time reads the wall clock anyway" | AST analysis of the audited file — **shipped in v3.6**, with **no external tool**, because "does this scope read the wall clock" is decidable from the syntax tree, import aliases included, and a decidable question should not be put to a model that can be talked out of it. Asymmetric on a *dead-parameter* discriminator: `CONFIRMED` only when a STRONG injected-time parameter is present, is never referenced anywhere in the scope, **and** the scope reads the wall clock — both halves proven from the tree, because `CONFIRMED` feeds an auto-fix path. Everything else is `UNCERTAIN`, above all the case where the injected clock **is** also used: co-occurrence is not a defect (stamping an audit log with real time while the logic runs on `as_of` is correct, and common). `FALSE_POSITIVE` only when no clock read of any kind occurs in the enclosing scope, and only when the file's names resolve well enough for that absence to mean something — a `from x import *`, or a clock function named but never called, blocks refutation rather than being ignored. |
 | `semantic` | domain/business-logic judgment | **no tool** → LLM adjudicator with cited facts |
 
 ### 3.3 Verdict rule
@@ -164,3 +165,16 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
   authored by the same agent that raised the finding, whereas nobody authors a substrate
   disagreement. Requires the `numeric` or `verify` extra (`mpmath>=1.3`); absent ⇒
   `UNCERTAIN`. See `docs/superpowers/specs/2026-07-21-substrate-differential-design.md`.
+- **v3.6 (shipped)** — `clock_leak` claims: "code that should run on injected time reads the
+  wall clock anyway", settled from the syntax tree by `cca_checks/clock_check.py` with **no
+  external tool and no new dependency**, since the question is decidable through import aliases
+  and should not be put to a model that can be talked out of it. The discriminator is a *dead
+  parameter*: `CONFIRMED` requires a STRONG injected-time parameter (`CCA_CLOCK_STRONG_PARAMS`)
+  that is never referenced in the scope **and** a real wall-clock read — the obvious rule, "a
+  clock parameter and a `datetime.now()` are both present", is deliberately not used, being far
+  too weak to license the auto-fix a `CONFIRMED` verdict feeds. An injected clock that **is**
+  also used is `UNCERTAIN`, never a defect. `FALSE_POSITIVE` is held to the taint checker's
+  standard — only an absence the audited file cannot have hidden refutes, so a `from x import *`
+  or a clock function named but never called blocks refutation rather than being ignored. WEAK
+  names (`CCA_CLOCK_WEAK_PARAMS`) only ever raise the question. No separate spec document; the
+  design record is the module docstring of `cca_checks/clock_check.py`.
