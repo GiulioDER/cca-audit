@@ -1,75 +1,151 @@
 [
   {
-    "bug": "neuml/txtai#1125",
-    "org_repo": "neuml/txtai",
-    "pr": 1125,
-    "merge_commit_sha": "fc6f93828b6b8e03f3c0147e1d9e7ff9bdda7f04",
-    "stars": 12726,
-    "title": "Raise SQLError on unterminated bracket, function and similar clauses",
-    "closed": "2026-07-02",
+    "bug": "AOSSIE-Org/PictoPy#1380",
+    "org_repo": "AOSSIE-Org/PictoPy",
+    "pr": 1380,
+    "merge_commit_sha": "a1de21bd22ff3835e73f46366a1dd12c188945dc",
+    "stars": 268,
+    "title": "Folder Appears Empty If AI Tagging Is Enabled Before Indexing Completes",
+    "closed": "2026-07-24",
     "source_files": [
-      "src/python/txtai/database/sql/expression.py"
+      "backend/app/database/folders.py",
+      "backend/app/routes/folders.py",
+      "backend/app/schemas/folders.py"
     ]
   },
   {
-    "bug": "allaboutduncan/clu-comics#389",
-    "org_repo": "allaboutduncan/clu-comics",
-    "pr": 389,
-    "merge_commit_sha": "adce7573063257bf60f545333149ccd4afe45c5c",
-    "stars": 241,
-    "title": "Make Wanted Matching Month-agnostic",
-    "closed": "2026-07-09",
+    "bug": "FlexMeasures/flexmeasures#2341",
+    "org_repo": "FlexMeasures/flexmeasures",
+    "pr": 2341,
+    "merge_commit_sha": "99a98138ef4cd7aa87fc51c05b06c28fc4c72a3b",
+    "stars": 201,
+    "title": "Fix reading (boolean) settings from the environment, incl. SECURITY_TWO_FACTOR",
+    "closed": "2026-07-24",
     "source_files": [
-      "app.py",
-      "helpers/collection.py"
+      "flexmeasures/app.py",
+      "flexmeasures/utils/config_utils.py"
     ]
   },
   {
-    "bug": "pallets/click#3678",
-    "org_repo": "pallets/click",
-    "pr": 3678,
-    "merge_commit_sha": "b67832c2167e5b0ff6764a8c04a0a9087e697b5a",
-    "stars": 17583,
-    "title": "Fix parsing when a parameter is named `help`",
+    "bug": "HKUDS/nanobot#4665",
+    "org_repo": "HKUDS/nanobot",
+    "pr": 4665,
+    "merge_commit_sha": "cad368f58512b444a93aaede0c5741a3488c9d98",
+    "stars": 46173,
+    "title": "fix: preserve pending message runtime context",
+    "closed": "2026-07-24",
+    "source_files": [
+      "nanobot/agent/loop.py"
+    ]
+  },
+  {
+    "bug": "LLMQuant/quant-mind#124",
+    "org_repo": "LLMQuant/quant-mind",
+    "pr": 124,
+    "merge_commit_sha": "857b33d252cff3eb95620a91aaf9a152eec70552",
+    "stars": 2110,
+    "title": "fix(preprocess): unify PR Newswire identities",
+    "closed": "2026-07-23",
+    "source_files": [
+      "quantmind/preprocess/pr_newswire.py"
+    ]
+  },
+  {
+    "bug": "LearningCircuit/local-deep-research#1879",
+    "org_repo": "LearningCircuit/local-deep-research",
+    "pr": 1879,
+    "merge_commit_sha": "695d20b2a5f2cc361e0511afbc75548a991a4c73",
+    "stars": 8770,
+    "title": "fix: use to_bool for checkbox env var conversion",
+    "closed": "2026-02-23",
+    "source_files": [
+      "src/local_deep_research/utilities/type_utils.py"
+    ]
+  },
+  {
+    "bug": "MDAnalysis/mdanalysis#5374",
+    "org_repo": "MDAnalysis/mdanalysis",
+    "pr": 5374,
+    "merge_commit_sha": "13e8664f62b536f5530f8498d7878cb61b3a0d23",
+    "stars": 1613,
+    "title": "BUG: use base units for TPR x/v parsing",
+    "closed": "2026-05-16",
+    "source_files": [
+      "package/MDAnalysis/coordinates/TPR.py"
+    ]
+  },
+  {
+    "bug": "NVIDIA-NeMo/Megatron-Bridge#5043",
+    "org_repo": "NVIDIA-NeMo/Megatron-Bridge",
+    "pr": 5043,
+    "merge_commit_sha": "84ca2fe57914f94674945f1de0000bee12e32bc7",
+    "stars": 828,
+    "title": "fix(perf): MB-923 support recipes without environment maps",
+    "closed": "2026-07-24",
+    "source_files": [
+      "scripts/performance/run_script.py"
+    ]
+  },
+  {
+    "bug": "NVIDIA/TensorRT-LLM#14297",
+    "org_repo": "NVIDIA/TensorRT-LLM",
+    "pr": 14297,
+    "merge_commit_sha": "f0301220f3bf68c2e643e505287391d36555a4ea",
+    "stars": 14192,
+    "title": "[None][fix] DSv4 indexer: stable radix aux scratch for CUDA Graph safety",
+    "closed": "2026-05-21",
+    "source_files": [
+      "tensorrt_llm/_torch/attention_backend/sparse/dsa.py",
+      "tensorrt_llm/_torch/custom_ops/cpp_custom_ops.py",
+      "tensorrt_llm/_torch/model_config.py"
+    ]
+  },
+  {
+    "bug": "NeuralEnsemble/PyNN#839",
+    "org_repo": "NeuralEnsemble/PyNN",
+    "pr": 839,
+    "merge_commit_sha": "0bf4f9fe86c9920c53cdb89a43d0086bff48cf2e",
+    "stars": 310,
+    "title": "Fix Issue 837",
+    "closed": "2026-07-06",
+    "source_files": [
+      "pyNN/standardmodels/base.py"
+    ]
+  },
+  {
+    "bug": "Ostorlab/oxo#1024",
+    "org_repo": "Ostorlab/oxo",
+    "pr": 1024,
+    "merge_commit_sha": "20afa352b287ff24c7f6c2e90ffac758c459b7f3",
+    "stars": 579,
+    "title": "fix: Resolve the issue of stopscan message not consumed by stop_scan agent",
+    "closed": "2026-05-07",
+    "source_files": [
+      "src/ostorlab/utils/definitions.py"
+    ]
+  },
+  {
+    "bug": "PlasmaPy/PlasmaPy#3216",
+    "org_repo": "PlasmaPy/PlasmaPy",
+    "pr": 3216,
+    "merge_commit_sha": "21f20ba2603ea9af773366fababdba694eae1218",
+    "stars": 703,
+    "title": "Fix `plasma_frequency` doc typo and ensure |Z| in `plasma_frequency_lite`",
+    "closed": "2026-02-21",
+    "source_files": [
+      "src/plasmapy/formulary/frequencies.py"
+    ]
+  },
+  {
+    "bug": "SciTools/iris#7197",
+    "org_repo": "SciTools/iris",
+    "pr": 7197,
+    "merge_commit_sha": "64878fb04c46c0b08c886ec17df14354ad583192",
+    "stars": 721,
+    "title": "PP saving: always set `lbft` in hours",
     "closed": "2026-07-10",
     "source_files": [
-      "src/click/core.py"
-    ]
-  },
-  {
-    "bug": "sktime/pytorch-forecasting#2257",
-    "org_repo": "sktime/pytorch-forecasting",
-    "pr": 2257,
-    "merge_commit_sha": "818a84d7cc293de01fd1ad046ce668a5d98d44a9",
-    "stars": 4950,
-    "title": "[BUG] correct inverted condition for `n_plotting_samples` default in `DeepAR`",
-    "closed": "2026-04-14",
-    "source_files": [
-      "pytorch_forecasting/models/deepar/_deepar.py"
-    ]
-  },
-  {
-    "bug": "inventree/InvenTree#12332",
-    "org_repo": "inventree/InvenTree",
-    "pr": 12332,
-    "merge_commit_sha": "a616e7826c968a3a4535ef4e56d8931e9f1f16ac",
-    "stars": 7255,
-    "title": "Fix notes being dropped on part creation",
-    "closed": "2026-07-08",
-    "source_files": [
-      "src/backend/InvenTree/InvenTree/serializers.py"
-    ]
-  },
-  {
-    "bug": "pytroll/satpy#3367",
-    "org_repo": "pytroll/satpy",
-    "pr": 3367,
-    "merge_commit_sha": "7aac2670cee7d0172ff3809658beca8c5df61524",
-    "stars": 1200,
-    "title": "Fix projection handling for NWC GEO v2025 data",
-    "closed": "2026-04-14",
-    "source_files": [
-      "satpy/readers/nwcsaf_nc.py"
+      "lib/iris/fileformats/pp_save_rules.py"
     ]
   },
   {
@@ -77,7 +153,7 @@
     "org_repo": "aio-libs/aiohttp",
     "pr": 12264,
     "merge_commit_sha": "af05010f61ca9be00a98a0885c8ae213adf4cf45",
-    "stars": 16504,
+    "stars": 16506,
     "title": "Reject HTTP/1.1 requests without Host header",
     "closed": "2026-04-13",
     "source_files": [
@@ -85,17 +161,131 @@
     ]
   },
   {
-    "bug": "pyinfra-dev/pyinfra#1858",
-    "org_repo": "pyinfra-dev/pyinfra",
-    "pr": 1858,
-    "merge_commit_sha": "556c0beb390ccd31cb1d0e7d04db233d7bff15b3",
-    "stars": 5893,
-    "title": "fix: allow SSH connections when an ED25519-SK (FIDO2) key is present in the agent",
-    "closed": "2026-07-08",
+    "bug": "angr/angr#6365",
+    "org_repo": "angr/angr",
+    "pr": 6365,
+    "merge_commit_sha": "a7ca0201bae22e5735279069e3f8f7a5e2480cae",
+    "stars": 8965,
+    "title": "Fix analyses cfg cfgemulated callless ret",
+    "closed": "2026-04-24",
     "source_files": [
-      "src/pyinfra/connectors/ssh.py",
-      "src/pyinfra/connectors/ssh_util.py",
-      "src/pyinfra/connectors/sshuserclient/client.py"
+      "angr/engines/pcode/engine.py",
+      "angr/engines/vex/heavy/heavy.py"
+    ]
+  },
+  {
+    "bug": "apache/burr#790",
+    "org_repo": "apache/burr",
+    "pr": 790,
+    "merge_commit_sha": "855bea6a5b64b2d04704a30b0658dfc6bd0ef25a",
+    "stars": 2489,
+    "title": "fix: use utf-8 for local tracking text files",
+    "closed": "2026-05-29",
+    "source_files": [
+      "burr/tracking/server/backend.py"
+    ]
+  },
+  {
+    "bug": "bartfeenstra/betty#4027",
+    "org_repo": "bartfeenstra/betty",
+    "pr": 4027,
+    "merge_commit_sha": "be305b0c080dbd06508f6e1926510753c4b2b1e4",
+    "stars": 122,
+    "title": "Add missing `__init__.py` files",
+    "closed": "2026-03-31",
+    "source_files": [
+      "betty/plugins/document_provider/__init__.py"
+    ]
+  },
+  {
+    "bug": "commitizen-tools/commitizen#1874",
+    "org_repo": "commitizen-tools/commitizen",
+    "pr": 1874,
+    "merge_commit_sha": "988c81f1e82a82332f55c70b44a1bc966a5d54e0",
+    "stars": 3483,
+    "title": "fix(config): fix contains_commitizen_section failing for completely e\u2026",
+    "closed": "2026-02-18",
+    "source_files": [
+      "commitizen/config/json_config.py",
+      "commitizen/config/yaml_config.py"
+    ]
+  },
+  {
+    "bug": "ctrliq/ascender#431",
+    "org_repo": "ctrliq/ascender",
+    "pr": 431,
+    "merge_commit_sha": "4aa8a7247582f9b3eae923c30e40cd65f970e7a2",
+    "stars": 163,
+    "title": "Fix relaunching a sliced job at the Workflow level",
+    "closed": "2026-06-15",
+    "source_files": [
+      "awx/api/views/__init__.py"
+    ]
+  },
+  {
+    "bug": "cusp-ai-oss/kUPS#186",
+    "org_repo": "cusp-ai-oss/kUPS",
+    "pr": 186,
+    "merge_commit_sha": "2a751ceb32b280502335d37a432251a43b67bda1",
+    "stars": 223,
+    "title": "fix: Invert permutation via scatter to avoid XLA `argsort` miscompile on GPU",
+    "closed": "2026-06-24",
+    "source_files": [
+      "src/kups/potential/mliap/torch/interface.py"
+    ]
+  },
+  {
+    "bug": "deepmodeling/deepmd-kit#5351",
+    "org_repo": "deepmodeling/deepmd-kit",
+    "pr": 5351,
+    "merge_commit_sha": "afb97f63a9e7428d63da5b88ccff144362171538",
+    "stars": 1986,
+    "title": "fix(pt): fix NaN Hessian in DPA2 and DPA3",
+    "closed": "2026-03-31",
+    "source_files": [
+      "deepmd/pt/model/descriptor/repflows.py",
+      "deepmd/pt/model/descriptor/repformers.py",
+      "deepmd/pt/utils/safe_gradient.py"
+    ]
+  },
+  {
+    "bug": "djangopackages/djangopackages#1539",
+    "org_repo": "djangopackages/djangopackages",
+    "pr": 1539,
+    "merge_commit_sha": "eb2c69fe8edc0043e4df515cc41c09a42d5c94bf",
+    "stars": 947,
+    "title": "Fix upload time handling in Package model and related rules",
+    "closed": "2026-02-14",
+    "source_files": [
+      "package/models.py",
+      "searchv2/builders.py",
+      "searchv2/rules.py"
+    ]
+  },
+  {
+    "bug": "fastmachinelearning/hls4ml#1421",
+    "org_repo": "fastmachinelearning/hls4ml",
+    "pr": 1421,
+    "merge_commit_sha": "27af406367b565f3fbc698923ba3a2f8414ca614",
+    "stars": 2074,
+    "title": "Fix Keras v3 model conversion in numerical profiling",
+    "closed": "2026-02-09",
+    "source_files": [
+      "hls4ml/converters/__init__.py",
+      "hls4ml/model/profiling.py"
+    ]
+  },
+  {
+    "bug": "felixdittrich92/OnnxTR#113",
+    "org_repo": "felixdittrich92/OnnxTR",
+    "pr": 113,
+    "merge_commit_sha": "52d61362885033b0d026f232efcc3cbea9d23052",
+    "stars": 188,
+    "title": "[Fix] remove pad score issue",
+    "closed": "2026-06-22",
+    "source_files": [
+      "onnxtr/models/detection/_utils/base.py",
+      "onnxtr/utils/geometry.py"
     ]
   },
   {
@@ -103,7 +293,7 @@
     "org_repo": "fossasia/eventyay",
     "pr": 3789,
     "merge_commit_sha": "e6083de28c741a59de849499c38b1da20d8d93e1",
-    "stars": 1641,
+    "stars": 1644,
     "title": "fix: replace break with continue in notify_webhooks to prevent Dropping Webhook Notifications",
     "closed": "2026-06-20",
     "source_files": [
@@ -111,15 +301,383 @@
     ]
   },
   {
-    "bug": "pypa/pipx#1860",
-    "org_repo": "pypa/pipx",
-    "pr": 1860,
-    "merge_commit_sha": "24a15a50e518bfd48020ea0d092d778f1214aa95",
-    "stars": 12882,
-    "title": "\ud83d\udc1b fix(install): resolve local find-links",
-    "closed": "2026-07-10",
+    "bug": "galaxyproject/galaxy#17504",
+    "org_repo": "galaxyproject/galaxy",
+    "pr": 17504,
+    "merge_commit_sha": "58a38767a38b576039bd066e1838b95aa6c205d9",
+    "stars": 1817,
+    "title": "allow etree.XMLParser to resolve external entities",
+    "closed": "2026-04-15",
     "source_files": [
-      "src/pipx/package_specifier.py"
+      "lib/galaxy/util/__init__.py"
+    ]
+  },
+  {
+    "bug": "gcovr/gcovr#1271",
+    "org_repo": "gcovr/gcovr",
+    "pr": 1271,
+    "merge_commit_sha": "9890c8a14d2997f213d37f4c5675cd64c63518c6",
+    "stars": 988,
+    "title": "Fix issues in boost theme",
+    "closed": "2026-06-19",
+    "source_files": [
+      "src/gcovr/data_model/container.py",
+      "src/gcovr/formats/html/write.py"
+    ]
+  },
+  {
+    "bug": "gramps-project/gramps#2248",
+    "org_repo": "gramps-project/gramps",
+    "pr": 2248,
+    "merge_commit_sha": "9443dcbb30015dbac6cfe88dc08f710ae6218df4",
+    "stars": 3033,
+    "title": "Follow symlinks when scanning plugin directories (#10436)",
+    "closed": "2026-05-28",
+    "source_files": [
+      "gramps/gen/plug/_manager.py"
+    ]
+  },
+  {
+    "bug": "harvard-edge/cs249r_book#1353",
+    "org_repo": "harvard-edge/cs249r_book",
+    "pr": 1353,
+    "merge_commit_sha": "5ff02cbd4f411e639072a6a81a41f2b15e23a959",
+    "stars": 27564,
+    "title": "fix(labs/lab_05): import plotly.subplots AFTER micropip install",
+    "closed": "2026-04-16",
+    "source_files": [
+      "labs/vol2/lab_05_dist_train.py"
+    ]
+  },
+  {
+    "bug": "home-assistant/supervisor#6877",
+    "org_repo": "home-assistant/supervisor",
+    "pr": 6877,
+    "merge_commit_sha": "dc6a77507bb33bde7b910082ca1554b913a641ef",
+    "stars": 2191,
+    "title": "fix(docker): restore add-on device access after USB re-enumeration",
+    "closed": "2026-06-15",
+    "source_files": [
+      "supervisor/apps/model.py",
+      "supervisor/apps/options.py",
+      "supervisor/docker/app.py"
+    ]
+  },
+  {
+    "bug": "inclusionAI/AReno#92",
+    "org_repo": "inclusionAI/AReno",
+    "pr": 92,
+    "merge_commit_sha": "fe93f7fc6dbeaf8a507d251b1aa4f132518b3567",
+    "stars": 136,
+    "title": "fix(sft): honor loss_mask in padded path",
+    "closed": "2026-06-23",
+    "source_files": [
+      "areno/api/loss_fns/sft.py"
+    ]
+  },
+  {
+    "bug": "inventree/InvenTree#11627",
+    "org_repo": "inventree/InvenTree",
+    "pr": 11627,
+    "merge_commit_sha": "dab43190338e7594c5b1224820792aa472728bc6",
+    "stars": 7296,
+    "title": "Receive virtual parts",
+    "closed": "2026-03-30",
+    "source_files": [
+      "src/backend/InvenTree/order/models.py"
+    ]
+  },
+  {
+    "bug": "jupyterhub/jupyterhub#5290",
+    "org_repo": "jupyterhub/jupyterhub",
+    "pr": 5290,
+    "merge_commit_sha": "75520dfa1362d22d52fc7d3f908b0e44d3f4c1af",
+    "stars": 8325,
+    "title": "add external_ssl_authorities to trust bundles",
+    "closed": "2026-02-24",
+    "source_files": [
+      "jupyterhub/app.py"
+    ]
+  },
+  {
+    "bug": "kubernetes-client/python#2585",
+    "org_repo": "kubernetes-client/python",
+    "pr": 2585,
+    "merge_commit_sha": "46989af4f776478c62ce7b42f7dbc03f7dde50ac",
+    "stars": 7627,
+    "title": "config: write api_key['BearerToken'] so v36+ SDK auth works",
+    "closed": "2026-05-21",
+    "source_files": [
+      "kubernetes/base/config/incluster_config.py",
+      "kubernetes/base/config/kube_config.py",
+      "kubernetes_asyncio/config/incluster_config.py"
+    ]
+  },
+  {
+    "bug": "meltano/meltano#9922",
+    "org_repo": "meltano/meltano",
+    "pr": 9922,
+    "merge_commit_sha": "8cdf92d67ab3e7b6d44240e9ee7cd744a0cb4cb4",
+    "stars": 2569,
+    "title": "fix: Do not swallow state backend persistence errors in BookmarkWriter",
+    "closed": "2026-04-07",
+    "source_files": [
+      "src/meltano/core/plugin/singer/target.py",
+      "src/meltano/core/state_service.py"
+    ]
+  },
+  {
+    "bug": "meltano/sdk#3046",
+    "org_repo": "meltano/sdk",
+    "pr": 3046,
+    "merge_commit_sha": "37d2961fd193d8109305e89a6617c5f08d0b2998",
+    "stars": 118,
+    "title": "fix(mappers): Preserve full schema for unselected catalog streams",
+    "closed": "2026-07-13",
+    "source_files": [
+      "singer_sdk/mapper.py"
+    ]
+  },
+  {
+    "bug": "milvus-io/pymilvus#3390",
+    "org_repo": "milvus-io/pymilvus",
+    "pr": 3390,
+    "merge_commit_sha": "fda5f1d3fa5cca85cc41e276f3840810776f0502",
+    "stars": 1402,
+    "title": "fix: infer_dtype_bydata returns UNKNOWN for list of strings instead of ARRAY",
+    "closed": "2026-04-07",
+    "source_files": [
+      "pymilvus/orm/types.py"
+    ]
+  },
+  {
+    "bug": "mindee/doctr#2054",
+    "org_repo": "mindee/doctr",
+    "pr": 2054,
+    "merge_commit_sha": "deb76ebc2145b704335315e245da099366c32235",
+    "stars": 6190,
+    "title": "Ordering fix",
+    "closed": "2026-04-27",
+    "source_files": [
+      "doctr/utils/geometry.py"
+    ]
+  },
+  {
+    "bug": "modflowpy/flopy#2716",
+    "org_repo": "modflowpy/flopy",
+    "pr": 2716,
+    "merge_commit_sha": "7746e0995a0e72716e0012b4c84d1aac4327a566",
+    "stars": 621,
+    "title": "fix(model_splitter): fix spurious ssm creation",
+    "closed": "2026-02-25",
+    "source_files": [
+      "flopy/mf6/utils/model_splitter.py"
+    ]
+  },
+  {
+    "bug": "moralmunky/Home-Assistant-Mail-And-Packages#1329",
+    "org_repo": "moralmunky/Home-Assistant-Mail-And-Packages",
+    "pr": 1329,
+    "merge_commit_sha": "79f424d218602db7b177c733fe515cb5d7a23a4f",
+    "stars": 865,
+    "title": "fix(config): add detailed debug logging for IMAP connection and OAuth failures",
+    "closed": "2026-07-23",
+    "source_files": [
+      "custom_components/mail_and_packages/config_flow.py",
+      "custom_components/mail_and_packages/utils/imap.py"
+    ]
+  },
+  {
+    "bug": "mrk-its/homeassistant-blitzortung#292",
+    "org_repo": "mrk-its/homeassistant-blitzortung",
+    "pr": 292,
+    "merge_commit_sha": "2b756412f57d9d6ba983a91a1bc487bf6d007b3f",
+    "stars": 334,
+    "title": "Fix unknown dispatcher warning",
+    "closed": "2026-06-30",
+    "source_files": [
+      "custom_components/blitzortung/geo_location.py"
+    ]
+  },
+  {
+    "bug": "music-assistant/server#3997",
+    "org_repo": "music-assistant/server",
+    "pr": 3997,
+    "merge_commit_sha": "568ae93964fc34edb0ca5befff56f4dfefa606c5",
+    "stars": 2887,
+    "title": "Scale background audio-analysis timeout to track duration",
+    "closed": "2026-05-26",
+    "source_files": [
+      "music_assistant/controllers/streams/audio_analysis.py"
+    ]
+  },
+  {
+    "bug": "napari/napari#9230",
+    "org_repo": "napari/napari",
+    "pr": 9230,
+    "merge_commit_sha": "b725e1f0220b0d4d3b8cf6fdfed89eaa20d22320",
+    "stars": 2712,
+    "title": "fix: action binding the `new-label` tooltips  with shortcuts",
+    "closed": "2026-07-19",
+    "source_files": [
+      "src/napari/_qt/layer_controls/widgets/_labels/qt_label_color.py"
+    ]
+  },
+  {
+    "bug": "networktocode/diffsync#335",
+    "org_repo": "networktocode/diffsync",
+    "pr": 335,
+    "merge_commit_sha": "5620c418d93c65a5eef203035d48422bdec3e25b",
+    "stars": 186,
+    "title": "Fix Deepcopy Bug",
+    "closed": "2026-02-12",
+    "source_files": [
+      "diffsync/__init__.py"
+    ]
+  },
+  {
+    "bug": "ohdearquant/lionagi#1139",
+    "org_repo": "ohdearquant/lionagi",
+    "pr": 1139,
+    "merge_commit_sha": "b9eb59e49acfa439bf75f8f27d6f49ed973f7912",
+    "stars": 400,
+    "title": "fix(security): SSRF guard unmaps IPv4-compat IPv6 (CWE-918)",
+    "closed": "2026-05-25",
+    "source_files": [
+      "lionagi/ln/_ssrf.py"
+    ]
+  },
+  {
+    "bug": "openai/openai-agents-python#2883",
+    "org_repo": "openai/openai-agents-python",
+    "pr": 2883,
+    "merge_commit_sha": "48ad4aae1958da31ec15d4884457a4d322e980fb",
+    "stars": 28142,
+    "title": "fix: tolerate None text in ResponseOutputText content items",
+    "closed": "2026-04-15",
+    "source_files": [
+      "src/agents/items.py"
+    ]
+  },
+  {
+    "bug": "opensandbox-group/OpenSandbox#250",
+    "org_repo": "opensandbox-group/OpenSandbox",
+    "pr": 250,
+    "merge_commit_sha": "a64dc4276d78c85e2131865b22afa0ff64c82b1d",
+    "stars": 12155,
+    "title": "fix(server): skip auth for proxy-to-sandbox paths; strict path matching",
+    "closed": "2026-02-28",
+    "source_files": [
+      "server/src/middleware/auth.py"
+    ]
+  },
+  {
+    "bug": "pandas-dev/pandas#63887",
+    "org_repo": "pandas-dev/pandas",
+    "pr": 63887,
+    "merge_commit_sha": "caa6a62b7cf16a8515b14cf936afcefa8ab495a7",
+    "stars": 49303,
+    "title": "BUG: Conversion from numpy masked arrays to pandas array does not preserve missing values",
+    "closed": "2026-02-16",
+    "source_files": [
+      "pandas/core/construction.py"
+    ]
+  },
+  {
+    "bug": "paperless-ngx/paperless-ngx#12789",
+    "org_repo": "paperless-ngx/paperless-ngx",
+    "pr": 12789,
+    "merge_commit_sha": "7e381f204e4ed3c61b17ff8cbaa6bb863ca5d9e5",
+    "stars": 43423,
+    "title": "Fix: Sanitize dash or plus from the text search path",
+    "closed": "2026-05-12",
+    "source_files": [
+      "src/documents/search/_query.py"
+    ]
+  },
+  {
+    "bug": "pydantic/pydantic-ai#6693",
+    "org_repo": "pydantic/pydantic-ai",
+    "pr": 6693,
+    "merge_commit_sha": "4312c89794fc1c10602c3f17e7ea8f16037ac0de",
+    "stars": 18787,
+    "title": "Map deferred `google-genai` stream errors in `GoogleModel`",
+    "closed": "2026-07-24",
+    "source_files": [
+      "pydantic_ai_slim/pydantic_ai/models/google.py"
+    ]
+  },
+  {
+    "bug": "pygae/galgebra#536",
+    "org_repo": "pygae/galgebra",
+    "pr": 536,
+    "merge_commit_sha": "1a27cc775107eccf81380a7b394f89edc1d2d86d",
+    "stars": 281,
+    "title": "fix(mv): improve is_versor() per GSG's analysis",
+    "closed": "2026-03-31",
+    "source_files": [
+      "galgebra/mv.py"
+    ]
+  },
+  {
+    "bug": "pymc-labs/CausalPy#853",
+    "org_repo": "pymc-labs/CausalPy",
+    "pr": 853,
+    "merge_commit_sha": "8fe2c06b265d47f5d4e96ed52827d171272243e3",
+    "stars": 1162,
+    "title": "Fix mypy type: ignore codes in panel_regression.py",
+    "closed": "2026-04-24",
+    "source_files": [
+      "causalpy/experiments/panel_regression.py"
+    ]
+  },
+  {
+    "bug": "pymc-labs/pymc-marketing#2464",
+    "org_repo": "pymc-labs/pymc-marketing",
+    "pr": 2464,
+    "merge_commit_sha": "1ec5e1ec71fd87cf83786375f03bbbb43b2db5ac",
+    "stars": 1203,
+    "title": "Fix MaskedPrior with non-scalar Prior parameters",
+    "closed": "2026-03-31",
+    "source_files": [
+      "pymc_marketing/special_priors.py"
+    ]
+  },
+  {
+    "bug": "pypa/pip#14033",
+    "org_repo": "pypa/pip",
+    "pr": 14033,
+    "merge_commit_sha": "7456712c30e7bd8944f6d92fba60b7fcfe62017b",
+    "stars": 10232,
+    "title": "Fix `sitecustomize.py` used for build isolation on Python 3.15+",
+    "closed": "2026-06-08",
+    "source_files": [
+      "src/pip/_internal/build_env.py"
+    ]
+  },
+  {
+    "bug": "pypa/pipx#1753",
+    "org_repo": "pypa/pipx",
+    "pr": 1753,
+    "merge_commit_sha": "8e56c8fa1be28d685494118e360a41b864c20684",
+    "stars": 12886,
+    "title": "\ud83d\udc1b fix(uninstall): prevent data loss from relative directory names",
+    "closed": "2026-03-18",
+    "source_files": [
+      "src/pipx/main.py"
+    ]
+  },
+  {
+    "bug": "pypa/virtualenv#3054",
+    "org_repo": "pypa/virtualenv",
+    "pr": 3054,
+    "merge_commit_sha": "6ff2e3efd639d8abea37b1fbf58942a23b569cc2",
+    "stars": 5039,
+    "title": "\ud83d\udc1b fix(discovery): harden subprocess interrogation and test reliability",
+    "closed": "2026-02-18",
+    "source_files": [
+      "src/virtualenv/discovery/cached_py_info.py",
+      "src/virtualenv/discovery/py_info.py"
     ]
   }
 ]

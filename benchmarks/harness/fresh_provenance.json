@@ -1,0 +1,49 @@
+{
+  "generated_for": "docs/specs/2026-07-24-fresh-corpus-scale-design.md",
+  "months": [
+    [
+      "2026-02-01",
+      "2026-02-28"
+    ],
+    [
+      "2026-03-01",
+      "2026-03-31"
+    ],
+    [
+      "2026-04-01",
+      "2026-04-30"
+    ],
+    [
+      "2026-05-01",
+      "2026-05-31"
+    ],
+    [
+      "2026-06-01",
+      "2026-06-30"
+    ],
+    [
+      "2026-07-01",
+      "2026-07-24"
+    ]
+  ],
+  "labels": [
+    "bug",
+    "type: bug",
+    "kind/bug",
+    "bugfix",
+    "defect"
+  ],
+  "per_query": 100,
+  "language": "python",
+  "state": "merged",
+  "stars_min": 100,
+  "stars_max": 60000,
+  "max_src_files": 3,
+  "max_src_changes": 60,
+  "requires_regression_test": true,
+  "one_bug_per_repo": true,
+  "target": 55,
+  "pool_size": 2484,
+  "repos_examined": 1089,
+  "candidates": 55
+}
