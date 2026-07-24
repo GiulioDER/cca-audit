@@ -73,14 +73,21 @@ table. If any REJECT fires, **STOP** — do not audit.
 | **Alive** | default branch pushed within ~90d, AND the newest commits are not an archive/deprecation notice, AND the README carries no archive banner | REJECT |
 | **Accepts contributions** | `CONTRIBUTING.md` exists, OR ≥1 merged PR from a non-org author in the last 6 months | REJECT |
 | **Test harness** | a runnable test suite exists — you need somewhere to put the red→green repro | REJECT |
-| **Language** | the language is one this pipeline audits well (not transpiled / generated output) | REJECT |
+| **Language** | `python -m cca_checks capabilities --file <a representative source file>` returns a non-null `language` (and not transpiled / generated output) | REJECT |
 | **Money / irreversible surface** | order, payment, signing, auth, or destructive paths exist | Not a reject — this only decides whether the STAKES/NUM domain auditors dispatch |
 
 ```bash
 gh repo view <owner>/<repo> --json isArchived,pushedAt,description
 gh pr list --repo <owner>/<repo> --state merged --limit 10 --json author,title
 head -20 README.md | grep -iE 'archiv|deprecat|no longer maintained|do not use'
+python -m cca_checks capabilities --file <a representative source file>
 ```
+
+> **The Language gate is a command, not a judgement.** Hunt mode reports pre-existing defects in a
+> stranger's repository, so a finding has to survive contact with a maintainer — which means it needs
+> a mechanical artifact behind it, not a model's opinion. `capabilities` answers exactly that: a
+> `null` language means every finding in this repo would rest on LLM adjudication alone. Do not talk
+> yourself past it because the code looks readable.
 
 **Why this gate exists.** Every signal can look perfect on a dead repository: real code, a real test
 suite, exactly the right bug class — and an archive banner in the README that says "no longer
@@ -194,6 +201,20 @@ Whatever the tier, the run summary must state what was NOT verified — e.g. `P2
 unverified (FAST tier)`. A gate that was skipped and a gate that passed must never render the same.
 
 Report: `Tier=<T> | MODE=<DIFF|HUNT> | <N> files (<LANGUAGES>) | domains STAKES=<…> NUM=<…> DAT=<…> DEP=<…> DEPLOY=<…> | size=<SIZE>L`
+
+**Also report DETERMINISTIC COVERAGE.** Run `python -m cca_checks capabilities --file <F>` on one
+representative file per detected language and report a line per language:
+
+```
+COVERAGE: python → definedness, nullability, type, taint, clock_leak
+          rust   → clock_leak, taint, panic_path, error_swallow, unsafe_op   (overflow: cargo not on PATH)
+          typescript → none (no deterministic backend)
+```
+
+A language with no backend, or a claim type listed as unavailable, means every finding of that
+kind rides LLM adjudication for this run. **Say so in the final report.** A verification tool that
+cannot state where it is blind is asking for trust it has not earned — and the reader needs to know
+whether the answer is "install something" or "stop expecting coverage here".
 
 **In HUNT mode, also log every file under TARGETS that no auditor reached.** A hunt that silently
 truncates its own coverage reads as "audited everything" when it did not.
@@ -392,8 +413,8 @@ you could not reach is NOT a duplicate: keep the finding and say the check could
 
 **P1 on a high-stakes path (`high_stakes=true`)** — DEEP only: adversarial **2-of-3**.
 
-**First, the artifact exemption.** A finding whose verdict `source` is a TOOL — `pyright`,
-`semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
+**First, the artifact exemption.** A finding whose verdict `source` is a TOOL — `pyright`, `clippy`,
+`ast`, `semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
 resting on an `llm`-sourced verdict.
 
 This is not a numeric special case; it is the same rule `cca-fp-check.md` states ("you may not
@@ -411,12 +432,28 @@ subagent_type: fp-check
 Try to REFUTE this finding. Default verdict = FALSE_POSITIVE unless you can prove the bug is real,
 in scope for this run's MODE, and has real impact. Provide the file:line evidence for your verdict.
 ```
-CONFIRMED if **≥2 of 3** skeptics fail to refute it. Otherwise → **UNCERTAIN**, escalated to a human.
+Resolve the panel into exactly one of three verdicts — a bare "≥2 of 3 else UNCERTAIN" rule is
+ambiguous, because it collapses *unanimous refutation* and *no consensus* into the same bucket when
+they are opposite signals:
 
-**The panel's tie-break is UNCERTAIN, never FALSE_POSITIVE.** These are by construction the
+| Panel outcome | Verdict |
+|---|---|
+| **≥2 of 3 fail to refute** | **CONFIRMED** → fix plan |
+| **3 of 3 refute**, each citing file:line evidence or an execution artifact | **FALSE_POSITIVE** → drop, recording every skeptic's evidence |
+| **anything else** — a 2-1 / 1-2 split, or a refutation asserted without evidence | **UNCERTAIN** → escalated to a human |
+
+**A SPLIT panel breaks to UNCERTAIN, never FALSE_POSITIVE.** These are by construction the
 irreversible findings — money, auth, deletion. Three refute-biased models failing to agree is not
 evidence the bug is absent; it is evidence the question is hard, which is exactly when a human should
 look. Silently dropping it there converts "we could not agree" into "we checked and it was fine."
+
+**Unanimity is the only branch that may drop a high-stakes P1, and only with evidence attached.**
+Three independent refute-biased checkers that all reached the same conclusion *and* showed their work
+is a different signal from three that could not agree. Without the evidence requirement this branch
+degrades into exactly the silent drop the split rule forbids — so a skeptic who refutes on plausibility
+alone, or on blast-radius reasoning ("nothing calls it", "it's only test code") rather than on the
+finding's stated mechanism, does not count toward unanimity. Blast radius sets SEVERITY; only the
+mechanism decides whether the defect is REAL.
 
 Apply verdicts: CONFIRMED → fix plan · FALSE_POSITIVE → drop (record with evidence) ·
 DUPLICATE → drop (record the upstream URL; it is someone else's find, not yours) ·
@@ -429,14 +466,96 @@ merely re-read and approved is unverified — a sign error reads fluently, which
 this class needs execution rather than a second opinion. FAST and STANDARD are unaffected: the
 claim type is available there, but nothing blocks on it.
 
+### Step 2.5b — Disposition Ledger (append-only, STANDARD/DEEP)
+
+Before proceeding — and **even on `no-fix`**, because a verdict is data whether or not it gets fixed —
+append one row per verified finding to `.claude/audits/AUDITOR_SCORECARD.jsonl`:
+
+    {"ts": <iso>, "run_id": <short>, "auditor": <name>, "category": <slug>, "severity": <S>,
+     "high_stakes": <bool>, "priority": "P1|P2|P3", "verify_source": "llm|tool",
+     "verdict": "CONFIRMED|FALSE_POSITIVE|DUPLICATE|UNCERTAIN", "fix_id": <FIX-id or null>}
+
+This is the raw material for the Step 2.6 scorecard. It records only the L2.5 **verdict**; the
+fixed/parked **outcome** is appended as a separate row after Step 6 (kept append-only, joined by
+`run_id`+`fix_id`).
+
 If `no-fix`: STOP here. Report consolidated findings + verdicts.
+
+## Step 2.6: Auditor Scorecard — precision routing (STANDARD/DEEP; routing OFF by default)
+
+**Do NOT compute this by reading the ledger.** Run the checker and consume its output — a statistic
+eyeballed from a JSONL file is not a measurement, and the `n < 10` guard is exactly the kind of rule
+that quietly stops being applied when a human (or a model) is doing the arithmetic in its head:
+
+```bash
+CCA=.claude/tools/cca_scorecard.py; [ -f "$CCA" ] || CCA="$HOME/.claude/tools/cca_scorecard.py"
+python "$CCA" --json          # add --routing on to enable routing
+```
+
+It reads `.claude/audits/AUDITOR_SCORECARD.jsonl` over a trailing 90-day window and returns
+`{route_up, review, yield_flags, cells, rows_scored, rows_malformed}`. Per `(auditor, category)` cell:
+`precision = CONFIRMED / (CONFIRMED + FALSE_POSITIVE)`, with DUPLICATE and UNCERTAIN excluded from the
+denominator (neither is a wrong call).
+
+What the orchestrator does with it:
+- **`route_up`** (emitted only with `--routing on`; default OFF): precision **< 0.50** ⇒ that cell is
+  wrong more often than right, so *raise* its findings' verification — e.g. a P2 non-high-stakes finding
+  in that cell gets an `fp-check` even on FAST instead of being reported unverified.
+- **`review`** (always): precision **< 0.40** ⇒ list under "Auditors to review" in the summary. A
+  prompt-tuning signal for a human, not an automated action.
+- **`yield_flags`** (always): an auditor with ≥15 disposed findings and **zero** CONFIRMED is a possible
+  noise generator — cost without signal, independent of precision.
+- **`rows_malformed` > 0** ⇒ say so. The statistic was computed on an incomplete sample; a corrupted
+  ledger must not render identically to a clean one.
+- Cells with **n < 10** come back `learning` and carry no action. At n=5 the 95% interval on precision
+  spans ~0.15–0.85 — there is nothing there to act on.
+
+**The filter is additive-only: it may ADD scrutiny, never DROP a finding.** That is enforced in the
+checker itself (`Report` has no field able to express a suppression, pinned by
+`test_never_emits_a_drop`), not merely promised here. A rarely-right auditor can still be the only one
+to catch the one real Critical, so filtering by base rate would Goodhart the auditors — *a suppression
+rate is not a score.* Bank ≥10-sample cells with routing off first, then turn it on.
+
+Print the checker's `Scorecard: …` summary line in the run output.
 
 ## Step 3: Layer 3 — Fix Plan
 
 (Reachable only when `no-fix` is absent.) From CONFIRMED findings only: always fix P1; fix P2 unless
 `p1-only`; skip P3 (report as deferred).
 
+## Fix Attempt Budget & Journal (STANDARD/DEEP)
+
+The fix lifecycle (L4 implement → L5 re-verify → L5.5 regression → L6 architect) is a repair loop per
+finding. Bound it **per finding, once** — not per stage — so a single stubborn finding cannot ping-pong
+between gates and burn 3×3 cycles.
+
+- `attempts[FIX-id]` starts at 0. Increment it **each time** any gate (L5 test-repair, L5.5
+  REGRESSION_RISK/SCOPE_CREEP, L6 REVISE) sends that finding back for another edit.
+- Cap = **3 total** repair cycles per finding across ALL gates combined.
+- On the 3rd exhausted attempt: **park** the finding — mark it `UNCERTAIN → human`, revert its partial
+  edit, drop it from the active fix set, and **continue fixing the other findings.** One hard finding
+  never aborts the batch (this mirrors a tree search abandoning one bad leaf and expanding the next-best,
+  not halting the whole search).
+
+**Fix journal — `.claude/audits/FIX_JOURNAL.md` (per run, created fresh).** Every repair cycle appends
+one row so the *next* attempt sees what already failed and why — a re-fixer without this re-treads
+rejected edits:
+
+    | FIX-id | attempt | gate | changed (file:line) | verdict | reject_reason |
+
+Whenever a gate returns a finding for re-work, the re-fix prompt (L4 re-implement, and the L6 REVISE
+feedback) **MUST include that finding's existing FIX_JOURNAL rows** as context. FAST tier skips the
+journal (it has no L5.5/L6 mapping loop).
+
 ## Step 4: Layer 4 — Implement Fixes
+
+**Before the first edit**, snapshot the pre-fix content of every file you are about to change. The
+red-state proof at Step 5.6 needs it, and it becomes unrecoverable the moment the fixes land:
+
+```bash
+TC=.claude/tools/cca_tautology_check.py; [ -f "$TC" ] || TC="$HOME/.claude/tools/cca_tautology_check.py"
+python "$TC" snapshot <every file you will edit>
+```
 
 Per fix: Read current file → apply via Edit → note which finding ID it resolves.
 
@@ -455,7 +574,10 @@ A P1 fix without a red→green test is incomplete (the architect gate will flag 
 
 1. `{TEST_CMD}` on the relevant test file(s) — baseline + any new P1 tests must pass.
 2. `{LINT_CMD}` on changed files — clean (pre-existing warnings OK).
-If tests fail: diagnose, fix, re-run. Do NOT skip. Bound the loop at **3 attempts**, then escalate.
+If tests fail: diagnose, fix, re-run. Do NOT skip. Each re-fix **increments `attempts[FIX-id]`** for the
+finding(s) whose fix broke the test and appends a FIX_JOURNAL row; when a finding hits the shared cap of
+3 (see § Fix Attempt Budget & Journal) park it (`UNCERTAIN → human`, revert its edit) and continue the
+rest rather than aborting the run.
 
 **A failing baseline test may not be weakened, skipped, `xfail`ed, deleted, or have its assertions
 loosened to make this step pass.** "Diagnose, fix, re-run" means fix the code. If a baseline test is
@@ -481,11 +603,44 @@ For each fix hunk, the intended change is to resolve a specific finding. Verify:
 Map each hunk → finding. Verdict per hunk: SAFE | SCOPE_CREEP | REGRESSION_RISK (file:line + reasoning).
 ```
 REGRESSION_RISK → revert/correct, re-run L5 **then L5.5 again**. SCOPE_CREEP → trim to minimal,
-re-run L5 **then L5.5 again**. All SAFE → proceed.
+re-run L5 **then L5.5 again**. All SAFE → proceed. Each such correction **increments `attempts[FIX-id]`**
+and appends a FIX_JOURNAL row; a finding that hits the shared 3-cycle cap here is parked
+(`UNCERTAIN → human`) and its hunk reverted, so this loop cannot run unbounded.
 
 Scoping this gate to "Layer 4 changes" alone would leave a hole in exactly the place edits are made
 under pressure: a Step 5 repair, or a correction made in response to this gate's own verdict, would
 never be reviewed. Re-run it until it comes back clean on the diff as it actually stands.
+
+## Step 5.6: Red-State Proof — tautological-test detector (STANDARD/DEEP)
+
+A red→green test written *after* the fix may pass against the pre-fix code too, in which case it
+proves nothing and its finding is unverified. This is the reward-hacking surface of the fix stage:
+the cheapest way to turn L5 green is a test that was never red. Do not eyeball the test — execute it
+against the pre-fix code:
+
+```bash
+TC=.claude/tools/cca_tautology_check.py; [ -f "$TC" ] || TC="$HOME/.claude/tools/cca_tautology_check.py"
+python "$TC" verify \
+  --proof FIX-002=tests/test_x.py::test_fee \
+  --proof FIX-004=tests/test_x.py::test_injection --json
+```
+
+It reverts the snapshotted files to their pre-fix content, re-runs each claimed proof, restores the
+fixed content (hash-verified, inside a `finally`), and **exits non-zero if any claimed proof is not a
+proof** — it is a gate, not a report.
+
+| Verdict | Meaning | Action |
+|---|---|---|
+| `RED` | failed pre-fix on **behaviour** | genuine proof ✅ |
+| `TAUTOLOGICAL` | **passed** pre-fix | proves nothing; the finding is UNVERIFIED. Rewrite the test so it pins the defect — that is a rework cycle, so increment `attempts[FIX-id]` and journal it. |
+| `INCONCLUSIVE` | errored / never reached the code (ImportError, missing symbol, collection error) | NOT proof. A test that breaks for an unrelated reason is the same failure class as a guard that is silent for an unrelated reason — report it, never count it. |
+
+Deliberately **not** "AssertionError only": a genuine proof can fail pre-fix with a domain exception
+(an injection test failing with `OperationalError` *is* the defect manifesting). Only symbol-resolution
+failures mean the test never reached the code under test.
+
+Every CONFIRMED P1 must carry at least one `RED` proof. A P1 whose only proof is `TAUTOLOGICAL` or
+`INCONCLUSIVE` is an orphan P1 at the architect gate.
 
 ## Step 6: Layer 6 — Architect Gate + Fix→Finding Mapping
 
@@ -499,12 +654,23 @@ THEN (STANDARD/DEEP) emit a mapping covering every CONFIRMED P1/P2:
   | Finding ID | Fix (file:line) | Red→green test (P1) | Resolves? | Notes |
 Verdict rules:
   - Orphan CONFIRMED P1 (no fix, fix that doesn't resolve it, or a P1 missing its red→green test) → REVISE.
+  - A P1 whose Step 5.6 proof came back TAUTOLOGICAL or INCONCLUSIVE → REVISE (the fix is unverified).
+    You are HANDED the Step 5.6 output — do not re-derive the red state by hand.
   - Phantom fix (change not tied to any finding) → REVISE (trim it).
   - Otherwise judge normally.
 Final verdict: APPROVED | REVISE | BLOCKED.
 ```
-APPROVED → commit. REVISE → implement feedback, re-verify (L5 + L5.5), re-submit (max 3 iters, then
-escalate). BLOCKED → STOP, report blocker, do NOT commit.
+APPROVED → commit. REVISE → implement feedback, re-verify (L5 + L5.5), re-submit. Each REVISE cycle
+**increments `attempts[FIX-id]`** for every finding it sends back and appends a FIX_JOURNAL row; the
+architect MUST be handed each such finding's prior FIX_JOURNAL rows so its feedback does not contradict
+an already-rejected attempt. A finding reaching the shared 3-cycle cap is **parked** (`UNCERTAIN → human`)
+and dropped from the fix set — the run still commits the findings that did pass. BLOCKED → STOP, report
+blocker, do NOT commit.
+
+After the gate resolves, append each finding's **outcome row** to `.claude/audits/AUDITOR_SCORECARD.jsonl`
+so Step 2.6 can measure fix success, not just verification:
+`{"run_id": <short>, "fix_id": <FIX-id>, "result": "fixed|parked|reverted", "architect_verdict": <V>}`
+(Step 2.6 left-joins outcome rows to disposition rows on `run_id`+`fix_id`.)
 
 ## Step 7: Commit
 

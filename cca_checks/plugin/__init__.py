@@ -22,13 +22,17 @@ import re
 from dataclasses import dataclass, field
 from importlib import resources
 
-__all__ = ["InstallResult", "install", "iter_agents", "iter_commands"]
+__all__ = ["InstallResult", "install", "iter_agents", "iter_commands", "iter_tools"]
 
 # Our own files are named `cca-*.md`; the orchestrator commands `audit-fix*.md`
 # (canonical plus the DEEP alias). Globs, not hardcoded lists: an auditor added
 # tomorrow ships without anyone remembering to update a manifest here.
 _AGENT_GLOB = "cca-*.md"
 _COMMAND_GLOB = "audit-fix*.md"
+# The two checkers the orchestrator shells out to BY PATH (Step 2.6 scorecard,
+# Step 5.6 red-state proof). `test_*` is excluded: their tests run in this
+# repo's CI and have no business in a user's .claude/.
+_TOOL_GLOB = "cca_*.py"
 
 # Agent names CCA-Audit dispatches. Our *files* are cca-*.md but their
 # frontmatter `name:` is generic, so a project that already defines one of
@@ -74,6 +78,15 @@ def iter_commands():
     return _iter_resources("commands", _COMMAND_GLOB)
 
 
+def iter_tools():
+    """Yield (filename, text) for every packaged pipeline checker."""
+    return (
+        (name, text)
+        for name, text in _iter_resources("tools", _TOOL_GLOB)
+        if not name.startswith("test_")
+    )
+
+
 def _write(dest: pathlib.Path, text: str, result: InstallResult) -> None:
     """Write one file, preserving a differing existing version as `<name>.bak`.
 
@@ -109,7 +122,7 @@ def _warn_on_shadowing_agents(agents_dir: pathlib.Path, result: InstallResult) -
 
 
 def install(target: str | pathlib.Path = ".") -> InstallResult:
-    """Install the agents and commands into `<target>/.claude/`.
+    """Install the agents, commands and pipeline checkers into `<target>/.claude/`.
 
     Returns an `InstallResult` rather than printing, so the behaviour is
     testable without capturing stdout and the CLI owns all presentation.
@@ -120,6 +133,7 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
 
     agents = list(iter_agents())
     commands = list(iter_commands())
+    tools = list(iter_tools())
     # A wheel missing its markdown would install "successfully" into an empty
     # .claude/ -- a total, silent failure. Refuse before creating anything.
     if not agents:
@@ -132,11 +146,23 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
             "no command markdown found in the installed package; the wheel is "
             "incomplete -- reinstall with `pip install --force-reinstall cca-audit`"
         )
+    # Missing checkers fail the same way but quieter still: the install looks
+    # complete, and Steps 2.6 and 5.6 then fail as `command not found` mid-run,
+    # so the scorecard and the red-state proof are simply absent from the report
+    # with nothing saying why. That was the pre-2026-07-24 behaviour of both
+    # shell installers, and it is worth refusing rather than reproducing.
+    if not tools:
+        raise RuntimeError(
+            "no pipeline checkers found in the installed package; the wheel is "
+            "incomplete -- reinstall with `pip install --force-reinstall cca-audit`"
+        )
 
     agents_dir = root / ".claude" / "agents"
     commands_dir = root / ".claude" / "commands"
+    tools_dir = root / ".claude" / "tools"
     agents_dir.mkdir(parents=True, exist_ok=True)
     commands_dir.mkdir(parents=True, exist_ok=True)
+    tools_dir.mkdir(parents=True, exist_ok=True)
 
     result = InstallResult()
     # Check *before* writing: afterwards our own cca-*.md files are present and
@@ -147,5 +173,7 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
         _write(agents_dir / name, text, result)
     for name, text in commands:
         _write(commands_dir / name, text, result)
+    for name, text in tools:
+        _write(tools_dir / name, text, result)
 
     return result

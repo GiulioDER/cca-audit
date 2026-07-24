@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cca-audit"
-version = "0.7.1"
+version = "0.8.0"
 description = "Multi-agent code audit for Claude Code in which no finding reaches your code unverified"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,15 +43,28 @@ Issues = "https://github.com/GiulioDER/cca-audit/issues"
 # cannot be fixed at all without a hypothesis artifact. An extra that half-enables
 # a feature is worse than one that does not exist, because the failure is silent.
 numeric = ["hypothesis>=6.0", "pytest>=7", "mpmath>=1.3"]
+# The Rust backend's PARSER. Not its diagnostics: `panic_path`, `overflow`,
+# `error_swallow` and `unsafe_op` are settled by clippy, which is part of the target's
+# own toolchain and cannot be pip-installed. Splitting them is deliberate -- a grammar
+# wheel always works, so `clock_leak` and enclosing-span resolution keep working on a
+# crate that does not build, which is exactly when an auditor most needs them.
+rust = ["tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 # The whole deterministic layer in one install, so it is reproducible from the
 # manifest rather than from a sentence in the README.
-verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50", "mpmath>=1.3"]
+verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.350", "semgrep>=1.50", "mpmath>=1.3",
+          "tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 # mpmath belongs here for the same reason pytest belongs in `numeric`: CI installs
 # `.[dev]`, and both tests/test_substrate.py and tests/acceptance/test_substrate_suite.py
 # `pytest.importorskip("mpmath")` at module scope -- without it here, ~25 substrate
 # tests (including the integrity gate, the feature's central safety guarantee) skip
 # on every CI run instead of executing, and a regression there merges with green CI.
-dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4", "mpmath>=1.3"]
+# tree-sitter belongs here for exactly the reason mpmath does: tests/test_treesitter.py
+# and tests/test_clock_check_rust.py `pytest.importorskip` it at module scope, and CI
+# installs `.[dev]` -- so without it here the entire Rust parsing layer would skip
+# silently on every CI run and a regression in it would merge green.
+# test_dev_extra_completeness.py asserts this invariant rather than this list.
+dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4", "mpmath>=1.3",
+       "tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 
 [tool.setuptools.packages.find]
 # Glob, not a hand-maintained list: a literal `packages = ["cca_checks"]` silently
@@ -65,10 +78,18 @@ cca_checks = ["rules/*.yaml"]
 # cleanly and produces an empty .claude/, which no import smoke-test can see.
 # tests/test_plugin_install.py asserts every file on disk is reachable as a
 # package resource, so this glob cannot silently stop matching.
-"cca_checks.plugin" = ["agents/*.md", "commands/*.md"]
+# tools/*.py ships for the same reason: the orchestrator shells out to the two
+# checkers BY PATH, so a wheel without them installs cleanly and then reports no
+# scorecard and no red-state proof, with the gates failing as "command not found".
+"cca_checks.plugin" = ["agents/*.md", "commands/*.md", "tools/*.py"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# cca_checks/plugin/tools is a testpath, not a stray directory: those two checkers
+# gate the audit pipeline itself (Step 2.6 and Step 5.6), so a regression there is
+# a regression in what /audit-fix is willing to confirm. Their tests import the
+# modules as bare siblings, which is why they live beside them rather than under
+# tests/ -- and why that directory deliberately has no __init__.py.
+testpaths = ["tests", "cca_checks/plugin/tools"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

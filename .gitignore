@@ -14,3 +14,8 @@ venv/
 # belongs in the repo -- without this line an agent running `git add -A` commits a
 # self-install of all 13 agents.
 .claude/
+
+# Rust fixture crates build here. `cargo test` needs a real target dir (see
+# cca_checks/cargo_repro.py on why the repro path does not isolate it), and the
+# artifacts are large, machine-specific, and regenerated on every run.
+tests/fixtures/**/target/

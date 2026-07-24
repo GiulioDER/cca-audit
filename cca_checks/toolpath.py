@@ -47,16 +47,30 @@ def resolve_tool(name: str, cwd: str | None = None) -> str | None:
     The cwd-first hazard is closed at the source instead: passing `path=` to
     `shutil.which` suppresses the implicit current-directory entry that Windows
     (and CreateProcess) would otherwise search before PATH.
+
+    What is returned is the path as FOUND, not its `realpath`. Returning the
+    resolved target breaks every multi-call binary -- the ones that dispatch on
+    `argv[0]` rather than on their own inode. `~/.cargo/bin/cargo` is a symlink to
+    `rustup`, so a realpath'd launch runs rustup with cargo's arguments; it replies
+    `error: unexpected argument '--manifest-path'` and every Rust claim escalates.
+    The same holds for busybox-style tools. Symlinks are followed for the *trust*
+    decision below and nowhere else.
     """
     # Explicit PATH: without it, shutil.which mirrors CreateProcess and searches
     # the current directory first on Windows.
     found = shutil.which(name, path=os.environ.get("PATH"))
     if not found:
         return None
+    launch = os.path.abspath(found)
     resolved = os.path.realpath(found)
     root = os.path.realpath(cwd if cwd is not None else os.getcwd())
-    if os.path.dirname(resolved) == root:
-        # Planted in the root of the repo under audit. A real toolchain is never
-        # installed there, so this is the hijack case.
+    # Both directions are the hijack case, so both are checked. Following the
+    # symlink only would miss a link planted in the repo root that points at a
+    # genuine system binary today and is repointed later; checking only the link
+    # would miss one parked elsewhere on PATH aiming into the audited tree. The
+    # dirname of `launch` is realpath'd so the comparison survives a symlinked
+    # parent (/tmp -> /private/tmp on macOS) without following the binary itself.
+    if os.path.realpath(os.path.dirname(launch)) == root or os.path.dirname(resolved) == root:
+        # A real toolchain is never installed in the root of the repo under audit.
         return None
-    return resolved
+    return launch

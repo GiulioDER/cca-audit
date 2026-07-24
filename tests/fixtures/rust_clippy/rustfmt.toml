@@ -1,0 +1,3 @@
+# NEVER format this crate -- its LINE NUMBERS are the test contract. See the note in
+# tests/fixtures/rust/rustfmt.toml for the incident this rule comes from.
+disable_all_formatting = true

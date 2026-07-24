@@ -137,6 +137,8 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
 
 - **Not** a from-scratch static-analysis engine — v3 orchestrates existing tools via shell.
 - **Not** multi-language in this slice — Python only; other languages ride the v2 fallback until adapters land.
+  *(Superseded by v3.3, §7: the backend layer landed and Rust is on it. Everything except Python and
+  Rust still rides the v2 fallback, and now says so per file via `capabilities`.)*
 - **`semantic` claims stay LLM-adjudicated.** v3 shrinks the residue that depends on LLM judgment to the claims no tool can settle, and forces even those to cite facts. It does not make "is this the *right* business logic" deterministic — that ceiling is real and disclosed.
 - Repro-gen is **confirmatory, not refuting**: "couldn't reproduce" escalates, it does not drop.
 
@@ -151,8 +153,28 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
   refutes a false premise and informs adjudication, but never confirms: it flags safely
   parameterized queries, so a hit is evidence, not proof. See
   `docs/superpowers/specs/2026-07-10-v3.2-taint-semgrep-design.md`.
-- **v3.3** — other languages (TypeScript via `tsc`, Go, Rust), which is also the point at
-  which the mechanical checks should move behind their own layer.
+- **v3.3 (shipped)** — the language backend layer, and **Rust** on it. `cca_checks/languages/`
+  resolves a backend by file extension ONCE, before any checker runs; an uncovered language, or a
+  claim type the covering backend does not declare, returns `UNCERTAIN` rather than reaching a
+  checker whose silence would be read as evidence. This closed a live defect: `definedness` was
+  exempt from the blindness probe and had no language guard, so a `.rs` file collected a binding
+  `FALSE_POSITIVE` carrying `source: pyright` — pyright parses Rust as Python and finds no
+  `reportUndefinedVariable`.
+
+  Rust does **not** port `definedness`/`type`/`nullability` — the code compiled, so those refute
+  by construction. It settles `clock_leak` (tree-sitter, mirroring the Python checker, with glob
+  `use` and any macro invocation blocking refutation), `panic_path`/`overflow`/`error_swallow`/
+  `unsafe_op` (clippy) and `taint` (semgrep, with a Rust catalog).
+
+  clippy is the analogue of pyright, not of `ast`, and its blindness is different: never
+  type-blind, since the crate compiled, but **lint**-blind, because every lint used is
+  allow-by-default. They are force-enabled with `--force-warn`, which overrides the crate's own
+  `#![allow]`, `clippy.toml` and `[lints]` — the analogue of `enableTypeIgnoreComments: false`.
+  Cargo freshness is the analogue of `summary.filesAnalyzed` and is handled by a dedicated target
+  directory plus a `build-finished` assertion.
+
+  TypeScript and Go are **not** shipped. The layer is built for them; a language is now a grammar
+  wheel, a catalog, and a small adapter.
 - **v3.4 (shipped)** — `numeric` claims via auditor-declared metamorphic properties, run
   under `hypothesis` (`assert_bounded`, `assert_monotonic_in`, `assert_limit`,
   `assert_scale_invariant`, `assert_sign_symmetric`, `assert_round_trips`). A violated

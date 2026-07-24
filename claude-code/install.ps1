@@ -54,8 +54,10 @@ try {
 
     $AgentsDir = ".claude\agents"
     $CommandsDir = ".claude\commands"
+    $ToolsDir = ".claude\tools"
     New-Item -ItemType Directory -Force -Path $AgentsDir | Out-Null
     New-Item -ItemType Directory -Force -Path $CommandsDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
 
     # Copy one file, preserving any local customization as <name>.bak.
     #
@@ -102,6 +104,17 @@ try {
     $commands = Get-ChildItem "$SrcDir\commands\audit-fix*.md" -ErrorAction SilentlyContinue
     if (-not $commands) { throw "no command files found in $SrcDir\commands\" }
     $commands | ForEach-Object { Install-CcaFile $_.FullName $CommandsDir $_.Name }
+
+    # Copy the pipeline checkers. They ship as package data but are not imported
+    # -- the orchestrator shells out to them BY PATH (Step 2.6 scorecard, Step 5.6
+    # red-state proof), so they have to land on disk in .claude\tools\ as well as
+    # in the wheel. Before they were installed here, a fresh install had an
+    # audit-fix.md referencing two files nothing ever placed on disk, so both gates
+    # degraded to "command not found" on every machine except the author's.
+    $tools = Get-ChildItem "$SrcDir\tools\cca_*.py" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike "test_*" }
+    if (-not $tools) { throw "no checker files found in $SrcDir\tools\" }
+    $tools | ForEach-Object { Install-CcaFile $_.FullName $ToolsDir $_.Name }
 
     # Install the cca_checks package so the deterministic verifier works.
     #

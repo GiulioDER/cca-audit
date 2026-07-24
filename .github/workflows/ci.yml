@@ -27,12 +27,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Install the Rust toolchain
+        # The Rust backend's tests are NOT allowed to skip here. `cargo` gates the
+        # clippy half of tests/test_clippy_check.py, and a job without it would run
+        # them as skips -- no red, no signal, and the force-warn guarantee (the
+        # backend's central soundness property) would get zero coverage forever.
+        # That is the same defect class test_dev_extra_completeness.py exists to
+        # prevent for optional Python dependencies; the assertion that this step
+        # stays here lives in tests/test_ci_contract.py.
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
       - name: Install the deterministic layer
         # pyright and semgrep are what the acceptance suite exercises. semgrep has
         # no Windows wheel, which is one reason this job is ubuntu-only.
         run: pip install pyright semgrep
 
       - name: Lint
+        # claude-code/tools is linted too: those checkers gate Steps 2.6 and 5.6,
+        # so they are pipeline code, not scripts sitting beside it.
+        # `cca_checks` covers cca_checks/plugin/tools, so the two pipeline
+        # checkers are linted as the pipeline code they are, without a second path.
         run: ruff check cca_checks tests
 
       - name: Test
@@ -63,13 +79,44 @@ jobs:
           /tmp/wheeltest/bin/python -m cca_checks --help
           # Bundled rule files actually shipped and are reachable through
           # importlib.resources, not just present in the source tree.
+          #
+          # Enumerated from the BACKENDS rather than from a pair of constants: a new
+          # language's catalog would otherwise ship unchecked, and a rule file missing
+          # from the wheel is invisible to the test job (which runs against the source
+          # tree) right up until a user installs it and every taint claim escalates.
           /tmp/wheeltest/bin/python - <<'PY'
           import os
-          from cca_checks.semgrep_check import SINKS_RULES, TAINT_RULES, rules_path
-          for name in (SINKS_RULES, TAINT_RULES):
-              path = rules_path(name)
-              assert os.path.exists(path), f"rule file missing from the wheel: {name}"
-          print("packaged rules OK")
+          from cca_checks import languages
+          from cca_checks.semgrep_check import rules_path
+          checked = 0
+          for backend in languages.BACKENDS:
+              catalog = getattr(backend, "semgrep_catalog", None)
+              if catalog is None:
+                  continue
+              for kind in ("sinks", "taint"):
+                  name = catalog(kind)
+                  assert os.path.exists(rules_path(name)), \
+                      f"rule file missing from the wheel: {name}"
+                  checked += 1
+          assert checked, "no backend shipped a catalog; this check proved nothing"
+          print(f"packaged rules OK ({checked} files)")
+          PY
+          # The tree-sitter grammar is an optional extra, so the wheel must import and
+          # the CLI must run WITHOUT it -- and a Rust claim must escalate rather than
+          # crash. An extra that is required in practice is not optional.
+          /tmp/wheeltest/bin/python - <<'PY'
+          import json, subprocess, sys, tempfile, os
+          with tempfile.TemporaryDirectory() as td:
+              src = os.path.join(td, "main.rs")
+              open(src, "w").write("fn main() {\n    let a = 1;\n    let b = a;\n}\n")
+              out = subprocess.run(
+                  [sys.executable, "-m", "cca_checks", "check", "--claim-type",
+                   "clock_leak", "--finding-id", "X", "--file", "main.rs", "--line", "2"],
+                  capture_output=True, text=True, cwd=td)
+          verdict = json.loads(out.stdout)
+          assert verdict["verdict"] == "UNCERTAIN", verdict
+          assert "not installed" in verdict["evidence"], verdict
+          print("missing-grammar escalation OK")
           PY
 
       - name: Install the plugin from the wheel into a scratch project

@@ -6,6 +6,12 @@ from cca_checks import __main__ as cli
 from cca_checks import pyright_check as pc
 from cca_checks.claim import make_verdict
 
+# The CLI dispatches a claim to the language backend that declared its extension, so
+# the checkers these tests stand down live on the backend module, not on the CLI. The
+# assertions are unchanged -- only the patch target followed the seam it was always
+# aiming at.
+from cca_checks.languages import python as pyb
+
 
 @pytest.fixture(autouse=True)
 def real_claim_files(tmp_path, monkeypatch):
@@ -25,7 +31,7 @@ def real_claim_files(tmp_path, monkeypatch):
 @pytest.fixture
 def no_pyright(monkeypatch):
     """Make run_pyright report the tool as unavailable, so the CLI never shells out."""
-    monkeypatch.setattr(cli, "run_pyright", lambda path: None)
+    monkeypatch.setattr(pyb, "run_pyright", lambda path: None)
 
 
 def run(capsys, argv):
@@ -55,7 +61,7 @@ def test_definedness_alias_matches_the_generic_subcommand(capsys, no_pyright):
 
 
 def test_check_refutes_a_clean_definedness_claim(capsys, monkeypatch):
-    monkeypatch.setattr(cli, "run_pyright", lambda path: [])
+    monkeypatch.setattr(pyb, "run_pyright", lambda path: [])
     out = run(capsys, ["check", "--claim-type", "definedness",
                        "--finding-id", "D", "--file", "s.py", "--line", "3"])
     assert out["verdict"] == "FALSE_POSITIVE"
@@ -63,7 +69,7 @@ def test_check_refutes_a_clean_definedness_claim(capsys, monkeypatch):
 
 
 def test_check_confirms_a_nullability_claim(capsys, monkeypatch):
-    monkeypatch.setattr(cli, "run_pyright", lambda path: [
+    monkeypatch.setattr(pyb, "run_pyright", lambda path: [
         {"range": {"start": {"line": 8}}, "rule": "reportOptionalMemberAccess",
          "message": "\"token\" is not a known attribute of \"None\""}
     ])
@@ -75,7 +81,7 @@ def test_check_confirms_a_nullability_claim(capsys, monkeypatch):
 
 
 def test_check_confirms_a_type_claim(capsys, monkeypatch):
-    monkeypatch.setattr(cli, "run_pyright", lambda path: [
+    monkeypatch.setattr(pyb, "run_pyright", lambda path: [
         {"range": {"start": {"line": 8}}, "rule": "reportArgumentType",
          "message": "Argument of type \"str\" cannot be assigned to parameter \"x\" of type \"int\" in function \"foo\""}
     ])
@@ -100,7 +106,7 @@ def test_symbol_lands_in_proposition_not_a_positional_slot(monkeypatch, capsys, 
         captured["claim"] = claim
         return real(claim, diags, rules, blind_probe)
 
-    monkeypatch.setattr(cli, "verdict_for_claim", spy)
+    monkeypatch.setattr(pyb, "verdict_for_claim", spy)
     run(capsys, ["check", "--claim-type", "definedness", "--finding-id", "D",
                  "--file", "s.py", "--line", "1", "--symbol", "RISK_CAP"])
     claim = captured["claim"]
@@ -117,7 +123,7 @@ def test_repro_subcommand_still_works(capsys, monkeypatch):
 
 
 def test_check_taint_refutes_when_no_sink(capsys, monkeypatch):
-    monkeypatch.setattr(cli, "verdict_for_taint",
+    monkeypatch.setattr(pyb, "verdict_for_taint",
                         lambda claim: make_verdict(claim.finding_id, "FALSE_POSITIVE",
                                                    "semgrep: no sql sink in the enclosing scope",
                                                    "semgrep"))
@@ -134,7 +140,7 @@ def test_check_taint_passes_the_sink_class_through(capsys, monkeypatch):
         captured["claim"] = claim
         return make_verdict(claim.finding_id, "UNCERTAIN", "stub", "semgrep")
 
-    monkeypatch.setattr(cli, "verdict_for_taint", spy)
+    monkeypatch.setattr(pyb, "verdict_for_taint", spy)
     run(capsys, ["check", "--claim-type", "taint", "--sink-class", "command",
                  "--finding-id", "T-2", "--file", "svc.py", "--line", "3"])
     assert captured["claim"].claim_type == "taint"
@@ -144,7 +150,7 @@ def test_check_taint_passes_the_sink_class_through(capsys, monkeypatch):
 
 def test_unknown_sink_class_is_not_an_argparse_error(capsys, monkeypatch):
     # An agent may name a class we do not cover. That must escalate, not crash.
-    monkeypatch.setattr(cli, "verdict_for_taint",
+    monkeypatch.setattr(pyb, "verdict_for_taint",
                         lambda claim: make_verdict(claim.finding_id, "UNCERTAIN",
                                                    "sink class not covered; escalated", "llm"))
     out = run(capsys, ["check", "--claim-type", "taint", "--sink-class", "xxe",
@@ -154,7 +160,7 @@ def test_unknown_sink_class_is_not_an_argparse_error(capsys, monkeypatch):
 
 
 def test_taint_without_sink_class_still_returns_a_verdict(capsys, monkeypatch):
-    monkeypatch.setattr(cli, "verdict_for_taint",
+    monkeypatch.setattr(pyb, "verdict_for_taint",
                         lambda claim: make_verdict(claim.finding_id, "UNCERTAIN",
                                                    "no sink class given; escalated", "llm"))
     out = run(capsys, ["check", "--claim-type", "taint",
@@ -220,7 +226,7 @@ def test_check_clock_leak_routes_to_the_ast_checker(capsys, monkeypatch):
         return make_verdict(claim.finding_id, "CONFIRMED",
                             "ast: parameter 'now' is declared and NEVER referenced", "ast")
 
-    monkeypatch.setattr(cli, "verdict_for_clock_leak", spy)
+    monkeypatch.setattr(pyb, "verdict_for_clock_leak", spy)
     out = run(capsys, ["check", "--claim-type", "clock_leak",
                        "--finding-id", "C-1", "--file", "svc.py", "--line", "9"])
     assert captured["claim"].claim_type == "clock_leak"

@@ -4,15 +4,33 @@ import os
 import sys
 from dataclasses import asdict
 
+from . import languages
+from .cargo_repro import run_repro as run_cargo_repro
 from .claim import Claim, Verdict, make_verdict
-from .clock_check import verdict_for_clock_leak
 from .property_check import run_properties
-from .pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from .repro_runner import run_repro
-from .semgrep_check import verdict_for_taint
 from .toolpath import _is_inside
 
-CLAIM_TYPES = sorted(set(RULES_BY_CLAIM) | {"taint", "clock_leak"})
+# Derived from the registry rather than restated, so a backend that adds a claim type
+# reaches the CLI without a second edit here. A hand-maintained list would let
+# `--claim-type panic_path` exit with an argparse usage error on a repo where the
+# backend settles it perfectly well -- and a usage error is not a verdict, so the
+# finding leaves the pipeline through a path that renders no evidence at all.
+CLAIM_TYPES = sorted({ct for b in languages.BACKENDS for ct in b.claim_types})
+
+# WHY THE LANGUAGE IS RESOLVED HERE AND NOT PER-CHECKER. It used to be per-checker,
+# and it was enforced in two places out of five: `clock_check` and `semgrep_check`
+# test `.endswith(".py")`, `type`/`nullability` fail closed only because the
+# blindness probe escalates when `ast.parse` chokes on non-Python, and `definedness`
+# -- exempt from that probe by TYPE_DEPENDENT_CLAIMS -- had nothing. pyright parses a
+# `.rs` file as Python, emits syntax errors that fall under no rule we match, and
+# `verdict_for_claim` falls through to a confident FALSE_POSITIVE carrying
+# `source: pyright`. That artifact may not be overturned downstream, so a real defect
+# is dropped and the file is closed on it.
+#
+# A guarantee each checker has to remember to implement is one the next checker ships
+# without. Resolving the language once, here, is what makes it structural: see
+# `cca_checks/languages/__init__.py`, which owns the extension table.
 
 
 def _add_claim_args(parser):
@@ -68,17 +86,105 @@ def _validate_coordinate(file: str, line: int, finding_id: str) -> Verdict | Non
     return None
 
 
+def _resolve_backend(file: str, claim_type: str, finding_id: str):
+    """(backend, None) when this claim can be settled, (None, Verdict) when it cannot.
+
+    Two distinct refusals, because they mean different things to whoever reads the
+    escalation: no backend covers the language at all, versus a backend that covers
+    the language but does not claim to settle THIS claim type. The second is the one
+    that keeps a future claim type safe -- it is unsupported by every backend until
+    its author opts each one in, rather than defaulting into a checker built for a
+    different language.
+    """
+    def bad(why: str):
+        return None, make_verdict(finding_id, "UNCERTAIN", f"{why}; escalated", "llm")
+
+    backend = languages.resolve(file)
+    if backend is None:
+        ext = languages.extension_of(file) or "extension-less"
+        return bad(f"no deterministic backend covers the {ext} language "
+                   f"({os.path.basename(file)}); a tool that cannot read this file "
+                   f"cannot be meaningfully silent about it either")
+    if claim_type not in backend.claim_types:
+        return bad(f"the {backend.name} backend does not settle {claim_type!r} claims "
+                   f"(it settles: {', '.join(sorted(backend.claim_types))})")
+    return backend, None
+
+
 def _check(claim_type: str, args) -> Verdict:
+    # Coordinate first, language second, and the order is load-bearing for the
+    # MESSAGE rather than the verdict -- both gates escalate, so either order is
+    # equally safe, but a directory or a missing file has no meaningful extension
+    # and would otherwise be reported as an unsupported language, which sends the
+    # reader looking for a backend to install instead of at the typo in the path.
+    # Neither gate runs an analyzer, so nothing is executed against an unsupported
+    # language by checking the coordinate first.
     invalid = _validate_coordinate(args.file, args.line, args.finding_id)
     if invalid is not None:
         return invalid
+    backend, unsupported = _resolve_backend(args.file, claim_type, args.finding_id)
+    if unsupported is not None:
+        return unsupported
     claim = Claim(args.finding_id, args.file, args.line, claim_type,
                   proposition=args.symbol, sink_class=args.sink_class)
-    if claim_type == "taint":
-        return verdict_for_taint(claim)
-    if claim_type == "clock_leak":
-        return verdict_for_clock_leak(claim)
-    return verdict_for_claim(claim, run_pyright(args.file), RULES_BY_CLAIM[claim_type])
+    return backend.settle(claim)
+
+
+#: Which repro runner drives a generated test, by the test file's own extension.
+#: Keyed on the TEST rather than looked up through the language registry, because a
+#: repro is a file the caller wrote -- there is no claim coordinate to resolve, and a
+#: `.rs` test is run by cargo whatever the finding was about.
+_REPRO_RUNNERS = {".py": run_repro, ".rs": run_cargo_repro}
+
+
+def _repro(args) -> Verdict:
+    """Dispatch a repro to the runner for the test file's language.
+
+    An unrecognised extension escalates rather than defaulting to pytest. Handing a
+    `.rs` file to `python -m pytest` yields a collection error, and a collection
+    error is a non-zero exit -- which the pytest runner would then have to tell apart
+    from a genuine failure. Refusing up front is both clearer and safer.
+    """
+    ext = os.path.splitext(args.test)[1].lower()
+    runner = _REPRO_RUNNERS.get(ext)
+    if runner is None:
+        return make_verdict(
+            args.finding_id, "UNCERTAIN",
+            f"no repro runner for a {ext or 'extension-less'} test file "
+            f"({os.path.basename(args.test)}); supported: "
+            f"{', '.join(sorted(_REPRO_RUNNERS))}; escalated", "llm")
+    return runner(args.finding_id, args.test, args.expect_error)
+
+
+def _capabilities(file: str) -> dict:
+    """What this installation can settle about `file`, and what is missing.
+
+    WHY THIS EXISTS. `cca-fp-check.md` is a PROMPT, and it used to enumerate the
+    claim types in prose. That is a copy of the routing table living beside the real
+    one, and the two drift -- the back-compat `definedness` alias below exists
+    because they already did once. With a second language the copy also has to encode
+    which claim types apply to which extension, and a prompt that says "Rust settles
+    panic_path" on a machine with no cargo produces an agent confidently running a
+    check that cannot run.
+
+    So the prompt asks instead. `claim_types` is what the backend declares;
+    `unavailable` names the ones whose tool is missing RIGHT HERE, with the reason.
+    Both are reported, never silently subtracted: an agent that sees `overflow` listed
+    as unavailable knows to escalate it, whereas an agent that never sees it at all
+    cannot tell that from a claim type nobody supports.
+    """
+    backend = languages.resolve(file)
+    if backend is None:
+        return {"file": file, "language": None, "claim_types": [], "unavailable": {},
+                "reason": f"no deterministic backend covers "
+                          f"{languages.extension_of(file) or 'this extension'}"}
+    unavailable = {}
+    check = getattr(backend, "unavailable_claim_types", None)
+    if check is not None:
+        unavailable = check()
+    return {"file": file, "language": backend.name,
+            "claim_types": sorted(backend.claim_types),
+            "unavailable": unavailable}
 
 
 def main(argv=None) -> int:
@@ -104,7 +210,16 @@ def main(argv=None) -> int:
     n.add_argument("--finding-id", required=True)
     n.add_argument("--test", required=True)
 
+    k = sub.add_parser("capabilities",
+                       help="which claim types can be settled about a file, here")
+    k.add_argument("--file", required=True)
+
     a = p.parse_args(argv)
+    if a.cmd == "capabilities":
+        # Not a Verdict: this reports what the installation can do, not what is true
+        # of the code, and giving it a verdict shape would let it be mistaken for one.
+        print(json.dumps(_capabilities(a.file)))
+        return 0
     if a.cmd == "check":
         v = _check(a.claim_type, a)
     elif a.cmd == "definedness":
@@ -112,7 +227,7 @@ def main(argv=None) -> int:
     elif a.cmd == "numeric":
         v = run_properties(a.finding_id, a.test)
     else:
-        v = run_repro(a.finding_id, a.test, a.expect_error)
+        v = _repro(a)
     print(json.dumps(asdict(v)))
     return 0
 

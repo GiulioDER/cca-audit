@@ -113,13 +113,22 @@ hallucination. Refutation bias only helps when the verifier gets evidence the ge
 have. The gate therefore classifies each finding into a *claim type* and settles it with a tool
 wherever one exists:
 
-| Claim type | Settled by | Evidence produced |
-|---|---|---|
-| `definedness`, `nullability`, `type` | `pyright` | the diagnostic, at a resolved `file:line` |
-| `taint` | `semgrep` | sink presence or absence in the enclosing scope |
-| `crash_impact` | a `pytest` repro | a failing test reproducing the predicted error |
-| `numeric` | `hypothesis` | a falsifying example |
-| `semantic` | LLM adjudication | cited facts gathered from source |
+| Claim type | Language | Settled by | Evidence produced |
+|---|---|---|---|
+| `definedness`, `nullability`, `type` | Python | `pyright` | the diagnostic, at a resolved `file:line` |
+| `clock_leak` | Python | `ast` | a dead injected-time parameter beside a wall-clock read |
+| `clock_leak` | Rust | tree-sitter | the same, resolved through `use` aliases |
+| `panic_path`, `overflow`, `error_swallow`, `unsafe_op` | Rust | `clippy` | the diagnostic, with the lint force-enabled over the crate's own config |
+| `taint` | Python, Rust | `semgrep` | sink presence or absence in the enclosing scope |
+| `crash_impact` | Python | a `pytest` repro | a failing test reproducing the predicted error |
+| `numeric` | Python | `hypothesis` | a falsifying example |
+| `semantic` | any | LLM adjudication | cited facts gathered from source |
+
+**The claim vocabulary is per language, not a matrix to be filled in.** Rust has no `definedness`,
+`type` or `nullability` because the code compiled — those would refute by construction. It has
+`panic_path` and `overflow` instead, which is where Rust actually breaks. A claim type a backend
+does not declare escalates rather than being routed to a checker built for another language;
+`python -m cca_checks capabilities --file <F>` reports what is settleable, and what is missing.
 
 The LLM is demoted to adjudicating the residue — whatever no tool could settle. It **may not
 overturn a verdict carrying a tool artifact**: the checker read the code, the model is guessing.
@@ -127,7 +136,10 @@ overturn a verdict carrying a tool artifact**: the checker read the code, the mo
 Each settler concludes only what its evidence supports, so the reachable verdicts differ by tool.
 `semgrep` can prove a sink is absent but never that an injection is real. The `numeric` checker can
 confirm with a counterexample but never refute, because a property holding across a bounded search
-is the absence of a counterexample, not proof of correctness.
+is the absence of a counterexample, not proof of correctness. `clippy` splits the same way *within*
+one tool: `overflow` and `error_swallow` may confirm, because the lint fires on the defect itself,
+while `panic_path` and `unsafe_op` may only refute — a lint sees a `.unwrap()`, not whether it is
+reachable with a value the caller controls.
 
 Full design: [v3-design.md](v3-design.md).
 

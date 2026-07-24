@@ -1,0 +1,162 @@
+# Two-tier sink catalog for Rust. STRICT = vetted sinks; a match means the sink
+# exists. LOOSE = unvetted name heuristics; a match means we may not recognise the
+# sink, so the finding's premise must NOT be refuted.
+# These are plain pattern rules, never taint rules: this file answers only
+# "does a sink of class C occur here".
+#
+# Soundness note, identical to python_sinks.yaml's. Absence from BOTH tiers is the
+# sole trigger for a FALSE_POSITIVE, so this catalog is load-bearing in a way a
+# best-effort list normally is not: every sink missing from it converts a real
+# finding into a decisive refutation. The LOOSE tier is therefore not a second list
+# of known sinks -- it is a name-shaped net whose job is to make an UNRECOGNISED call
+# escalate rather than refute. When adding a sink, prefer widening the loose regex
+# over appending one more strict pattern.
+#
+# A NOTE SPECIFIC TO RUST. semgrep's Rust support is younger than its Python support,
+# and a refutation here rests on semgrep's SILENCE. A file semgrep failed to parse
+# looks exactly like a file with no sinks in it. `semgrep_check.parse_control_rules`
+# is the positive control that closes that gap: a rule that must match any Rust file
+# with a function in it. If the control does not fire, the scan proves nothing and
+# the checker escalates instead of refuting.
+rules:
+  - id: sink-strict-sql
+    languages: [rust]
+    severity: INFO
+    message: vetted sql sink
+    patterns:
+      - pattern-either:
+          - pattern: sqlx::query(...)
+          - pattern: sqlx::query_as(...)
+          - pattern: sqlx::query_scalar(...)
+          - pattern: sqlx::raw_sql(...)
+          - pattern: diesel::sql_query(...)
+          - pattern: $C.execute($Q, ...)
+          - pattern: $C.query($Q, ...)
+          - pattern: $C.query_one($Q, ...)
+          - pattern: $C.query_opt($Q, ...)
+          - pattern: $C.query_raw($Q, ...)
+          - pattern: $C.batch_execute(...)
+          - pattern: $C.execute_batch(...)
+          - pattern: $C.prepare($Q)
+          - pattern: $C.execute_unprepared(...)
+
+  - id: sink-loose-sql
+    languages: [rust]
+    severity: INFO
+    message: possible unvetted sql sink
+    patterns:
+      - pattern-either:
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          # Deliberately excludes bare `get`/`find`/`load`: those are ORM accessor
+          # names, and an ORM call that never builds raw SQL is the canonical false
+          # premise the checker exists to refute. Widening onto them would make the
+          # refutation path unreachable, trading a false refutation for a useless tool.
+          regex: (?i)^(.*::)?(sql|raw_sql|sql_query|query_raw|execute_sql|run_query|raw_query|exec_sql)$
+
+  - id: sink-strict-command
+    languages: [rust]
+    severity: INFO
+    message: vetted command sink
+    patterns:
+      - pattern-either:
+          - pattern: std::process::Command::new(...)
+          - pattern: Command::new(...)
+          - pattern: tokio::process::Command::new(...)
+          - pattern: $C.arg(...)
+          - pattern: $C.args(...)
+          - pattern: std::process::abort(...)
+
+  - id: sink-loose-command
+    languages: [rust]
+    severity: INFO
+    message: possible unvetted command sink
+    patterns:
+      - pattern-either:
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: (?i)^(.*::)?(exec|execve|execvp|spawn_shell|shell|system|popen|run_command|exec_command)$
+
+  - id: sink-strict-code_exec
+    languages: [rust]
+    severity: INFO
+    message: vetted code-execution sink
+    patterns:
+      - pattern-either:
+          # Dynamic loading is Rust's closest analogue of eval: it runs code chosen
+          # at runtime, and the path is frequently caller-influenced.
+          - pattern: libloading::Library::new(...)
+          - pattern: Library::new(...)
+          - pattern: libloading::os::unix::Library::open(...)
+          - pattern: libloading::os::windows::Library::new(...)
+          - pattern: dlopen(...)
+          - pattern: std::mem::transmute(...)
+
+  - id: sink-loose-code_exec
+    languages: [rust]
+    severity: INFO
+    message: possible unvetted code-execution sink
+    patterns:
+      - pattern-either:
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: (?i)^(.*::)?(eval|eval_str|exec_str|load_library|dlsym|get_symbol|from_raw_parts|transmute.*)$
+
+  - id: sink-strict-path
+    languages: [rust]
+    severity: INFO
+    message: vetted path sink
+    patterns:
+      - pattern-either:
+          - pattern: std::fs::File::open(...)
+          - pattern: std::fs::File::create(...)
+          - pattern: File::open(...)
+          - pattern: File::create(...)
+          - pattern: std::fs::read(...)
+          - pattern: std::fs::read_to_string(...)
+          - pattern: std::fs::write(...)
+          - pattern: std::fs::remove_file(...)
+          - pattern: std::fs::remove_dir_all(...)
+          - pattern: std::fs::rename(...)
+          - pattern: std::fs::copy(...)
+          - pattern: fs::read_to_string(...)
+          - pattern: fs::write(...)
+          - pattern: fs::remove_file(...)
+          - pattern: fs::remove_dir_all(...)
+          - pattern: tokio::fs::read(...)
+          - pattern: tokio::fs::write(...)
+          - pattern: $P.join(...)
+          - pattern: $P.push(...)
+
+  - id: sink-loose-path
+    languages: [rust]
+    severity: INFO
+    message: possible unvetted path sink
+    patterns:
+      - pattern-either:
+          - pattern: $F(...)
+          - pattern: $C.$F(...)
+      - metavariable-regex:
+          metavariable: $F
+          regex: (?i)^(.*::)?(open|create|create_new|read_dir|read_link|canonicalize|symlink|hard_link|open_file|write_file|read_file)$
+
+  # --- the positive control ----------------------------------------------------
+  # NOT a sink. This rule must match ANY Rust file containing a function, and it
+  # exists so that "semgrep matched nothing" can be told apart from "semgrep could
+  # not read this file". Only the first licenses a refutation. See
+  # `semgrep_check.CONTROL_RULE` for how the verdict path uses it.
+  - id: parse-control
+    languages: [rust]
+    severity: INFO
+    message: parse control -- a function item was recognised in this file
+    pattern-either:
+      - pattern: |
+          fn $NAME(...) { ... }
+      - pattern: |
+          fn $NAME(...) -> $RET { ... }

@@ -83,6 +83,27 @@ mechanically via `python -m cca_checks` where a tool covers the claim_type, othe
 cited-fact adjudication — rather than by re-reading the finding text. For each P1/P2 finding,
 run TWO phases in order:
 
+**Phase 0 — ask what can be settled here.** The claim types available depend on the file's
+LANGUAGE and on which tools are installed on THIS machine. Do not infer either from the sections
+below — run:
+
+```
+python -m cca_checks capabilities --file <FILE>
+→ {"language": "rust",
+   "claim_types": ["clock_leak", "error_swallow", "overflow", "panic_path", "taint", "unsafe_op"],
+   "unavailable": {"overflow": "cargo is not on PATH, so clippy cannot run"}}
+```
+
+Classify the finding into one of the returned `claim_types`. A claim type listed under
+`unavailable` **cannot** be settled here: mark it UNCERTAIN with that reason as the evidence and
+adjudicate in Phase 2 — never report it as refuted. `"language": null` means no deterministic
+backend covers the file at all; every finding in it goes to Phase 2.
+
+> **Why this is a command and not a table.** A table here is a copy of the routing logic that
+> lives in the package, and copies drift — this file is *copied* into `.claude/agents/` while
+> `cca_checks` is *pip-installed*. Worse, a table cannot know whether `cargo` exists on the machine
+> you are running on, so it would have you confidently run a check that cannot run.
+
 **Phase 1 — mechanical (preferred).** Classify the finding into a claim_type, then:
 
 - **`definedness`** — the finding asserts a name/import does not resolve.
@@ -198,10 +219,66 @@ run TWO phases in order:
   call the raw internal function), predicting the impact, THEN:
   `python -m cca_checks repro --finding-id <ID> --test t_<ID>.py --expect-error <ErrorType>`
 
+### Rust claim types
+
+Reported by `capabilities` for a `.rs` file. **`definedness`, `type` and `nullability` do not
+exist here, and their absence is deliberate** — in Rust those defects do not survive to review,
+because the code compiled: the name resolved, the types checked, and `Option` is not a nullable
+pointer you can dereference by accident. A finding that claims one of them about Rust code is
+almost always really a `panic_path` or an `overflow` claim; reclassify it rather than forcing it.
+
+Every command is the same shape as the Python ones:
+`python -m cca_checks check --claim-type <TYPE> --finding-id <ID> --file <FILE> --line <LINE>`
+
+- **`clock_leak`** — as for Python, settled from the syntax tree via tree-sitter, resolving
+  through `use` aliases. Wall clock: `SystemTime::now()`, `Utc::now()`, `Local::now()`,
+  `OffsetDateTime::now_utc()`. `Instant::now()` is monotonic — it raises the question, never
+  settles it.
+- **`panic_path`** — the finding asserts a call can panic on caller-controlled input:
+  `.unwrap()`, `.expect()`, slice indexing, division. **Never returns CONFIRMED.** A lint sees
+  the construct, not whether it is *reachable* — `.unwrap()` on a value constructed two lines
+  above is correct code. A `FALSE_POSITIVE` means no panicking construct exists anywhere in the
+  enclosing scope, with the lint force-enabled over the crate's own config; honour it. Anything
+  else adjudicates, or is confirmed by a repro that actually panics.
+- **`overflow`** — the finding asserts arithmetic can overflow: raw `+`/`-`/`*` on a money path
+  where `checked_*`/`saturating_*` is required, or a lossy `as` cast. **May CONFIRM**, because
+  the lint fires on the defect itself.
+- **`error_swallow`** — the finding asserts a `Result` is discarded: `let _ = fallible();`,
+  a dropped `#[must_use]`, `.ok();` in statement position. **May CONFIRM.**
+- **`unsafe_op`** — the finding asserts an `unsafe` block's invariant is undocumented or
+  unsound. **Never returns CONFIRMED**; soundness is not decidable from a lint.
+- **`taint`** — as for Python, with a Rust sink catalog. Same asymmetry: refutes a false
+  premise, never confirms.
+
+**Confirming a Rust `panic_path` or `overflow` needs a repro that actually panics.** Write an
+integration test into the crate's own `tests/` directory — `<crate>/tests/t_<ID>.rs` — driving the
+code through its **public entry point** (respect validators; never call a private helper directly),
+then:
+
+```
+python -m cca_checks repro --finding-id <ID> --test <crate>/tests/t_<ID>.rs --expect-error "attempt to multiply with overflow"
+```
+
+`--expect-error` is the **panic message**, not an error type: Rust panics carry text, not exception
+classes. The runner builds with `--no-run` first and escalates if the crate does not compile, so a
+build failure can never be read as a reproduction. Delete the test file afterwards, as for pytest.
+
+> **Debug panics, release wraps.** `cargo test` builds in debug, where integer overflow panics. In
+> release it wraps silently, and no debug repro can demonstrate that. If the finding is about the
+> wrapping behaviour specifically, say so in the evidence rather than implying the artifact covers it.
+
+**An `UNCERTAIN` naming clippy is not a refutation.** "clippy could not run (cargo missing, no
+Cargo.toml, build failed, or nothing was compiled)" means the crate did not build or the
+toolchain is absent — investigate; do not drop the finding. A crate that does not compile
+produces no lint diagnostics at all, which reads exactly like a clean crate.
+
+**An `UNCERTAIN` saying "the parse control did not fire" means semgrep scanned the file but did
+not understand it** — its silence about sinks is not evidence of absence. Same handling.
+
 Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
 temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
 that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`,
-`pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
+`clippy`, `ast`, `pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
 `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit `source: llm`.
 
 **Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.

@@ -126,6 +126,81 @@ Add your auditor's scope to `docs/auditor-scopes.md` and ensure no overlap with 
 > which tiers run it. Auditors should return findings as the canonical JSON schema (see the Findings
 > Schema section of `audit-fix.md`) — that return value is what the orchestrator consumes.
 
+## Adding a Language Backend
+
+Auditors are language-agnostic prose. The **deterministic** layer is not: a checker's silence is
+what licenses a `FALSE_POSITIVE`, so it may only ever be pointed at a language it can actually read.
+`cca_checks/languages/` enforces that structurally.
+
+### 1. Write the backend
+
+Create `cca_checks/languages/<lang>.py` satisfying the `LanguageBackend` protocol in
+`languages/base.py`:
+
+```python
+class GoBackend:
+    name = "go"
+    extensions = frozenset({".go"})       # lower-case, dot-prefixed
+    claim_types = frozenset({"clock_leak", "taint"})
+
+    def enclosing_span(self, path, line_1based): ...   # 1-indexed, inclusive
+    def settle(self, claim): ...                       # -> Verdict
+
+    # Optional:
+    def semgrep_catalog(self, kind): return f"go_{kind}.yaml"
+    def unavailable_claim_types(self): return {}       # tool missing HERE, with reason
+```
+
+`claim_types` is a **positive list**. A claim type is unsupported by your backend until you opt in,
+which is the safe default — a backend that forgot one escalates rather than routing the claim to a
+checker built for another language.
+
+### 2. Register it
+
+Add it to `BACKENDS` in `cca_checks/languages/__init__.py`. That is the only place. The CLI's
+`--claim-type` choices, the `capabilities` output, and the catalog tests are all derived from the
+registry; a hand-maintained list beside it is how the two drift.
+
+### 3. Choose the claim vocabulary for that language, not Python's
+
+**Do not port the six Python claim types by reflex.** Rust deliberately has no `definedness`,
+`type` or `nullability`: the code compiled, so those refute by construction and would double the
+vocabulary while settling nothing new. Ask instead what a verdict can carry information about in
+*this* language, and name the claim types after that.
+
+### 4. Decide what may CONFIRM, and what may only REFUTE
+
+The asymmetry is per claim type, and it follows one rule: **does the tool see the defect, or a
+possibility?** A clippy `let_underscore_must_use` fires on the defect itself, so `error_swallow` may
+confirm. A `clippy::unwrap_used` fires on a construct that may or may not be reachable, so
+`panic_path` may only refute — mirroring `taint`, where semgrep flags safely-parameterized calls.
+Confirmations for those come from a repro that actually reproduces.
+
+### 5. State what your tool cannot see, and make it block refutation
+
+Every backend has blind spots. They are handled the same way: the conditions under which the tool
+could be hiding something must **escalate**, never pass silently. The Rust backend blocks
+`FALSE_POSITIVE` on a glob `use` from a time crate and on any macro invocation in scope, because
+tree-sitter cannot expand macros. If your tool needs the project to build, an un-buildable project
+is `UNCERTAIN` everywhere.
+
+If the audited project controls a suppression mechanism your tool honours, **disable it** —
+`--force-warn` for clippy, `enableTypeIgnoreComments: false` for pyright, `--disable-nosem` for
+semgrep. The auditor must control the configuration its refutations rest on; the audited repo must
+not.
+
+### 6. Fixtures, and CI
+
+Fixture line numbers are the test contract. Disable the language's formatter in the fixture
+directory (`rustfmt.toml`'s `disable_all_formatting`, mirroring ruff's `extend-exclude`), and pin
+the coordinates in `tests/test_fixture_contract.py`.
+
+If your tests gate on an external binary via `shutil.which(...)`, **ci.yml must install it**.
+`tests/test_ci_contract.py` asserts that invariant: a test that skips on every CI run is worse than
+no test, because it looks like coverage.
+
+Then add the honest limits to `README.md` — and, per this repo's convention, a test for each.
+
 ## Design Principles
 
 1. **Non-overlapping scopes**: Every check belongs to exactly one auditor

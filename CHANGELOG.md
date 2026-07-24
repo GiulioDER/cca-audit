@@ -8,7 +8,103 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
-Nothing yet.
+- **The pipeline checkers moved into the repo and now ship.** `cca_scorecard.py` (Step 2.6) and
+  `cca_tautology_check.py` (Step 5.6) lived in a separate private repository and reached
+  `~/.claude/tools/` only by a hand-run `cp`. They are now package data under
+  `cca_checks/plugin/tools/`, alongside the agents and commands, and both installers copy them.
+  **This fixes a silent shipped failure:** the installers wrote agents and commands but no tools,
+  while `audit-fix.md` referenced `$HOME/.claude/tools/cca_*.py` — paths nothing in the install
+  path ever created. On every machine but the author's, Steps 2.6 and 5.6 were `command not
+  found`, and the pipeline reported no scorecard and no red-state proof without saying why. The
+  call sites now resolve `.claude/tools/` first and fall back to `$HOME/.claude/tools/`.
+
+- **`resolve_tool` launches analyzers by the path found, not its `realpath`.** Resolving the
+  symlink breaks every multi-call binary — the ones that dispatch on `argv[0]` rather than on
+  their own inode. `~/.cargo/bin/cargo` is a symlink to `rustup`, so the resolved launch ran
+  rustup with cargo's arguments (`error: unexpected argument '--manifest-path'`) and 9 Rust tests
+  failed in CI. It passed locally only because Windows `cargo.EXE` is a real binary. In
+  production the failure would have been quieter than a red suite: every Rust claim escalating to
+  `UNCERTAIN` for a reason unrelated to the code under audit.
+
+  The same change closes a second hole. The old check tested only `dirname(realpath(found))`, so
+  a symlink **planted in the audited repo root** and pointed at a genuine system binary was
+  accepted — and whoever controls the repo controls where it points next. Both the link's own
+  location and its target are now disqualifying.
+
+  `resolve_tool` had no direct coverage at all — every caller monkeypatches it away, which is how
+  both defects shipped. `tests/test_toolpath.py` is new, and its two regression tests were
+  confirmed red against the previous implementation.
+
+- **`audit-fix.md` reconciled.** The deployed prompt and the repo copy had each gained changes the
+  other lacked, so the orchestrator — where the L2.5 gate semantics live — was versioned nowhere
+  current. Merged three-way against master with no conflicts, purely additive.
+
+- **v3.3 — the language backend layer, and Rust on it.** `cca_checks/languages/` resolves a backend
+  by file extension **once**, before any checker runs. An uncovered language, or a claim type the
+  covering backend does not declare, returns `UNCERTAIN` — it can no longer reach a checker whose
+  silence would be read as evidence.
+
+  **This closed a live defect.** The Python-only assumption was enforced in two of the five claim
+  types: `clock_check` and `semgrep_check` tested `.endswith(".py")`, `type`/`nullability` failed
+  closed only by accident (the blindness probe escalates when `ast.parse` chokes on non-Python), and
+  `definedness` — exempt from that probe by `TYPE_DEPENDENT_CLAIMS` — had no guard at all. pyright
+  parses a `.rs` file as Python, reports nothing under `DEFINEDNESS_RULES`, and
+  `verdict_for_claim` fell through to a confident `FALSE_POSITIVE` carrying `source: pyright`. That
+  artifact may not be overturned downstream, so a real defect was dropped and the file closed on it.
+
+- **Rust claim types, chosen for Rust rather than ported from Python.** `definedness`, `type` and
+  `nullability` are deliberately absent: the code compiled, so they would refute by construction.
+  Shipped instead:
+
+  | claim | settler | confirms? |
+  |---|---|---|
+  | `clock_leak` | tree-sitter | yes — a dead strong clock parameter beside a wall-clock read |
+  | `overflow` | clippy | yes — the lint fires on the defect itself |
+  | `error_swallow` | clippy | yes |
+  | `panic_path` | clippy | **no** — a lint sees the construct, not its reachability |
+  | `unsafe_op` | clippy | **no** |
+  | `taint` | semgrep + a Rust catalog | **no** (as for Python) |
+
+- **clippy is the analogue of pyright, not of `ast`, and its blindness is different.** Never
+  type-blind (the crate compiled), but **lint**-blind: every lint used is allow-by-default. They are
+  force-enabled with `--force-warn`, which overrides the crate's own `#![allow]`, `clippy.toml` and
+  `[lints]` table — the direct analogue of `enableTypeIgnoreComments: false`. Cargo **freshness** is
+  the analogue of `summary.filesAnalyzed`: a dedicated target directory (never the audited crate's)
+  plus a `build-finished` assertion, so a build that reported nothing because it did nothing cannot
+  read as a clean crate.
+
+- **A parse control for the Rust sink catalog.** semgrep's Rust support is younger than its Python
+  support and a refutation rests on its silence; a file it failed to parse is scanned, reported
+  without errors, and matches nothing — indistinguishable from a file with no sinks. `rust_sinks.yaml`
+  ships a `parse-control` rule that must match any file containing a function; if it does not fire,
+  the checker escalates instead of refuting. Opt-in per catalog, so Python behaviour is unchanged.
+
+- **A Rust repro runner** (`cargo_repro.py`), which is the only way `panic_path` can be CONFIRMED at
+  all — clippy sees the construct, not its reachability. `python -m cca_checks repro --test
+  <crate>/tests/t_<ID>.rs --expect-error "<panic message>"` builds with `--no-run` **first** and
+  escalates if the crate does not compile, so a build failure cannot be read as a reproduction:
+  `cargo test` exits non-zero for both, and confirmation only requires the predicted string to
+  appear in the output. `repro` now dispatches on the test file's extension, and an unrecognised one
+  escalates rather than defaulting to pytest.
+
+- **`python -m cca_checks capabilities --file <F>`** reports which claim types can be settled about a
+  file *on this machine*, and names the tool missing for any that cannot. `cca-fp-check.md` and
+  `audit-fix.md` now ask it rather than carrying a routing table that drifts from the package.
+
+- **New optional extra `[rust]`** (`tree-sitter`, `tree-sitter-rust`), also in `[verify]` and
+  `[dev]`. The grammar is the *parser* only — clippy belongs to the target's toolchain and cannot be
+  pip-installed — so `clock_leak` and span resolution keep working on a crate that does not build.
+  New knob `CCA_RUST_TIMEOUT_S` (default 600): a cold cargo build routinely exceeds `CCA_TIMEOUT_S`.
+
+- Three defects the fixtures caught in this code, all failing safe and therefore silent: the trailing
+  segment of a scoped path counted as a use of a same-named parameter (making `CONFIRMED` unreachable
+  for `fn f(now) { Utc::now() }`); cargo span paths are relative to the manifest, not to cwd, so every
+  diagnostic was unplaceable; and a sibling module's diagnostic was read as "unlocatable", which made
+  one `unwrap` anywhere in a crate block every refutation in every file.
+
+- Python behaviour is unchanged. The existing suite passes with no assertion edited; the patch targets
+  in `test_cli.py` and `test_selfaudit_hardening.py` follow the dispatch from `__main__` to the
+  backend module.
 
 ## [0.7.1] - 2026-07-24
 

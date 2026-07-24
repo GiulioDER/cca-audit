@@ -1,0 +1,18 @@
+[package]
+name = "cca_rust_fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# No dependencies on purpose. The clock-leak checker resolves `use chrono::Utc`
+# from the SYNTAX TREE and never compiles the crate, so adding chrono would buy
+# nothing and would put a network fetch in the path of a parser test. The clippy
+# backend's fixtures (which do have to compile) live in their own crate for the
+# same reason: a fixture that cannot build is a fixture that silently skips.
+[dependencies]
+
+# Every lint the clippy backend force-warns is allow-by-default, and this crate
+# deliberately trips several of them. Left at the default, `cargo clippy` on the
+# workspace would be noisy for reasons unrelated to what is under test.
+[lints.clippy]
+all = "allow"

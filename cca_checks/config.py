@@ -16,6 +16,7 @@ import math
 import os
 
 _DEFAULT_TIMEOUT_S = 120
+_DEFAULT_RUST_TIMEOUT_S = 600
 _DEFAULT_MAX_EXAMPLES = 200
 _DEFAULT_SUBSTRATE_TOL = 1e-9
 _DEFAULT_SUBSTRATE_DPS = 50
@@ -87,6 +88,15 @@ def _positive_float(name: str, default: float,
 
 # Wall-clock ceiling for every external tool invocation (pyright, semgrep, pytest).
 TIMEOUT_S = _positive_int("CCA_TIMEOUT_S", _DEFAULT_TIMEOUT_S)
+
+# The same ceiling for cargo, which needs its own because it is not the same kind of
+# operation. pyright and semgrep analyse a file; `cargo clippy` COMPILES a crate and
+# every dependency it has, from a cold target directory (see clippy_check on why the
+# directory must be cold). Two minutes is generous for the former and routinely too
+# short for the latter, and a timeout maps to UNCERTAIN -- so an under-set ceiling
+# does not fail loudly, it silently deletes deterministic coverage for exactly the
+# large crates where it is worth most.
+RUST_TIMEOUT_S = _positive_int("CCA_RUST_TIMEOUT_S", _DEFAULT_RUST_TIMEOUT_S)
 
 # How many examples Hypothesis generates per property.
 MAX_EXAMPLES = _positive_int("CCA_MAX_EXAMPLES", _DEFAULT_MAX_EXAMPLES)
