@@ -8,6 +8,19 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+- **Corrected three stale figures in the README**, which is also the PyPI project description.
+  The tests badge said 610 while the Engineering table said 378 — the same fact stated twice, in
+  disagreement, on the published page. The intro said "Ten specialised auditors" while the Core and
+  Conditional tables listed eleven (Deployability was added and the prose was not). The design of
+  record was described as "v3.0 → v3.5" though `docs/v3-design.md` documents through v3.6.
+- **`tests/test_readme_counts_are_consistent.py`** so those two counts cannot silently diverge
+  again. It asserts internal consistency, not correctness: the true test count depends on
+  collection and the auditor set is defined by prompt files, so neither is checkable against ground
+  truth from a test — but "the page must not contradict itself" is, and that is exactly what
+  failed. Both checks were confirmed red against the pre-fix README and green after, and a third
+  test exercises the detection path so a regex that stopped matching cannot leave them green on a
+  self-contradicting page.
+
 - **The pipeline checkers moved into the repo and now ship.** `cca_scorecard.py` (Step 2.6) and
   `cca_tautology_check.py` (Step 5.6) lived in a separate private repository and reached
   `~/.claude/tools/` only by a hand-run `cp`. They are now package data under
