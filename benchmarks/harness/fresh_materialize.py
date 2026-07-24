@@ -51,6 +51,7 @@ def safe(bug):
 def main():
     man = json.load(open(MAN, encoding="utf-8"))
     tasks, bugs = [], {}
+    excluded, dropped_files = [], []
     for c in man:
         org_repo, fixed, bug = c["org_repo"], c["merge_commit_sha"], c["bug"]
         cj, err = gh([f"repos/{org_repo}/commits/{fixed}"])
@@ -80,24 +81,53 @@ def main():
                           for s in ("import numpy", "import math", "from math", "np."))
             bw = [[h["old_start"], h["old_start"] + max(h["old_len"], 1) - 1] for h in hs]
             fw = [[h["new_start"], h["new_start"] + max(h["new_len"], 1) - 1] for h in hs]
-            bugs[bug]["files"][path] = {"buggy_windows": bw, "fixed_windows": fw}
+            # Index the file ONLY if both versions were fetched. The index is the
+            # scorer's denominator, so a file no auditor was ever shown must not
+            # sit in it: it can never be caught, and counting it turns a fetch
+            # failure into a recall penalty against the tool. The commonest cause
+            # is not a transient error but a structural one -- a fix that CREATES
+            # a file has no buggy version to audit, which is exactly what
+            # bartfeenstra/betty#4027 ("Add missing __init__.py files") is.
             if "buggy" in contents and "fixed" in contents:
+                bugs[bug]["files"][path] = {"buggy_windows": bw, "fixed_windows": fw}
                 tasks.append({
                     "bug": bug, "project": org_repo, "file": path, "numeric": numeric,
                     "buggy_path": os.path.join(out, "buggy", path.replace("/", os.sep)).replace("\\", "/"),
                     "fixed_path": os.path.join(out, "fixed", path.replace("/", os.sep)).replace("\\", "/"),
                 })
+            else:
+                dropped_files.append(f"{bug}::{path}")
+        # groundtruth.json keeps the FULL fix for the record; only the scoring
+        # index is narrowed. The two answer different questions.
         gt = {"project": org_repo, "bug": bug, "org_repo": org_repo,
               "buggy_commit": parent, "fixed_commit": fixed, "pr": c["pr"],
               "stars": c["stars"], "title": c["title"], "files": files}
         json.dump(gt, open(os.path.join(out, "groundtruth.json"), "w"), indent=2)
         tot = sum(h["new_len"] for hs in files.values() for h in hs)
-        print(f"{bug:<42} src={len(files)} fixlines={tot} errs={errs}")
+        if not bugs[bug]["files"]:
+            # Every file unfetchable => the bug is uncatchable by construction.
+            # Excluding it LOUDLY: a silently-dropped bug and a missed bug are the
+            # same number in the denominator and opposite facts about the tool.
+            del bugs[bug]
+            excluded.append(bug)
+            print(f"EXCLUDED {bug:<42} no auditable file (all {len(files)} unfetchable)")
+            continue
+        partial = "" if len(bugs[bug]["files"]) == len(files) else \
+            f"  PARTIAL {len(bugs[bug]['files'])}/{len(files)} files auditable"
+        print(f"{bug:<42} src={len(files)} fixlines={tot} errs={errs}{partial}")
 
     json.dump(tasks, open(os.path.join(BASE, "harness", "tasks_fresh_wf.json"), "w"), indent=2)
     json.dump(bugs, open(os.path.join(BASE, "harness", "bugs_fresh_index.json"), "w"), indent=2)
+    # Written, not just printed: the exclusions are part of how the denominator
+    # was arrived at, and a reader of the results has to be able to see them
+    # without re-running anything.
+    json.dump({"excluded_bugs": excluded, "dropped_files": dropped_files},
+              open(os.path.join(BASE, "harness", "fresh_exclusions.json"), "w"), indent=2)
     print(f"\n{len(tasks)} file-tasks across {len(bugs)} bugs "
           f"({sum(t['numeric'] for t in tasks)} numeric)")
+    if excluded or dropped_files:
+        print(f"excluded {len(excluded)} bug(s), dropped {len(dropped_files)} unfetchable file(s) "
+              f"-> harness/fresh_exclusions.json")
 
 
 if __name__ == "__main__":

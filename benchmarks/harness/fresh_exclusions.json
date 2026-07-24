@@ -1,0 +1,9 @@
+{
+  "excluded_bugs": [
+    "bartfeenstra/betty#4027"
+  ],
+  "dropped_files": [
+    "bartfeenstra/betty#4027::betty/plugins/document_provider/__init__.py",
+    "deepmodeling/deepmd-kit#5351::deepmd/pt/utils/safe_gradient.py"
+  ]
+}

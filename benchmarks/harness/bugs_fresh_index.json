@@ -1,199 +1,395 @@
 {
-  "neuml/txtai#1125": {
-    "project": "neuml/txtai",
+  "AOSSIE-Org/PictoPy#1380": {
+    "project": "AOSSIE-Org/PictoPy",
     "files": {
-      "src/python/txtai/database/sql/expression.py": {
+      "backend/app/database/folders.py": {
         "buggy_windows": [
           [
-            202,
-            207
+            30,
+            35
           ],
           [
-            224,
-            230
+            402,
+            408
           ],
           [
-            263,
-            269
+            422,
+            427
           ],
           [
-            291,
-            297
+            454,
+            456
           ]
         ],
         "fixed_windows": [
           [
-            202,
-            232
+            30,
+            36
           ],
           [
-            249,
-            255
+            403,
+            409
           ],
           [
-            288,
-            294
+            423,
+            429
           ],
           [
-            316,
-            322
-          ]
-        ]
-      }
-    }
-  },
-  "allaboutduncan/clu-comics#389": {
-    "project": "allaboutduncan/clu-comics",
-    "files": {
-      "app.py": {
-        "buggy_windows": [
-          [
-            687,
-            698
-          ],
-          [
-            2360,
-            2365
-          ]
-        ],
-        "fixed_windows": [
-          [
-            687,
-            701
-          ],
-          [
-            2363,
-            2370
+            456,
+            475
           ]
         ]
       },
-      "helpers/collection.py": {
+      "backend/app/routes/folders.py": {
         "buggy_windows": [
           [
-            46,
-            51
+            10,
+            15
           ],
           [
-            115,
-            120
-          ]
-        ],
-        "fixed_windows": [
+            61,
+            66
+          ],
           [
-            46,
+            70,
+            75
+          ],
+          [
+            78,
             87
           ],
           [
-            151,
-            162
+            460,
+            465
+          ],
+          [
+            470,
+            475
+          ]
+        ],
+        "fixed_windows": [
+          [
+            10,
+            16
+          ],
+          [
+            62,
+            68
+          ],
+          [
+            72,
+            79
+          ],
+          [
+            82,
+            96
+          ],
+          [
+            469,
+            475
+          ],
+          [
+            480,
+            486
+          ]
+        ]
+      },
+      "backend/app/schemas/folders.py": {
+        "buggy_windows": [
+          [
+            31,
+            36
+          ]
+        ],
+        "fixed_windows": [
+          [
+            31,
+            39
           ]
         ]
       }
     }
   },
-  "pallets/click#3678": {
-    "project": "pallets/click",
+  "FlexMeasures/flexmeasures#2341": {
+    "project": "FlexMeasures/flexmeasures",
     "files": {
-      "src/click/core.py": {
+      "flexmeasures/app.py": {
         "buggy_windows": [
           [
-            55,
-            60
-          ],
-          [
-            1119,
-            1124
-          ],
-          [
-            1153,
-            1158
-          ],
-          [
-            1169,
-            1176
+            184,
+            199
           ]
         ],
         "fixed_windows": [
           [
-            55,
-            64
-          ],
+            184,
+            190
+          ]
+        ]
+      },
+      "flexmeasures/utils/config_utils.py": {
+        "buggy_windows": [
           [
-            1123,
-            1159
-          ],
+            212,
+            241
+          ]
+        ],
+        "fixed_windows": [
           [
-            1188,
-            1198
-          ],
-          [
-            1209,
-            1218
+            212,
+            265
           ]
         ]
       }
     }
   },
-  "sktime/pytorch-forecasting#2257": {
-    "project": "sktime/pytorch-forecasting",
+  "HKUDS/nanobot#4665": {
+    "project": "HKUDS/nanobot",
     "files": {
-      "pytorch_forecasting/models/deepar/_deepar.py": {
+      "nanobot/agent/loop.py": {
         "buggy_windows": [
           [
-            141,
-            150
+            862,
+            867
           ]
         ],
         "fixed_windows": [
           [
-            141,
-            149
+            862,
+            881
           ]
         ]
       }
     }
   },
-  "inventree/InvenTree#12332": {
-    "project": "inventree/InvenTree",
+  "LLMQuant/quant-mind#124": {
+    "project": "LLMQuant/quant-mind",
     "files": {
-      "src/backend/InvenTree/InvenTree/serializers.py": {
+      "quantmind/preprocess/pr_newswire.py": {
         "buggy_windows": [
           [
-            822,
-            830
+            27,
+            32
+          ],
+          [
+            560,
+            568
+          ],
+          [
+            688,
+            703
           ]
         ],
         "fixed_windows": [
           [
-            822,
-            834
+            27,
+            33
+          ],
+          [
+            561,
+            570
+          ],
+          [
+            690,
+            695
           ]
         ]
       }
     }
   },
-  "pytroll/satpy#3367": {
-    "project": "pytroll/satpy",
+  "LearningCircuit/local-deep-research#1879": {
+    "project": "LearningCircuit/local-deep-research",
     "files": {
-      "satpy/readers/nwcsaf_nc.py": {
+      "src/local_deep_research/utilities/type_utils.py": {
         "buggy_windows": [
           [
-            43,
-            48
-          ],
-          [
-            405,
-            429
+            47,
+            53
           ]
         ],
         "fixed_windows": [
           [
-            43,
-            50
+            47,
+            55
+          ]
+        ]
+      }
+    }
+  },
+  "MDAnalysis/mdanalysis#5374": {
+    "project": "MDAnalysis/mdanalysis",
+    "files": {
+      "package/MDAnalysis/coordinates/TPR.py": {
+        "buggy_windows": [
+          [
+            127,
+            134
+          ]
+        ],
+        "fixed_windows": [
+          [
+            127,
+            138
+          ]
+        ]
+      }
+    }
+  },
+  "NVIDIA-NeMo/Megatron-Bridge#5043": {
+    "project": "NVIDIA-NeMo/Megatron-Bridge",
+    "files": {
+      "scripts/performance/run_script.py": {
+        "buggy_windows": [
+          [
+            61,
+            66
+          ]
+        ],
+        "fixed_windows": [
+          [
+            61,
+            72
+          ]
+        ]
+      }
+    }
+  },
+  "NVIDIA/TensorRT-LLM#14297": {
+    "project": "NVIDIA/TensorRT-LLM",
+    "files": {
+      "tensorrt_llm/_torch/attention_backend/sparse/dsa.py": {
+        "buggy_windows": [
+          [
+            99,
+            111
           ],
           [
-            407,
-            462
+            884,
+            889
+          ],
+          [
+            2371,
+            2377
+          ]
+        ],
+        "fixed_windows": [
+          [
+            99,
+            125
+          ],
+          [
+            898,
+            931
+          ],
+          [
+            2413,
+            2421
+          ]
+        ]
+      },
+      "tensorrt_llm/_torch/custom_ops/cpp_custom_ops.py": {
+        "buggy_windows": [
+          [
+            221,
+            227
+          ]
+        ],
+        "fixed_windows": [
+          [
+            221,
+            229
+          ]
+        ]
+      }
+    }
+  },
+  "NeuralEnsemble/PyNN#839": {
+    "project": "NeuralEnsemble/PyNN",
+    "files": {
+      "pyNN/standardmodels/base.py": {
+        "buggy_windows": [
+          [
+            188,
+            197
+          ]
+        ],
+        "fixed_windows": [
+          [
+            188,
+            199
+          ]
+        ]
+      }
+    }
+  },
+  "Ostorlab/oxo#1024": {
+    "project": "Ostorlab/oxo",
+    "files": {
+      "src/ostorlab/utils/definitions.py": {
+        "buggy_windows": [
+          [
+            60,
+            69
+          ]
+        ],
+        "fixed_windows": [
+          [
+            60,
+            67
+          ]
+        ]
+      }
+    }
+  },
+  "PlasmaPy/PlasmaPy#3216": {
+    "project": "PlasmaPy/PlasmaPy",
+    "files": {
+      "src/plasmapy/formulary/frequencies.py": {
+        "buggy_windows": [
+          [
+            198,
+            204
+          ],
+          [
+            216,
+            222
+          ],
+          [
+            330,
+            336
+          ]
+        ],
+        "fixed_windows": [
+          [
+            198,
+            204
+          ],
+          [
+            216,
+            222
+          ],
+          [
+            330,
+            336
+          ]
+        ]
+      }
+    }
+  },
+  "SciTools/iris#7197": {
+    "project": "SciTools/iris",
+    "files": {
+      "lib/iris/fileformats/pp_save_rules.py": {
+        "buggy_windows": [
+          [
+            169,
+            175
+          ]
+        ],
+        "fixed_windows": [
+          [
+            169,
+            175
           ]
         ]
       }
@@ -226,72 +422,350 @@
       }
     }
   },
-  "pyinfra-dev/pyinfra#1858": {
-    "project": "pyinfra-dev/pyinfra",
+  "angr/angr#6365": {
+    "project": "angr/angr",
     "files": {
-      "src/pyinfra/connectors/ssh.py": {
+      "angr/engines/pcode/engine.py": {
         "buggy_windows": [
           [
-            20,
-            26
-          ],
-          [
-            216,
-            221
+            217,
+            223
           ]
         ],
         "fixed_windows": [
           [
-            20,
-            26
-          ],
-          [
-            216,
+            217,
             223
           ]
         ]
       },
-      "src/pyinfra/connectors/ssh_util.py": {
+      "angr/engines/vex/heavy/heavy.py": {
         "buggy_windows": [
           [
-            1,
-            6
-          ],
-          [
-            19,
-            24
+            195,
+            201
           ]
         ],
         "fixed_windows": [
           [
-            1,
-            6
+            195,
+            201
+          ]
+        ]
+      }
+    }
+  },
+  "apache/burr#790": {
+    "project": "apache/burr",
+    "files": {
+      "burr/tracking/server/backend.py": {
+        "buggy_windows": [
+          [
+            309,
+            315
           ],
           [
-            19,
-            60
+            348,
+            354
+          ],
+          [
+            381,
+            387
+          ],
+          [
+            407,
+            413
+          ],
+          [
+            521,
+            527
+          ],
+          [
+            530,
+            536
+          ]
+        ],
+        "fixed_windows": [
+          [
+            309,
+            315
+          ],
+          [
+            348,
+            354
+          ],
+          [
+            381,
+            387
+          ],
+          [
+            407,
+            413
+          ],
+          [
+            521,
+            527
+          ],
+          [
+            530,
+            536
+          ]
+        ]
+      }
+    }
+  },
+  "commitizen-tools/commitizen#1874": {
+    "project": "commitizen-tools/commitizen",
+    "files": {
+      "commitizen/config/json_config.py": {
+        "buggy_windows": [
+          [
+            27,
+            33
+          ]
+        ],
+        "fixed_windows": [
+          [
+            27,
+            36
           ]
         ]
       },
-      "src/pyinfra/connectors/sshuserclient/client.py": {
+      "commitizen/config/yaml_config.py": {
         "buggy_windows": [
           [
-            21,
-            27
-          ],
-          [
-            198,
-            203
+            35,
+            41
           ]
         ],
         "fixed_windows": [
           [
-            21,
-            30
+            35,
+            41
+          ]
+        ]
+      }
+    }
+  },
+  "ctrliq/ascender#431": {
+    "project": "ctrliq/ascender",
+    "files": {
+      "awx/api/views/__init__.py": {
+        "buggy_windows": [
+          [
+            3223,
+            3229
+          ]
+        ],
+        "fixed_windows": [
+          [
+            3223,
+            3231
+          ]
+        ]
+      }
+    }
+  },
+  "cusp-ai-oss/kUPS#186": {
+    "project": "cusp-ai-oss/kUPS",
+    "files": {
+      "src/kups/potential/mliap/torch/interface.py": {
+        "buggy_windows": [
+          [
+            340,
+            346
+          ]
+        ],
+        "fixed_windows": [
+          [
+            340,
+            354
+          ]
+        ]
+      }
+    }
+  },
+  "deepmodeling/deepmd-kit#5351": {
+    "project": "deepmodeling/deepmd-kit",
+    "files": {
+      "deepmd/pt/model/descriptor/repflows.py": {
+        "buggy_windows": [
+          [
+            35,
+            40
           ],
           [
-            201,
-            208
+            473,
+            481
+          ],
+          [
+            512,
+            522
+          ]
+        ],
+        "fixed_windows": [
+          [
+            35,
+            43
+          ],
+          [
+            476,
+            482
+          ],
+          [
+            513,
+            523
+          ]
+        ]
+      },
+      "deepmd/pt/model/descriptor/repformers.py": {
+        "buggy_windows": [
+          [
+            32,
+            37
+          ],
+          [
+            446,
+            452
+          ]
+        ],
+        "fixed_windows": [
+          [
+            32,
+            40
+          ],
+          [
+            449,
+            455
+          ]
+        ]
+      }
+    }
+  },
+  "djangopackages/djangopackages#1539": {
+    "project": "djangopackages/djangopackages",
+    "files": {
+      "package/models.py": {
+        "buggy_windows": [
+          [
+            275,
+            281
+          ]
+        ],
+        "fixed_windows": [
+          [
+            275,
+            281
+          ]
+        ]
+      },
+      "searchv2/builders.py": {
+        "buggy_windows": [
+          [
+            48,
+            59
+          ]
+        ],
+        "fixed_windows": [
+          [
+            48,
+            59
+          ]
+        ]
+      },
+      "searchv2/rules.py": {
+        "buggy_windows": [
+          [
+            329,
+            351
+          ]
+        ],
+        "fixed_windows": [
+          [
+            329,
+            349
+          ]
+        ]
+      }
+    }
+  },
+  "fastmachinelearning/hls4ml#1421": {
+    "project": "fastmachinelearning/hls4ml",
+    "files": {
+      "hls4ml/converters/__init__.py": {
+        "buggy_windows": [
+          [
+            121,
+            128
+          ]
+        ],
+        "fixed_windows": [
+          [
+            121,
+            136
+          ]
+        ]
+      },
+      "hls4ml/model/profiling.py": {
+        "buggy_windows": [
+          [
+            27,
+            33
+          ],
+          [
+            37,
+            43
+          ]
+        ],
+        "fixed_windows": [
+          [
+            27,
+            33
+          ],
+          [
+            37,
+            43
+          ]
+        ]
+      }
+    }
+  },
+  "felixdittrich92/OnnxTR#113": {
+    "project": "felixdittrich92/OnnxTR",
+    "files": {
+      "onnxtr/models/detection/_utils/base.py": {
+        "buggy_windows": [
+          [
+            20,
+            26
+          ],
+          [
+            39,
+            62
+          ]
+        ],
+        "fixed_windows": [
+          [
+            20,
+            27
+          ],
+          [
+            40,
+            75
+          ]
+        ]
+      },
+      "onnxtr/utils/geometry.py": {
+        "buggy_windows": [
+          [
+            504,
+            510
+          ]
+        ],
+        "fixed_windows": [
+          [
+            504,
+            510
           ]
         ]
       }
@@ -316,28 +790,958 @@
       }
     }
   },
-  "pypa/pipx#1860": {
-    "project": "pypa/pipx",
+  "galaxyproject/galaxy#17504": {
+    "project": "galaxyproject/galaxy",
     "files": {
-      "src/pipx/package_specifier.py": {
+      "lib/galaxy/util/__init__.py": {
         "buggy_windows": [
           [
-            24,
-            29
+            120,
+            125
           ],
           [
-            167,
-            186
+            379,
+            393
           ]
         ],
         "fixed_windows": [
           [
-            24,
-            30
+            120,
+            140
           ],
           [
-            168,
-            185
+            394,
+            407
+          ]
+        ]
+      }
+    }
+  },
+  "gcovr/gcovr#1271": {
+    "project": "gcovr/gcovr",
+    "files": {
+      "src/gcovr/data_model/container.py": {
+        "buggy_windows": [
+          [
+            102,
+            107
+          ]
+        ],
+        "fixed_windows": [
+          [
+            102,
+            108
+          ]
+        ]
+      },
+      "src/gcovr/formats/html/write.py": {
+        "buggy_windows": [
+          [
+            438,
+            444
+          ],
+          [
+            479,
+            484
+          ],
+          [
+            496,
+            503
+          ],
+          [
+            515,
+            530
+          ]
+        ],
+        "fixed_windows": [
+          [
+            438,
+            444
+          ],
+          [
+            479,
+            486
+          ],
+          [
+            498,
+            503
+          ],
+          [
+            515,
+            544
+          ]
+        ]
+      }
+    }
+  },
+  "gramps-project/gramps#2248": {
+    "project": "gramps-project/gramps",
+    "files": {
+      "gramps/gen/plug/_manager.py": {
+        "buggy_windows": [
+          [
+            140,
+            146
+          ]
+        ],
+        "fixed_windows": [
+          [
+            140,
+            157
+          ]
+        ]
+      }
+    }
+  },
+  "harvard-edge/cs249r_book#1353": {
+    "project": "harvard-edge/cs249r_book",
+    "files": {
+      "labs/vol2/lab_05_dist_train.py": {
+        "buggy_windows": [
+          [
+            52,
+            58
+          ],
+          [
+            66,
+            71
+          ]
+        ],
+        "fixed_windows": [
+          [
+            52,
+            57
+          ],
+          [
+            65,
+            72
+          ]
+        ]
+      }
+    }
+  },
+  "home-assistant/supervisor#6877": {
+    "project": "home-assistant/supervisor",
+    "files": {
+      "supervisor/apps/model.py": {
+        "buggy_windows": [
+          [
+            358,
+            363
+          ]
+        ],
+        "fixed_windows": [
+          [
+            358,
+            368
+          ]
+        ]
+      },
+      "supervisor/apps/options.py": {
+        "buggy_windows": [
+          [
+            196,
+            201
+          ]
+        ],
+        "fixed_windows": [
+          [
+            196,
+            232
+          ]
+        ]
+      },
+      "supervisor/docker/app.py": {
+        "buggy_windows": [
+          [
+            618,
+            625
+          ],
+          [
+            887,
+            896
+          ]
+        ],
+        "fixed_windows": [
+          [
+            618,
+            626
+          ],
+          [
+            888,
+            904
+          ]
+        ]
+      }
+    }
+  },
+  "inclusionAI/AReno#92": {
+    "project": "inclusionAI/AReno",
+    "files": {
+      "areno/api/loss_fns/sft.py": {
+        "buggy_windows": [
+          [
+            27,
+            32
+          ]
+        ],
+        "fixed_windows": [
+          [
+            27,
+            34
+          ]
+        ]
+      }
+    }
+  },
+  "inventree/InvenTree#11627": {
+    "project": "inventree/InvenTree",
+    "files": {
+      "src/backend/InvenTree/order/models.py": {
+        "buggy_windows": [
+          [
+            1038,
+            1043
+          ],
+          [
+            1052,
+            1066
+          ],
+          [
+            1144,
+            1153
+          ]
+        ],
+        "fixed_windows": [
+          [
+            1038,
+            1066
+          ],
+          [
+            1075,
+            1080
+          ],
+          [
+            1158,
+            1163
+          ]
+        ]
+      }
+    }
+  },
+  "jupyterhub/jupyterhub#5290": {
+    "project": "jupyterhub/jupyterhub",
+    "files": {
+      "jupyterhub/app.py": {
+        "buggy_windows": [
+          [
+            1900,
+            1905
+          ],
+          [
+            1911,
+            1919
+          ]
+        ],
+        "fixed_windows": [
+          [
+            1900,
+            1911
+          ],
+          [
+            1917,
+            1922
+          ]
+        ]
+      }
+    }
+  },
+  "kubernetes-client/python#2585": {
+    "project": "kubernetes-client/python",
+    "files": {
+      "kubernetes/base/config/incluster_config.py": {
+        "buggy_windows": [
+          [
+            88,
+            94
+          ]
+        ],
+        "fixed_windows": [
+          [
+            88,
+            94
+          ]
+        ]
+      },
+      "kubernetes/base/config/kube_config.py": {
+        "buggy_windows": [
+          [
+            527,
+            533
+          ]
+        ],
+        "fixed_windows": [
+          [
+            527,
+            533
+          ]
+        ]
+      },
+      "kubernetes_asyncio/config/incluster_config.py": {
+        "buggy_windows": [
+          [
+            88,
+            94
+          ]
+        ],
+        "fixed_windows": [
+          [
+            88,
+            94
+          ]
+        ]
+      }
+    }
+  },
+  "meltano/meltano#9922": {
+    "project": "meltano/meltano",
+    "files": {
+      "src/meltano/core/plugin/singer/target.py": {
+        "buggy_windows": [
+          [
+            11,
+            17
+          ],
+          [
+            90,
+            101
+          ]
+        ],
+        "fixed_windows": [
+          [
+            11,
+            21
+          ],
+          [
+            94,
+            104
+          ]
+        ]
+      },
+      "src/meltano/core/state_service.py": {
+        "buggy_windows": [
+          [
+            41,
+            46
+          ],
+          [
+            183,
+            189
+          ]
+        ],
+        "fixed_windows": [
+          [
+            41,
+            50
+          ],
+          [
+            187,
+            197
+          ]
+        ]
+      }
+    }
+  },
+  "meltano/sdk#3046": {
+    "project": "meltano/sdk",
+    "files": {
+      "singer_sdk/mapper.py": {
+        "buggy_windows": [
+          [
+            793,
+            805
+          ]
+        ],
+        "fixed_windows": [
+          [
+            793,
+            810
+          ]
+        ]
+      }
+    }
+  },
+  "milvus-io/pymilvus#3390": {
+    "project": "milvus-io/pymilvus",
+    "files": {
+      "pymilvus/orm/types.py": {
+        "buggy_windows": [
+          [
+            112,
+            118
+          ]
+        ],
+        "fixed_windows": [
+          [
+            112,
+            122
+          ]
+        ]
+      }
+    }
+  },
+  "mindee/doctr#2054": {
+    "project": "mindee/doctr",
+    "files": {
+      "doctr/utils/geometry.py": {
+        "buggy_windows": [
+          [
+            164,
+            172
+          ]
+        ],
+        "fixed_windows": [
+          [
+            164,
+            171
+          ]
+        ]
+      }
+    }
+  },
+  "modflowpy/flopy#2716": {
+    "project": "modflowpy/flopy",
+    "files": {
+      "flopy/mf6/utils/model_splitter.py": {
+        "buggy_windows": [
+          [
+            2648,
+            2655
+          ]
+        ],
+        "fixed_windows": [
+          [
+            2648,
+            2653
+          ]
+        ]
+      }
+    }
+  },
+  "moralmunky/Home-Assistant-Mail-And-Packages#1329": {
+    "project": "moralmunky/Home-Assistant-Mail-And-Packages",
+    "files": {
+      "custom_components/mail_and_packages/config_flow.py": {
+        "buggy_windows": [
+          [
+            359,
+            365
+          ],
+          [
+            843,
+            849
+          ]
+        ],
+        "fixed_windows": [
+          [
+            359,
+            374
+          ],
+          [
+            852,
+            866
+          ]
+        ]
+      },
+      "custom_components/mail_and_packages/utils/imap.py": {
+        "buggy_windows": [
+          [
+            178,
+            184
+          ],
+          [
+            188,
+            194
+          ]
+        ],
+        "fixed_windows": [
+          [
+            178,
+            202
+          ],
+          [
+            206,
+            214
+          ]
+        ]
+      }
+    }
+  },
+  "mrk-its/homeassistant-blitzortung#292": {
+    "project": "mrk-its/homeassistant-blitzortung",
+    "files": {
+      "custom_components/blitzortung/geo_location.py": {
+        "buggy_windows": [
+          [
+            97,
+            102
+          ],
+          [
+            111,
+            116
+          ]
+        ],
+        "fixed_windows": [
+          [
+            97,
+            103
+          ],
+          [
+            112,
+            118
+          ]
+        ]
+      }
+    }
+  },
+  "music-assistant/server#3997": {
+    "project": "music-assistant/server",
+    "files": {
+      "music_assistant/controllers/streams/audio_analysis.py": {
+        "buggy_windows": [
+          [
+            36,
+            41
+          ],
+          [
+            693,
+            698
+          ],
+          [
+            702,
+            708
+          ],
+          [
+            713,
+            725
+          ]
+        ],
+        "fixed_windows": [
+          [
+            36,
+            42
+          ],
+          [
+            694,
+            705
+          ],
+          [
+            709,
+            715
+          ],
+          [
+            720,
+            732
+          ]
+        ]
+      }
+    }
+  },
+  "napari/napari#9230": {
+    "project": "napari/napari",
+    "files": {
+      "src/napari/_qt/layer_controls/widgets/_labels/qt_label_color.py": {
+        "buggy_windows": [
+          [
+            17,
+            22
+          ],
+          [
+            154,
+            162
+          ]
+        ],
+        "fixed_windows": [
+          [
+            17,
+            23
+          ],
+          [
+            155,
+            161
+          ]
+        ]
+      }
+    }
+  },
+  "networktocode/diffsync#335": {
+    "project": "networktocode/diffsync",
+    "files": {
+      "diffsync/__init__.py": {
+        "buggy_windows": [
+          [
+            484,
+            490
+          ]
+        ],
+        "fixed_windows": [
+          [
+            484,
+            496
+          ]
+        ]
+      }
+    }
+  },
+  "ohdearquant/lionagi#1139": {
+    "project": "ohdearquant/lionagi",
+    "files": {
+      "lionagi/ln/_ssrf.py": {
+        "buggy_windows": [
+          [
+            15,
+            28
+          ],
+          [
+            70,
+            77
+          ],
+          [
+            91,
+            96
+          ],
+          [
+            118,
+            123
+          ]
+        ],
+        "fixed_windows": [
+          [
+            15,
+            20
+          ],
+          [
+            62,
+            70
+          ],
+          [
+            84,
+            91
+          ],
+          [
+            113,
+            129
+          ]
+        ]
+      }
+    }
+  },
+  "openai/openai-agents-python#2883": {
+    "project": "openai/openai-agents-python",
+    "files": {
+      "src/agents/items.py": {
+        "buggy_windows": [
+          [
+            679,
+            685
+          ]
+        ],
+        "fixed_windows": [
+          [
+            679,
+            692
+          ]
+        ]
+      }
+    }
+  },
+  "opensandbox-group/OpenSandbox#250": {
+    "project": "opensandbox-group/OpenSandbox",
+    "files": {
+      "server/src/middleware/auth.py": {
+        "buggy_windows": [
+          [
+            19,
+            24
+          ],
+          [
+            40,
+            45
+          ],
+          [
+            82,
+            87
+          ]
+        ],
+        "fixed_windows": [
+          [
+            19,
+            25
+          ],
+          [
+            41,
+            57
+          ],
+          [
+            94,
+            104
+          ]
+        ]
+      }
+    }
+  },
+  "pandas-dev/pandas#63887": {
+    "project": "pandas-dev/pandas",
+    "files": {
+      "pandas/core/construction.py": {
+        "buggy_windows": [
+          [
+            29,
+            34
+          ],
+          [
+            311,
+            316
+          ]
+        ],
+        "fixed_windows": [
+          [
+            29,
+            35
+          ],
+          [
+            312,
+            334
+          ]
+        ]
+      }
+    }
+  },
+  "paperless-ngx/paperless-ngx#12789": {
+    "project": "paperless-ngx/paperless-ngx",
+    "files": {
+      "src/documents/search/_query.py": {
+        "buggy_windows": [
+          [
+            618,
+            624
+          ]
+        ],
+        "fixed_windows": [
+          [
+            618,
+            628
+          ]
+        ]
+      }
+    }
+  },
+  "pydantic/pydantic-ai#6693": {
+    "project": "pydantic/pydantic-ai",
+    "files": {
+      "pydantic_ai_slim/pydantic_ai/models/google.py": {
+        "buggy_windows": [
+          [
+            380,
+            385
+          ],
+          [
+            784,
+            796
+          ],
+          [
+            1002,
+            1008
+          ],
+          [
+            1512,
+            1524
+          ]
+        ],
+        "fixed_windows": [
+          [
+            380,
+            396
+          ],
+          [
+            795,
+            801
+          ],
+          [
+            1007,
+            1019
+          ],
+          [
+            1523,
+            1529
+          ]
+        ]
+      }
+    }
+  },
+  "pygae/galgebra#536": {
+    "project": "pygae/galgebra",
+    "files": {
+      "galgebra/mv.py": {
+        "buggy_windows": [
+          [
+            939,
+            963
+          ]
+        ],
+        "fixed_windows": [
+          [
+            939,
+            975
+          ]
+        ]
+      }
+    }
+  },
+  "pymc-labs/CausalPy#853": {
+    "project": "pymc-labs/CausalPy",
+    "files": {
+      "causalpy/experiments/panel_regression.py": {
+        "buggy_windows": [
+          [
+            557,
+            563
+          ],
+          [
+            673,
+            686
+          ]
+        ],
+        "fixed_windows": [
+          [
+            557,
+            563
+          ],
+          [
+            673,
+            689
+          ]
+        ]
+      }
+    }
+  },
+  "pymc-labs/pymc-marketing#2464": {
+    "project": "pymc-labs/pymc-marketing",
+    "files": {
+      "pymc_marketing/special_priors.py": {
+        "buggy_windows": [
+          [
+            598,
+            618
+          ]
+        ],
+        "fixed_windows": [
+          [
+            598,
+            665
+          ]
+        ]
+      }
+    }
+  },
+  "pypa/pip#14033": {
+    "project": "pypa/pip",
+    "files": {
+      "src/pip/_internal/build_env.py": {
+        "buggy_windows": [
+          [
+            468,
+            482
+          ]
+        ],
+        "fixed_windows": [
+          [
+            468,
+            486
+          ]
+        ]
+      }
+    }
+  },
+  "pypa/pipx#1753": {
+    "project": "pypa/pipx",
+    "files": {
+      "src/pipx/main.py": {
+        "buggy_windows": [
+          [
+            214,
+            220
+          ]
+        ],
+        "fixed_windows": [
+          [
+            214,
+            220
+          ]
+        ]
+      }
+    }
+  },
+  "pypa/virtualenv#3054": {
+    "project": "pypa/virtualenv",
+    "files": {
+      "src/virtualenv/discovery/cached_py_info.py": {
+        "buggy_windows": [
+          [
+            3,
+            8
+          ],
+          [
+            66,
+            85
+          ],
+          [
+            93,
+            98
+          ],
+          [
+            141,
+            146
+          ],
+          [
+            161,
+            168
+          ]
+        ],
+        "fixed_windows": [
+          [
+            3,
+            9
+          ],
+          [
+            67,
+            83
+          ],
+          [
+            91,
+            108
+          ],
+          [
+            151,
+            157
+          ],
+          [
+            172,
+            194
+          ]
+        ]
+      },
+      "src/virtualenv/discovery/py_info.py": {
+        "buggy_windows": [
+          [
+            783,
+            785
+          ]
+        ],
+        "fixed_windows": [
+          [
+            783,
+            786
           ]
         ]
       }

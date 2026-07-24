@@ -1,106 +1,586 @@
 [
   {
-    "bug": "neuml/txtai#1125",
-    "project": "neuml/txtai",
-    "file": "src/python/txtai/database/sql/expression.py",
+    "bug": "AOSSIE-Org/PictoPy#1380",
+    "project": "AOSSIE-Org/PictoPy",
+    "file": "backend/app/database/folders.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/neuml__txtai__1125/buggy/src/python/txtai/database/sql/expression.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/neuml__txtai__1125/fixed/src/python/txtai/database/sql/expression.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/AOSSIE-Org__PictoPy__1380/buggy/backend/app/database/folders.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/AOSSIE-Org__PictoPy__1380/fixed/backend/app/database/folders.py"
   },
   {
-    "bug": "allaboutduncan/clu-comics#389",
-    "project": "allaboutduncan/clu-comics",
-    "file": "app.py",
+    "bug": "AOSSIE-Org/PictoPy#1380",
+    "project": "AOSSIE-Org/PictoPy",
+    "file": "backend/app/routes/folders.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/buggy/app.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/fixed/app.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/AOSSIE-Org__PictoPy__1380/buggy/backend/app/routes/folders.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/AOSSIE-Org__PictoPy__1380/fixed/backend/app/routes/folders.py"
   },
   {
-    "bug": "allaboutduncan/clu-comics#389",
-    "project": "allaboutduncan/clu-comics",
-    "file": "helpers/collection.py",
+    "bug": "AOSSIE-Org/PictoPy#1380",
+    "project": "AOSSIE-Org/PictoPy",
+    "file": "backend/app/schemas/folders.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/buggy/helpers/collection.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/allaboutduncan__clu-comics__389/fixed/helpers/collection.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/AOSSIE-Org__PictoPy__1380/buggy/backend/app/schemas/folders.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/AOSSIE-Org__PictoPy__1380/fixed/backend/app/schemas/folders.py"
   },
   {
-    "bug": "pallets/click#3678",
-    "project": "pallets/click",
-    "file": "src/click/core.py",
+    "bug": "FlexMeasures/flexmeasures#2341",
+    "project": "FlexMeasures/flexmeasures",
+    "file": "flexmeasures/app.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pallets__click__3678/buggy/src/click/core.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pallets__click__3678/fixed/src/click/core.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/FlexMeasures__flexmeasures__2341/buggy/flexmeasures/app.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/FlexMeasures__flexmeasures__2341/fixed/flexmeasures/app.py"
   },
   {
-    "bug": "sktime/pytorch-forecasting#2257",
-    "project": "sktime/pytorch-forecasting",
-    "file": "pytorch_forecasting/models/deepar/_deepar.py",
+    "bug": "FlexMeasures/flexmeasures#2341",
+    "project": "FlexMeasures/flexmeasures",
+    "file": "flexmeasures/utils/config_utils.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/FlexMeasures__flexmeasures__2341/buggy/flexmeasures/utils/config_utils.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/FlexMeasures__flexmeasures__2341/fixed/flexmeasures/utils/config_utils.py"
+  },
+  {
+    "bug": "HKUDS/nanobot#4665",
+    "project": "HKUDS/nanobot",
+    "file": "nanobot/agent/loop.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/HKUDS__nanobot__4665/buggy/nanobot/agent/loop.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/HKUDS__nanobot__4665/fixed/nanobot/agent/loop.py"
+  },
+  {
+    "bug": "LLMQuant/quant-mind#124",
+    "project": "LLMQuant/quant-mind",
+    "file": "quantmind/preprocess/pr_newswire.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/LLMQuant__quant-mind__124/buggy/quantmind/preprocess/pr_newswire.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/LLMQuant__quant-mind__124/fixed/quantmind/preprocess/pr_newswire.py"
+  },
+  {
+    "bug": "LearningCircuit/local-deep-research#1879",
+    "project": "LearningCircuit/local-deep-research",
+    "file": "src/local_deep_research/utilities/type_utils.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/LearningCircuit__local-deep-research__1879/buggy/src/local_deep_research/utilities/type_utils.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/LearningCircuit__local-deep-research__1879/fixed/src/local_deep_research/utilities/type_utils.py"
+  },
+  {
+    "bug": "MDAnalysis/mdanalysis#5374",
+    "project": "MDAnalysis/mdanalysis",
+    "file": "package/MDAnalysis/coordinates/TPR.py",
     "numeric": true,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/sktime__pytorch-forecasting__2257/buggy/pytorch_forecasting/models/deepar/_deepar.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/sktime__pytorch-forecasting__2257/fixed/pytorch_forecasting/models/deepar/_deepar.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/MDAnalysis__mdanalysis__5374/buggy/package/MDAnalysis/coordinates/TPR.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/MDAnalysis__mdanalysis__5374/fixed/package/MDAnalysis/coordinates/TPR.py"
   },
   {
-    "bug": "inventree/InvenTree#12332",
-    "project": "inventree/InvenTree",
-    "file": "src/backend/InvenTree/InvenTree/serializers.py",
+    "bug": "NVIDIA-NeMo/Megatron-Bridge#5043",
+    "project": "NVIDIA-NeMo/Megatron-Bridge",
+    "file": "scripts/performance/run_script.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/inventree__InvenTree__12332/buggy/src/backend/InvenTree/InvenTree/serializers.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/inventree__InvenTree__12332/fixed/src/backend/InvenTree/InvenTree/serializers.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NVIDIA-NeMo__Megatron-Bridge__5043/buggy/scripts/performance/run_script.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NVIDIA-NeMo__Megatron-Bridge__5043/fixed/scripts/performance/run_script.py"
   },
   {
-    "bug": "pytroll/satpy#3367",
-    "project": "pytroll/satpy",
-    "file": "satpy/readers/nwcsaf_nc.py",
+    "bug": "NVIDIA/TensorRT-LLM#14297",
+    "project": "NVIDIA/TensorRT-LLM",
+    "file": "tensorrt_llm/_torch/attention_backend/sparse/dsa.py",
     "numeric": true,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pytroll__satpy__3367/buggy/satpy/readers/nwcsaf_nc.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pytroll__satpy__3367/fixed/satpy/readers/nwcsaf_nc.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NVIDIA__TensorRT-LLM__14297/buggy/tensorrt_llm/_torch/attention_backend/sparse/dsa.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NVIDIA__TensorRT-LLM__14297/fixed/tensorrt_llm/_torch/attention_backend/sparse/dsa.py"
+  },
+  {
+    "bug": "NVIDIA/TensorRT-LLM#14297",
+    "project": "NVIDIA/TensorRT-LLM",
+    "file": "tensorrt_llm/_torch/custom_ops/cpp_custom_ops.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NVIDIA__TensorRT-LLM__14297/buggy/tensorrt_llm/_torch/custom_ops/cpp_custom_ops.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NVIDIA__TensorRT-LLM__14297/fixed/tensorrt_llm/_torch/custom_ops/cpp_custom_ops.py"
+  },
+  {
+    "bug": "NeuralEnsemble/PyNN#839",
+    "project": "NeuralEnsemble/PyNN",
+    "file": "pyNN/standardmodels/base.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NeuralEnsemble__PyNN__839/buggy/pyNN/standardmodels/base.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/NeuralEnsemble__PyNN__839/fixed/pyNN/standardmodels/base.py"
+  },
+  {
+    "bug": "Ostorlab/oxo#1024",
+    "project": "Ostorlab/oxo",
+    "file": "src/ostorlab/utils/definitions.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/Ostorlab__oxo__1024/buggy/src/ostorlab/utils/definitions.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/Ostorlab__oxo__1024/fixed/src/ostorlab/utils/definitions.py"
+  },
+  {
+    "bug": "PlasmaPy/PlasmaPy#3216",
+    "project": "PlasmaPy/PlasmaPy",
+    "file": "src/plasmapy/formulary/frequencies.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/PlasmaPy__PlasmaPy__3216/buggy/src/plasmapy/formulary/frequencies.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/PlasmaPy__PlasmaPy__3216/fixed/src/plasmapy/formulary/frequencies.py"
+  },
+  {
+    "bug": "SciTools/iris#7197",
+    "project": "SciTools/iris",
+    "file": "lib/iris/fileformats/pp_save_rules.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/SciTools__iris__7197/buggy/lib/iris/fileformats/pp_save_rules.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/SciTools__iris__7197/fixed/lib/iris/fileformats/pp_save_rules.py"
   },
   {
     "bug": "aio-libs/aiohttp#12264",
     "project": "aio-libs/aiohttp",
     "file": "aiohttp/http_parser.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/aio-libs__aiohttp__12264/buggy/aiohttp/http_parser.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/aio-libs__aiohttp__12264/fixed/aiohttp/http_parser.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/aio-libs__aiohttp__12264/buggy/aiohttp/http_parser.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/aio-libs__aiohttp__12264/fixed/aiohttp/http_parser.py"
   },
   {
-    "bug": "pyinfra-dev/pyinfra#1858",
-    "project": "pyinfra-dev/pyinfra",
-    "file": "src/pyinfra/connectors/ssh.py",
+    "bug": "angr/angr#6365",
+    "project": "angr/angr",
+    "file": "angr/engines/pcode/engine.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/buggy/src/pyinfra/connectors/ssh.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/fixed/src/pyinfra/connectors/ssh.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/angr__angr__6365/buggy/angr/engines/pcode/engine.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/angr__angr__6365/fixed/angr/engines/pcode/engine.py"
   },
   {
-    "bug": "pyinfra-dev/pyinfra#1858",
-    "project": "pyinfra-dev/pyinfra",
-    "file": "src/pyinfra/connectors/ssh_util.py",
+    "bug": "angr/angr#6365",
+    "project": "angr/angr",
+    "file": "angr/engines/vex/heavy/heavy.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/buggy/src/pyinfra/connectors/ssh_util.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/fixed/src/pyinfra/connectors/ssh_util.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/angr__angr__6365/buggy/angr/engines/vex/heavy/heavy.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/angr__angr__6365/fixed/angr/engines/vex/heavy/heavy.py"
   },
   {
-    "bug": "pyinfra-dev/pyinfra#1858",
-    "project": "pyinfra-dev/pyinfra",
-    "file": "src/pyinfra/connectors/sshuserclient/client.py",
+    "bug": "apache/burr#790",
+    "project": "apache/burr",
+    "file": "burr/tracking/server/backend.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/buggy/src/pyinfra/connectors/sshuserclient/client.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pyinfra-dev__pyinfra__1858/fixed/src/pyinfra/connectors/sshuserclient/client.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/apache__burr__790/buggy/burr/tracking/server/backend.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/apache__burr__790/fixed/burr/tracking/server/backend.py"
+  },
+  {
+    "bug": "commitizen-tools/commitizen#1874",
+    "project": "commitizen-tools/commitizen",
+    "file": "commitizen/config/json_config.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/commitizen-tools__commitizen__1874/buggy/commitizen/config/json_config.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/commitizen-tools__commitizen__1874/fixed/commitizen/config/json_config.py"
+  },
+  {
+    "bug": "commitizen-tools/commitizen#1874",
+    "project": "commitizen-tools/commitizen",
+    "file": "commitizen/config/yaml_config.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/commitizen-tools__commitizen__1874/buggy/commitizen/config/yaml_config.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/commitizen-tools__commitizen__1874/fixed/commitizen/config/yaml_config.py"
+  },
+  {
+    "bug": "ctrliq/ascender#431",
+    "project": "ctrliq/ascender",
+    "file": "awx/api/views/__init__.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/ctrliq__ascender__431/buggy/awx/api/views/__init__.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/ctrliq__ascender__431/fixed/awx/api/views/__init__.py"
+  },
+  {
+    "bug": "cusp-ai-oss/kUPS#186",
+    "project": "cusp-ai-oss/kUPS",
+    "file": "src/kups/potential/mliap/torch/interface.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/cusp-ai-oss__kUPS__186/buggy/src/kups/potential/mliap/torch/interface.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/cusp-ai-oss__kUPS__186/fixed/src/kups/potential/mliap/torch/interface.py"
+  },
+  {
+    "bug": "deepmodeling/deepmd-kit#5351",
+    "project": "deepmodeling/deepmd-kit",
+    "file": "deepmd/pt/model/descriptor/repflows.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/deepmodeling__deepmd-kit__5351/buggy/deepmd/pt/model/descriptor/repflows.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/deepmodeling__deepmd-kit__5351/fixed/deepmd/pt/model/descriptor/repflows.py"
+  },
+  {
+    "bug": "deepmodeling/deepmd-kit#5351",
+    "project": "deepmodeling/deepmd-kit",
+    "file": "deepmd/pt/model/descriptor/repformers.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/deepmodeling__deepmd-kit__5351/buggy/deepmd/pt/model/descriptor/repformers.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/deepmodeling__deepmd-kit__5351/fixed/deepmd/pt/model/descriptor/repformers.py"
+  },
+  {
+    "bug": "djangopackages/djangopackages#1539",
+    "project": "djangopackages/djangopackages",
+    "file": "package/models.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/djangopackages__djangopackages__1539/buggy/package/models.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/djangopackages__djangopackages__1539/fixed/package/models.py"
+  },
+  {
+    "bug": "djangopackages/djangopackages#1539",
+    "project": "djangopackages/djangopackages",
+    "file": "searchv2/builders.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/djangopackages__djangopackages__1539/buggy/searchv2/builders.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/djangopackages__djangopackages__1539/fixed/searchv2/builders.py"
+  },
+  {
+    "bug": "djangopackages/djangopackages#1539",
+    "project": "djangopackages/djangopackages",
+    "file": "searchv2/rules.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/djangopackages__djangopackages__1539/buggy/searchv2/rules.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/djangopackages__djangopackages__1539/fixed/searchv2/rules.py"
+  },
+  {
+    "bug": "fastmachinelearning/hls4ml#1421",
+    "project": "fastmachinelearning/hls4ml",
+    "file": "hls4ml/converters/__init__.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/fastmachinelearning__hls4ml__1421/buggy/hls4ml/converters/__init__.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/fastmachinelearning__hls4ml__1421/fixed/hls4ml/converters/__init__.py"
+  },
+  {
+    "bug": "fastmachinelearning/hls4ml#1421",
+    "project": "fastmachinelearning/hls4ml",
+    "file": "hls4ml/model/profiling.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/fastmachinelearning__hls4ml__1421/buggy/hls4ml/model/profiling.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/fastmachinelearning__hls4ml__1421/fixed/hls4ml/model/profiling.py"
+  },
+  {
+    "bug": "felixdittrich92/OnnxTR#113",
+    "project": "felixdittrich92/OnnxTR",
+    "file": "onnxtr/models/detection/_utils/base.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/felixdittrich92__OnnxTR__113/buggy/onnxtr/models/detection/_utils/base.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/felixdittrich92__OnnxTR__113/fixed/onnxtr/models/detection/_utils/base.py"
+  },
+  {
+    "bug": "felixdittrich92/OnnxTR#113",
+    "project": "felixdittrich92/OnnxTR",
+    "file": "onnxtr/utils/geometry.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/felixdittrich92__OnnxTR__113/buggy/onnxtr/utils/geometry.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/felixdittrich92__OnnxTR__113/fixed/onnxtr/utils/geometry.py"
   },
   {
     "bug": "fossasia/eventyay#3789",
     "project": "fossasia/eventyay",
     "file": "app/eventyay/api/webhooks.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/fossasia__eventyay__3789/buggy/app/eventyay/api/webhooks.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/fossasia__eventyay__3789/fixed/app/eventyay/api/webhooks.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/fossasia__eventyay__3789/buggy/app/eventyay/api/webhooks.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/fossasia__eventyay__3789/fixed/app/eventyay/api/webhooks.py"
   },
   {
-    "bug": "pypa/pipx#1860",
-    "project": "pypa/pipx",
-    "file": "src/pipx/package_specifier.py",
+    "bug": "galaxyproject/galaxy#17504",
+    "project": "galaxyproject/galaxy",
+    "file": "lib/galaxy/util/__init__.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/galaxyproject__galaxy__17504/buggy/lib/galaxy/util/__init__.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/galaxyproject__galaxy__17504/fixed/lib/galaxy/util/__init__.py"
+  },
+  {
+    "bug": "gcovr/gcovr#1271",
+    "project": "gcovr/gcovr",
+    "file": "src/gcovr/data_model/container.py",
     "numeric": false,
-    "buggy_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pypa__pipx__1860/buggy/src/pipx/package_specifier.py",
-    "fixed_path": "C:/Users/gde00/Documents/cca-bench/data_fresh/pypa__pipx__1860/fixed/src/pipx/package_specifier.py"
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/gcovr__gcovr__1271/buggy/src/gcovr/data_model/container.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/gcovr__gcovr__1271/fixed/src/gcovr/data_model/container.py"
+  },
+  {
+    "bug": "gcovr/gcovr#1271",
+    "project": "gcovr/gcovr",
+    "file": "src/gcovr/formats/html/write.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/gcovr__gcovr__1271/buggy/src/gcovr/formats/html/write.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/gcovr__gcovr__1271/fixed/src/gcovr/formats/html/write.py"
+  },
+  {
+    "bug": "gramps-project/gramps#2248",
+    "project": "gramps-project/gramps",
+    "file": "gramps/gen/plug/_manager.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/gramps-project__gramps__2248/buggy/gramps/gen/plug/_manager.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/gramps-project__gramps__2248/fixed/gramps/gen/plug/_manager.py"
+  },
+  {
+    "bug": "harvard-edge/cs249r_book#1353",
+    "project": "harvard-edge/cs249r_book",
+    "file": "labs/vol2/lab_05_dist_train.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/harvard-edge__cs249r_book__1353/buggy/labs/vol2/lab_05_dist_train.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/harvard-edge__cs249r_book__1353/fixed/labs/vol2/lab_05_dist_train.py"
+  },
+  {
+    "bug": "home-assistant/supervisor#6877",
+    "project": "home-assistant/supervisor",
+    "file": "supervisor/apps/model.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/home-assistant__supervisor__6877/buggy/supervisor/apps/model.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/home-assistant__supervisor__6877/fixed/supervisor/apps/model.py"
+  },
+  {
+    "bug": "home-assistant/supervisor#6877",
+    "project": "home-assistant/supervisor",
+    "file": "supervisor/apps/options.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/home-assistant__supervisor__6877/buggy/supervisor/apps/options.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/home-assistant__supervisor__6877/fixed/supervisor/apps/options.py"
+  },
+  {
+    "bug": "home-assistant/supervisor#6877",
+    "project": "home-assistant/supervisor",
+    "file": "supervisor/docker/app.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/home-assistant__supervisor__6877/buggy/supervisor/docker/app.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/home-assistant__supervisor__6877/fixed/supervisor/docker/app.py"
+  },
+  {
+    "bug": "inclusionAI/AReno#92",
+    "project": "inclusionAI/AReno",
+    "file": "areno/api/loss_fns/sft.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/inclusionAI__AReno__92/buggy/areno/api/loss_fns/sft.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/inclusionAI__AReno__92/fixed/areno/api/loss_fns/sft.py"
+  },
+  {
+    "bug": "inventree/InvenTree#11627",
+    "project": "inventree/InvenTree",
+    "file": "src/backend/InvenTree/order/models.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/inventree__InvenTree__11627/buggy/src/backend/InvenTree/order/models.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/inventree__InvenTree__11627/fixed/src/backend/InvenTree/order/models.py"
+  },
+  {
+    "bug": "jupyterhub/jupyterhub#5290",
+    "project": "jupyterhub/jupyterhub",
+    "file": "jupyterhub/app.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/jupyterhub__jupyterhub__5290/buggy/jupyterhub/app.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/jupyterhub__jupyterhub__5290/fixed/jupyterhub/app.py"
+  },
+  {
+    "bug": "kubernetes-client/python#2585",
+    "project": "kubernetes-client/python",
+    "file": "kubernetes/base/config/incluster_config.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/kubernetes-client__python__2585/buggy/kubernetes/base/config/incluster_config.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/kubernetes-client__python__2585/fixed/kubernetes/base/config/incluster_config.py"
+  },
+  {
+    "bug": "kubernetes-client/python#2585",
+    "project": "kubernetes-client/python",
+    "file": "kubernetes/base/config/kube_config.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/kubernetes-client__python__2585/buggy/kubernetes/base/config/kube_config.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/kubernetes-client__python__2585/fixed/kubernetes/base/config/kube_config.py"
+  },
+  {
+    "bug": "kubernetes-client/python#2585",
+    "project": "kubernetes-client/python",
+    "file": "kubernetes_asyncio/config/incluster_config.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/kubernetes-client__python__2585/buggy/kubernetes_asyncio/config/incluster_config.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/kubernetes-client__python__2585/fixed/kubernetes_asyncio/config/incluster_config.py"
+  },
+  {
+    "bug": "meltano/meltano#9922",
+    "project": "meltano/meltano",
+    "file": "src/meltano/core/plugin/singer/target.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/meltano__meltano__9922/buggy/src/meltano/core/plugin/singer/target.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/meltano__meltano__9922/fixed/src/meltano/core/plugin/singer/target.py"
+  },
+  {
+    "bug": "meltano/meltano#9922",
+    "project": "meltano/meltano",
+    "file": "src/meltano/core/state_service.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/meltano__meltano__9922/buggy/src/meltano/core/state_service.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/meltano__meltano__9922/fixed/src/meltano/core/state_service.py"
+  },
+  {
+    "bug": "meltano/sdk#3046",
+    "project": "meltano/sdk",
+    "file": "singer_sdk/mapper.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/meltano__sdk__3046/buggy/singer_sdk/mapper.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/meltano__sdk__3046/fixed/singer_sdk/mapper.py"
+  },
+  {
+    "bug": "milvus-io/pymilvus#3390",
+    "project": "milvus-io/pymilvus",
+    "file": "pymilvus/orm/types.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/milvus-io__pymilvus__3390/buggy/pymilvus/orm/types.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/milvus-io__pymilvus__3390/fixed/pymilvus/orm/types.py"
+  },
+  {
+    "bug": "mindee/doctr#2054",
+    "project": "mindee/doctr",
+    "file": "doctr/utils/geometry.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/mindee__doctr__2054/buggy/doctr/utils/geometry.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/mindee__doctr__2054/fixed/doctr/utils/geometry.py"
+  },
+  {
+    "bug": "modflowpy/flopy#2716",
+    "project": "modflowpy/flopy",
+    "file": "flopy/mf6/utils/model_splitter.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/modflowpy__flopy__2716/buggy/flopy/mf6/utils/model_splitter.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/modflowpy__flopy__2716/fixed/flopy/mf6/utils/model_splitter.py"
+  },
+  {
+    "bug": "moralmunky/Home-Assistant-Mail-And-Packages#1329",
+    "project": "moralmunky/Home-Assistant-Mail-And-Packages",
+    "file": "custom_components/mail_and_packages/config_flow.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/moralmunky__Home-Assistant-Mail-And-Packages__1329/buggy/custom_components/mail_and_packages/config_flow.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/moralmunky__Home-Assistant-Mail-And-Packages__1329/fixed/custom_components/mail_and_packages/config_flow.py"
+  },
+  {
+    "bug": "moralmunky/Home-Assistant-Mail-And-Packages#1329",
+    "project": "moralmunky/Home-Assistant-Mail-And-Packages",
+    "file": "custom_components/mail_and_packages/utils/imap.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/moralmunky__Home-Assistant-Mail-And-Packages__1329/buggy/custom_components/mail_and_packages/utils/imap.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/moralmunky__Home-Assistant-Mail-And-Packages__1329/fixed/custom_components/mail_and_packages/utils/imap.py"
+  },
+  {
+    "bug": "mrk-its/homeassistant-blitzortung#292",
+    "project": "mrk-its/homeassistant-blitzortung",
+    "file": "custom_components/blitzortung/geo_location.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/mrk-its__homeassistant-blitzortung__292/buggy/custom_components/blitzortung/geo_location.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/mrk-its__homeassistant-blitzortung__292/fixed/custom_components/blitzortung/geo_location.py"
+  },
+  {
+    "bug": "music-assistant/server#3997",
+    "project": "music-assistant/server",
+    "file": "music_assistant/controllers/streams/audio_analysis.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/music-assistant__server__3997/buggy/music_assistant/controllers/streams/audio_analysis.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/music-assistant__server__3997/fixed/music_assistant/controllers/streams/audio_analysis.py"
+  },
+  {
+    "bug": "napari/napari#9230",
+    "project": "napari/napari",
+    "file": "src/napari/_qt/layer_controls/widgets/_labels/qt_label_color.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/napari__napari__9230/buggy/src/napari/_qt/layer_controls/widgets/_labels/qt_label_color.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/napari__napari__9230/fixed/src/napari/_qt/layer_controls/widgets/_labels/qt_label_color.py"
+  },
+  {
+    "bug": "networktocode/diffsync#335",
+    "project": "networktocode/diffsync",
+    "file": "diffsync/__init__.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/networktocode__diffsync__335/buggy/diffsync/__init__.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/networktocode__diffsync__335/fixed/diffsync/__init__.py"
+  },
+  {
+    "bug": "ohdearquant/lionagi#1139",
+    "project": "ohdearquant/lionagi",
+    "file": "lionagi/ln/_ssrf.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/ohdearquant__lionagi__1139/buggy/lionagi/ln/_ssrf.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/ohdearquant__lionagi__1139/fixed/lionagi/ln/_ssrf.py"
+  },
+  {
+    "bug": "openai/openai-agents-python#2883",
+    "project": "openai/openai-agents-python",
+    "file": "src/agents/items.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/openai__openai-agents-python__2883/buggy/src/agents/items.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/openai__openai-agents-python__2883/fixed/src/agents/items.py"
+  },
+  {
+    "bug": "opensandbox-group/OpenSandbox#250",
+    "project": "opensandbox-group/OpenSandbox",
+    "file": "server/src/middleware/auth.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/opensandbox-group__OpenSandbox__250/buggy/server/src/middleware/auth.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/opensandbox-group__OpenSandbox__250/fixed/server/src/middleware/auth.py"
+  },
+  {
+    "bug": "pandas-dev/pandas#63887",
+    "project": "pandas-dev/pandas",
+    "file": "pandas/core/construction.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pandas-dev__pandas__63887/buggy/pandas/core/construction.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pandas-dev__pandas__63887/fixed/pandas/core/construction.py"
+  },
+  {
+    "bug": "paperless-ngx/paperless-ngx#12789",
+    "project": "paperless-ngx/paperless-ngx",
+    "file": "src/documents/search/_query.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/paperless-ngx__paperless-ngx__12789/buggy/src/documents/search/_query.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/paperless-ngx__paperless-ngx__12789/fixed/src/documents/search/_query.py"
+  },
+  {
+    "bug": "pydantic/pydantic-ai#6693",
+    "project": "pydantic/pydantic-ai",
+    "file": "pydantic_ai_slim/pydantic_ai/models/google.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pydantic__pydantic-ai__6693/buggy/pydantic_ai_slim/pydantic_ai/models/google.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pydantic__pydantic-ai__6693/fixed/pydantic_ai_slim/pydantic_ai/models/google.py"
+  },
+  {
+    "bug": "pygae/galgebra#536",
+    "project": "pygae/galgebra",
+    "file": "galgebra/mv.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pygae__galgebra__536/buggy/galgebra/mv.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pygae__galgebra__536/fixed/galgebra/mv.py"
+  },
+  {
+    "bug": "pymc-labs/CausalPy#853",
+    "project": "pymc-labs/CausalPy",
+    "file": "causalpy/experiments/panel_regression.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pymc-labs__CausalPy__853/buggy/causalpy/experiments/panel_regression.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pymc-labs__CausalPy__853/fixed/causalpy/experiments/panel_regression.py"
+  },
+  {
+    "bug": "pymc-labs/pymc-marketing#2464",
+    "project": "pymc-labs/pymc-marketing",
+    "file": "pymc_marketing/special_priors.py",
+    "numeric": true,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pymc-labs__pymc-marketing__2464/buggy/pymc_marketing/special_priors.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pymc-labs__pymc-marketing__2464/fixed/pymc_marketing/special_priors.py"
+  },
+  {
+    "bug": "pypa/pip#14033",
+    "project": "pypa/pip",
+    "file": "src/pip/_internal/build_env.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__pip__14033/buggy/src/pip/_internal/build_env.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__pip__14033/fixed/src/pip/_internal/build_env.py"
+  },
+  {
+    "bug": "pypa/pipx#1753",
+    "project": "pypa/pipx",
+    "file": "src/pipx/main.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__pipx__1753/buggy/src/pipx/main.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__pipx__1753/fixed/src/pipx/main.py"
+  },
+  {
+    "bug": "pypa/virtualenv#3054",
+    "project": "pypa/virtualenv",
+    "file": "src/virtualenv/discovery/cached_py_info.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__virtualenv__3054/buggy/src/virtualenv/discovery/cached_py_info.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__virtualenv__3054/fixed/src/virtualenv/discovery/cached_py_info.py"
+  },
+  {
+    "bug": "pypa/virtualenv#3054",
+    "project": "pypa/virtualenv",
+    "file": "src/virtualenv/discovery/py_info.py",
+    "numeric": false,
+    "buggy_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__virtualenv__3054/buggy/src/virtualenv/discovery/py_info.py",
+    "fixed_path": "C:/Users/gde00/Documents/cca-audit/benchmarks/data_fresh/pypa__virtualenv__3054/fixed/src/virtualenv/discovery/py_info.py"
   }
 ]
