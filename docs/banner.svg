@@ -3,7 +3,6 @@
     .bg     { fill: #0d1219; }
     .rule   { stroke: #1f2a36; stroke-width: 1; }
     .wordmk { font: 700 40px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #e6ebf1; letter-spacing: -0.5px; }
-    .tag    { font: 400 16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #7b8896; }
     .lede   { font: 400 17px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; fill: #a3b0bd; }
     .accent { fill: #d9a05b; }
     .node   { font: 600 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #c6d0da; }
@@ -18,7 +17,6 @@
 
   <!-- wordmark -->
   <text class="wordmk" x="56" y="72">CCA-Audit</text>
-  <text class="tag" x="292" y="72">v0.6.0</text>
   <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code. Every finding is verified against your</text>
   <text class="lede" x="56" y="128">real code — mechanically, where a tool can settle it — before a line is edited.</text>
 

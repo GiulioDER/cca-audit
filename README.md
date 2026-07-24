@@ -5,7 +5,6 @@
 <p align="center">
   <a href="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml"><img src="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10–3.13"/>
-  <img src="https://img.shields.io/badge/tests-613%20passing-brightgreen" alt="613 tests passing"/>
   <img src="https://img.shields.io/badge/typed-pyright-informational" alt="Type-checked with pyright"/>
   <a href="https://github.com/GiulioDER/cca-audit/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
 </p>
