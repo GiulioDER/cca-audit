@@ -24,9 +24,15 @@ cleanup() { [[ -n "$CLEANUP_DIR" ]] && rm -rf "$CLEANUP_DIR"; }
 trap cleanup EXIT
 
 # Decide where to copy the files from.
-if [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/agents" ]]; then
+#
+# The agent/command markdown lives under cca_checks/plugin/ rather than beside
+# this script: a wheel can only carry package data, so that is the only
+# location from which BOTH `pip install cca-audit` and this script can serve
+# the same files. One copy on disk, so the two install paths cannot drift.
+ASSETS_REL="cca_checks/plugin"
+if [[ -n "$SOURCE_DIR" && -d "$SOURCE_DIR/../$ASSETS_REL/agents" ]]; then
   # Local mode: run from a checkout.
-  SRC_DIR="$SOURCE_DIR"
+  SRC_DIR="$(cd "$SOURCE_DIR/../$ASSETS_REL" && pwd)"
 else
   # Standalone mode: fetch the repo into a temp dir.
   command -v git >/dev/null 2>&1 || { echo "Error: git is required for the curl|bash install." >&2; exit 1; }
@@ -39,7 +45,7 @@ else
     echo "Error: could not clone $REPO_URL (network/proxy/auth?)." >&2
     exit 1
   fi
-  SRC_DIR="$CLEANUP_DIR/repo/claude-code"
+  SRC_DIR="$CLEANUP_DIR/repo/$ASSETS_REL"
 fi
 
 AGENTS_DIR=".claude/agents"
@@ -95,9 +101,10 @@ for cmd in "${commands[@]}"; do
   install_file "$cmd" "$COMMANDS_DIR"
 done
 
-# Copy the pipeline checkers. These are NOT part of the cca_checks package -- the
-# orchestrator shells out to them by path (Step 2.6 scorecard, Step 5.6 red-state
-# proof). Before they were installed here, a fresh install had an audit-fix.md
+# Copy the pipeline checkers. They ship as package data but are not imported --
+# the orchestrator shells out to them BY PATH (Step 2.6 scorecard, Step 5.6
+# red-state proof), so they have to land on disk in .claude/tools/ as well as in
+# the wheel. Before they were installed here, a fresh install had an audit-fix.md
 # that referenced two files nothing ever placed on disk, so both gates degraded to
 # "command not found" on every machine except the author's.
 tools=("$SRC_DIR/tools/"cca_*.py)
@@ -114,7 +121,11 @@ done
 # resolves elsewhere -- or nowhere -- produces a "successful" install whose
 # deterministic layer never runs, degrading silently to LLM-only verification.
 # So prefer `python`, and report which interpreter was used.
-REPO_ROOT="$(dirname "$SRC_DIR")"
+# SRC_DIR is <root>/cca_checks/plugin, so the project root is two levels up.
+# This must track ASSETS_REL: a single `dirname` here would point pip at
+# cca_checks/, which has no pyproject.toml, and the install would be skipped
+# with the misleading "python/pip not found" note below.
+REPO_ROOT="$(cd "$SRC_DIR/../.." && pwd)"
 PY="$(command -v python || command -v python3 || true)"
 if [[ -n "$PY" && -f "$REPO_ROOT/pyproject.toml" ]]; then
   echo "Installing cca_checks (deterministic verification helpers)..."
@@ -126,8 +137,16 @@ if [[ -n "$PY" && -f "$REPO_ROOT/pyproject.toml" ]]; then
   # `[numeric]` extra is installed by default because the numeric auditor ships
   # unconditionally; without it every numeric claim escalates to UNCERTAIN and,
   # on DEEP, cannot be fixed at all.
+  # Third fallback: the published package. A local path is preferred so a
+  # checkout installs the code you are looking at, but pip cannot always parse
+  # one -- under Git Bash on Windows $REPO_ROOT is an MSYS path (/c/Users/...)
+  # and pip rejects it as a requirement, which silently downgraded the whole
+  # install to LLM-only verification. Now that cca-audit is on PyPI there is a
+  # source that always parses.
   if "$PY" -m pip install --quiet "$REPO_ROOT[numeric]" >"$PIP_LOG" 2>&1 \
-     || "$PY" -m pip install --user --quiet "$REPO_ROOT[numeric]" >"$PIP_LOG" 2>&1; then
+     || "$PY" -m pip install --user --quiet "$REPO_ROOT[numeric]" >"$PIP_LOG" 2>&1 \
+     || "$PY" -m pip install --quiet "cca-audit[numeric]" >"$PIP_LOG" 2>&1 \
+     || "$PY" -m pip install --user --quiet "cca-audit[numeric]" >"$PIP_LOG" 2>&1; then
     echo "  Installed cca_checks[numeric] -> $PY -m cca_checks"
     if ! "$PY" -m cca_checks --help >/dev/null 2>&1; then
       echo "  WARNING: '$PY -m cca_checks' does not run; the deterministic layer will not be used." >&2

@@ -8,9 +8,36 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
-Nothing yet.
+- **The pipeline checkers moved into the repo and now ship.** `cca_scorecard.py` (Step 2.6) and
+  `cca_tautology_check.py` (Step 5.6) lived in a separate private repository and reached
+  `~/.claude/tools/` only by a hand-run `cp`. They are now package data under
+  `cca_checks/plugin/tools/`, alongside the agents and commands, and both installers copy them.
+  **This fixes a silent shipped failure:** the installers wrote agents and commands but no tools,
+  while `audit-fix.md` referenced `$HOME/.claude/tools/cca_*.py` — paths nothing in the install
+  path ever created. On every machine but the author's, Steps 2.6 and 5.6 were `command not
+  found`, and the pipeline reported no scorecard and no red-state proof without saying why. The
+  call sites now resolve `.claude/tools/` first and fall back to `$HOME/.claude/tools/`.
 
-## [0.7.0] - 2026-07-23
+- **`resolve_tool` launches analyzers by the path found, not its `realpath`.** Resolving the
+  symlink breaks every multi-call binary — the ones that dispatch on `argv[0]` rather than on
+  their own inode. `~/.cargo/bin/cargo` is a symlink to `rustup`, so the resolved launch ran
+  rustup with cargo's arguments (`error: unexpected argument '--manifest-path'`) and 9 Rust tests
+  failed in CI. It passed locally only because Windows `cargo.EXE` is a real binary. In
+  production the failure would have been quieter than a red suite: every Rust claim escalating to
+  `UNCERTAIN` for a reason unrelated to the code under audit.
+
+  The same change closes a second hole. The old check tested only `dirname(realpath(found))`, so
+  a symlink **planted in the audited repo root** and pointed at a genuine system binary was
+  accepted — and whoever controls the repo controls where it points next. Both the link's own
+  location and its target are now disqualifying.
+
+  `resolve_tool` had no direct coverage at all — every caller monkeypatches it away, which is how
+  both defects shipped. `tests/test_toolpath.py` is new, and its two regression tests were
+  confirmed red against the previous implementation.
+
+- **`audit-fix.md` reconciled.** The deployed prompt and the repo copy had each gained changes the
+  other lacked, so the orchestrator — where the L2.5 gate semantics live — was versioned nowhere
+  current. Merged three-way against master with no conflicts, purely additive.
 
 - **v3.3 — the language backend layer, and Rust on it.** `cca_checks/languages/` resolves a backend
   by file extension **once**, before any checker runs. An uncovered language, or a claim type the
@@ -78,6 +105,44 @@ Nothing yet.
 - Python behaviour is unchanged. The existing suite passes with no assertion edited; the patch targets
   in `test_cli.py` and `test_selfaudit_hardening.py` follow the dispatch from `__main__` to the
   backend module.
+## [0.7.0] - 2026-07-24
+
+- **Published to PyPI as `cca-audit`** — the first release installable with `pip`. The distribution
+  was renamed from `cca_checks` because the *product* is the auditor agents and the `/audit-fix`
+  orchestrator, not the verification helpers they shell out to; a PyPI page named after the helper
+  would have advertised a tool you could not install from it. **The import name is unchanged**
+  (`python -m cca_checks` still works, and every agent prompt that invokes it is untouched).
+  Nothing was ever published under `cca_checks`, so there is no migration.
+- **New `cca-audit install` console script.** `pip install cca-audit && cca-audit install` installs
+  the whole plugin into `<target>/.claude/`, replacing `curl … | bash` as the primary path — piping
+  a network fetch into a shell is an install step a large share of developers decline outright, and
+  that refusal is invisible. It mirrors the shell installer: customized files are preserved as
+  `<name>.md.bak` before being replaced, backups happen only when content actually differs, and a
+  pre-existing agent whose frontmatter `name:` collides with one we dispatch is reported rather
+  than silently shadowed.
+- **The agent and command markdown moved into the package**, from `claude-code/{agents,commands}/`
+  to `cca_checks/plugin/{agents,commands}/`. A wheel can only carry package data, so this is the
+  only location both install paths can serve from — one copy on disk, so the two cannot drift.
+  `claude-code/install.sh` and `install.ps1` read from the new location and behave as before.
+- **The wheel is now checked for the markdown, not just for imports.** A wheel missing the plugin
+  files installs cleanly, imports cleanly, and `cca-audit install` exits 0 having written an empty
+  `.claude/` — a total silent failure the previous import-only smoke test could not see. CI installs
+  the built wheel into a clean venv, runs the console script against a scratch project, and asserts
+  every agent in the source tree arrived; `tests/test_plugin_install.py` asserts the same invariant
+  through `importlib.resources`.
+- **The shell installer falls back to PyPI.** Under Git Bash on Windows `$REPO_ROOT` is an MSYS path
+  (`/c/Users/…`) that pip rejects as a requirement, which silently downgraded the install to
+  LLM-only verification. There is now a published source that always parses.
+- Fixed a stale README badge: the test count read 306 against an actual 376.
+
+## [0.6.1] - 2026-07-24
+
+- **Second field result, merged upstream** (docs only — no `cca_checks` change). Hunt mode on
+  `scipy/scipy` found a copy-paste defect in `signal.decimate`'s complex-coefficient guard
+  (`system.poles` tested twice, `system.zeros` never), which crashed valid `dlti` filters with real
+  poles and complex zeros and had been latent since gh-17881 in April 2023. Fix and regression test
+  merged as [scipy/scipy#25654](https://github.com/scipy/scipy/pull/25654) on 2026-07-23. README's
+  "Verified in the field" now carries both this and the Polymarket py-sdk result.
 
 ## [0.6.0] - 2026-07-23
 

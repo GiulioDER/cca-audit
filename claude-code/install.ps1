@@ -23,9 +23,14 @@ if ($PSCommandPath) {
 $CleanupDir = $null
 try {
     # Decide where to copy the files from.
-    if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "agents"))) {
+    # The agent/command markdown lives under cca_checks/plugin/ rather than beside
+    # this script: a wheel can only carry package data, so that is the only location
+    # from which BOTH `pip install cca-audit` and this script can serve the same
+    # files. One copy on disk, so the two install paths cannot drift.
+    $AssetsRel = "cca_checks\plugin"
+    if ($ScriptDir -and (Test-Path (Join-Path (Join-Path (Split-Path -Parent $ScriptDir) $AssetsRel) "agents"))) {
         # Local mode: run from a checkout.
-        $SrcDir = $ScriptDir
+        $SrcDir = Join-Path (Split-Path -Parent $ScriptDir) $AssetsRel
     } else {
         # Standalone mode: fetch the repo into a temp dir.
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -44,7 +49,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "could not clone $RepoUrl (network/proxy/auth?)."
         }
-        $SrcDir = Join-Path (Join-Path $CleanupDir "repo") "claude-code"
+        $SrcDir = Join-Path (Join-Path $CleanupDir "repo") $AssetsRel
     }
 
     $AgentsDir = ".claude\agents"
@@ -100,9 +105,10 @@ try {
     if (-not $commands) { throw "no command files found in $SrcDir\commands\" }
     $commands | ForEach-Object { Install-CcaFile $_.FullName $CommandsDir $_.Name }
 
-    # Copy the pipeline checkers. These are NOT part of the cca_checks package --
-    # the orchestrator shells out to them by path (Step 2.6 scorecard, Step 5.6
-    # red-state proof). Before they were installed here, a fresh install had an
+    # Copy the pipeline checkers. They ship as package data but are not imported
+    # -- the orchestrator shells out to them BY PATH (Step 2.6 scorecard, Step 5.6
+    # red-state proof), so they have to land on disk in .claude\tools\ as well as
+    # in the wheel. Before they were installed here, a fresh install had an
     # audit-fix.md referencing two files nothing ever placed on disk, so both gates
     # degraded to "command not found" on every machine except the author's.
     $tools = Get-ChildItem "$SrcDir\tools\cca_*.py" -ErrorAction SilentlyContinue |
@@ -116,7 +122,10 @@ try {
     # agent prompts actually invoke (`python -m cca_checks ...`). Installing into a
     # different interpreter yields a "successful" install whose deterministic layer
     # never runs, degrading silently to LLM-only verification.
-    $RepoRoot = Split-Path -Parent $SrcDir
+    # $SrcDir is <root>\cca_checks\plugin, so the project root is two levels up.
+    # A single Split-Path here would point pip at cca_checks\, which has no
+    # pyproject.toml -- the install would be skipped with a misleading note.
+    $RepoRoot = Split-Path -Parent (Split-Path -Parent $SrcDir)
     $py = Get-Command python -ErrorAction SilentlyContinue
     if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
     if ($py -and (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {

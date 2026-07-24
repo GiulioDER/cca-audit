@@ -3,15 +3,15 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cca_checks"
+name = "cca-audit"
 version = "0.7.0"
-description = "Deterministic verification helpers for CCA-Audit's fp-check gate"
+description = "Multi-agent code audit for Claude Code in which no finding reaches your code unverified"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Giulio D'Erme" }]
-keywords = ["static-analysis", "code-review", "verification", "claude-code", "llm"]
+keywords = ["static-analysis", "code-review", "verification", "claude-code", "llm", "ai-code-review", "code-audit"]
 dependencies = []
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -24,6 +24,12 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
   "Topic :: Security",
 ]
+
+[project.scripts]
+# The reason `pip install cca-audit` is worth anything: it puts the plugin
+# installer on PATH, so the whole product arrives in one command instead of a
+# clone plus a shell script piped from the network.
+cca-audit = "cca_checks.plugin.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/GiulioDER/cca-audit"
@@ -68,14 +74,22 @@ include = ["cca_checks*"]
 
 [tool.setuptools.package-data]
 cca_checks = ["rules/*.yaml"]
+# The agent and command markdown IS the product -- a wheel without it installs
+# cleanly and produces an empty .claude/, which no import smoke-test can see.
+# tests/test_plugin_install.py asserts every file on disk is reachable as a
+# package resource, so this glob cannot silently stop matching.
+# tools/*.py ships for the same reason: the orchestrator shells out to the two
+# checkers BY PATH, so a wheel without them installs cleanly and then reports no
+# scorecard and no red-state proof, with the gates failing as "command not found".
+"cca_checks.plugin" = ["agents/*.md", "commands/*.md", "tools/*.py"]
 
 [tool.pytest.ini_options]
-# claude-code/tools is a testpath, not a stray directory: those two checkers gate
-# the audit pipeline itself (Step 2.6 and Step 5.6), so a regression there is a
-# regression in what /audit-fix is willing to confirm. Their tests import the
+# cca_checks/plugin/tools is a testpath, not a stray directory: those two checkers
+# gate the audit pipeline itself (Step 2.6 and Step 5.6), so a regression there is
+# a regression in what /audit-fix is willing to confirm. Their tests import the
 # modules as bare siblings, which is why they live beside them rather than under
-# tests/.
-testpaths = ["tests", "claude-code/tools"]
+# tests/ -- and why that directory deliberately has no __init__.py.
+testpaths = ["tests", "cca_checks/plugin/tools"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

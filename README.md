@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml"><img src="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10–3.13"/>
-  <img src="https://img.shields.io/badge/tests-306%20passing-brightgreen" alt="306 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-376%20passing-brightgreen" alt="376 tests passing"/>
   <img src="https://img.shields.io/badge/typed-pyright-informational" alt="Type-checked with pyright"/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
 </p>
@@ -33,9 +33,48 @@ check that passed.**
 
 ## Verified in the field
 
-CCA's [hunt mode](#hunt-mode--auditing-code-you-did-not-write) was pointed at
-[Polymarket/py-sdk](https://github.com/Polymarket/py-sdk) — a third-party SDK, ~70 stars, actively
-maintained — and found a client-side price-validation defect:
+Two upstream results, both from [hunt mode](#hunt-mode--auditing-code-you-did-not-write), both
+checkable in under a minute.
+
+### SciPy — merged upstream
+
+Hunt mode was pointed at [scipy/scipy](https://github.com/scipy/scipy) (~14.8k stars) and found a
+copy-paste defect in `signal.decimate`'s complex-coefficient guard:
+
+```python
+elif (any(np.iscomplex(system.poles))
+      or any(np.iscomplex(system.poles))   # <- should be system.zeros
+      or np.iscomplex(system.gain)):
+```
+
+> The guard exists to route complex-coefficient filters away from `zpk2sos`, which cannot represent
+> them. Because it tested the poles twice and never the zeros, a `dlti` filter with **real poles and
+> complex zeros** was not recognised as complex, was forced through `zpk2sos`, and raised
+> `ValueError: complex value with no matching conjugate` on valid input.
+
+| | |
+|---|---|
+| Submitted upstream | [PR #25654](https://github.com/scipy/scipy/pull/25654), 18 Jul 2026 |
+| Merged | 23 Jul 2026 by a SciPy maintainer — approved *"LGTM"*, labelled `defect` |
+| What shipped | the one-line fix **and our regression test**, `test_complex_zeros_real_poles_iir_dlti` |
+| Latent for | ~3 years 3 months — introduced by [gh-17881](https://github.com/scipy/scipy/pull/17881) (Apr 2023) |
+
+The defect is sharper than its one-line diff suggests: gh-17881 was itself titled *"Fix handling on
+user-supplied filters in `signal.decimate`"* and added complex-filter support. The typo silently
+defeated half of the feature that PR shipped — complex *poles* worked, complex *zeros* crashed — and
+survived review, three years of releases, and the surrounding test suite, which covered the working
+half only. It is still live in the current release, 1.18.0.
+
+**To be precise about what that means:** the fix was ours and it was merged into a core scientific
+library after maintainer review. What we did *not* do is submit it autonomously — SciPy's
+[AI policy](https://github.com/scipy/scipy/blob/main/doc/source/dev/conduct/ai_policy.rst) requires a
+human to check generated code and open the PR, and requires the PR prose to be the contributor's own
+words. Both were honoured, and the AI-assistance disclosure is in the PR body.
+
+### Polymarket py-sdk — reported, fixed by the maintainers
+
+Hunt mode was pointed at [Polymarket/py-sdk](https://github.com/Polymarket/py-sdk) — a third-party
+SDK, ~70 stars, actively maintained — and found a client-side price-validation defect:
 
 > `_resolve_price` and `_resolve_protected_market_price` validated prices by **decimal-place count**
 > rather than **tick-grid membership**. The two agree on power-of-ten ticks and diverge on `0.005`
@@ -49,15 +88,18 @@ maintained — and found a client-side price-validation defect:
 | Author of the fix | a Polymarket maintainer, independently |
 | Issue status | closed as **completed** |
 
-**To be precise about what that means:** the upstream fix was written by a Polymarket maintainer, not
-submitted by us. That is the stronger result — an outside bug report was credible and specific enough
-that the maintainers implemented and shipped it themselves. Every link above is checkable in under a
-minute, which is the point.
+**To be precise about what that means:** here the upstream fix was written by a Polymarket
+maintainer, not submitted by us — an outside bug report was specific enough that the maintainers
+implemented and shipped it themselves.
 
 How the finding survived to that point: `/audit-fix hunt` surfaced four candidates; the adversarial
 2-of-3 verifier **killed the flashiest one** (already fixed in an open upstream PR) and one
 deliberate-by-design finding; the survivor was reproduced against ~23,000 exhaustive price/tick cases
 before a line was written.
+
+Neither result was cherry-picked from a benchmark: both targets were third-party repos nobody here
+wrote, and in both cases the finding had to survive the same adversarial gate before it left the
+machine.
 
 ## It audits itself, and the self-audit finds things
 
@@ -230,24 +272,37 @@ What changes:
   reported is dropped as `DUPLICATE` rather than re-submitted.
 
 The output is a finding you can stand behind: reproduced with a failing test, not already known
-upstream, and survivable under adversarial review. That is the process that produced the Polymarket
-result above.
+upstream, and survivable under adversarial review. That is the process that produced both
+[field results](#verified-in-the-field) above — the merged SciPy fix and the Polymarket report.
 
 ## Install
 
 ```bash
-# Unix/macOS — installs into your project's .claude/ directory (requires git)
+pip install cca-audit
+cca-audit install          # run from the root of the project you want to audit
+```
+
+That copies the auditor agents into `.claude/agents/` and `/audit-fix` into `.claude/commands/`, and
+puts the `cca_checks` verifier (`python -m cca_checks`) on the same interpreter. Re-run
+`cca-audit install` to upgrade — files you have customized are preserved as `<name>.md.bak` rather
+than overwritten.
+
+<details>
+<summary>Install without pip (shell script, requires git)</summary>
+
+```bash
+# Unix/macOS
 curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
 ```
 
 ```powershell
-# Windows PowerShell (requires git)
+# Windows PowerShell
 irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.ps1 | iex
 ```
 
-This copies the commands into `.claude/commands/`, the agents into `.claude/agents/`, and installs the
-**`cca_checks`** helper package (`python -m cca_checks`) that powers the deterministic verifier. Run
-it from the root of the project you want to audit.
+Same result: it clones the repo to a temp directory and copies the same files. Both paths read the
+markdown from `cca_checks/plugin/`, so there is one copy on disk and they cannot drift.
+</details>
 
 **For the deterministic verification layer**, have `pyright`, `pytest` and `semgrep` on your `PATH`.
 Without them the `definedness` / `nullability` / `type` / `taint` claim types fall back to LLM-only
@@ -260,13 +315,15 @@ as `UNCERTAIN`. DEEP is forced for every high-stakes or numeric diff and for all
 That is deliberate — a sign error reads fluently, so a second LLM opinion is not evidence — but it is
 a hard stop, not graceful degradation.
 
-`cca_checks` is not published on PyPI, so install it from a clone:
+The extras carry it:
 
 ```bash
-pip install -e ".[numeric]"     # adds hypothesis + mpmath
-pip install -e ".[rust]"        # adds the tree-sitter Rust grammar
-pip install -e ".[verify]"      # the whole deterministic layer in one install
+pip install 'cca-audit[verify]'    # the whole deterministic layer in one install
+pip install 'cca-audit[numeric]'   # just hypothesis + mpmath + pytest
+pip install 'cca-audit[rust]'      # just the tree-sitter Rust grammar
 ```
+
+From a clone, the editable equivalents are `pip install -e ".[verify]"` / `-e ".[numeric]"`.
 
 `pyright`, `semgrep` and the Rust toolchain are **not** pip extras: the first two install
 separately, and `cargo`/`clippy` belong to the project you are auditing. Check what you actually
@@ -310,7 +367,7 @@ is still relevant, fixes what remains and marks the rest stale — so no audit l
 
 | | |
 |---|---|
-| Tests | 306, on every push and PR |
+| Tests | 376, on every push and PR |
 | Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |

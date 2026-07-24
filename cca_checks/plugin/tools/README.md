@@ -10,21 +10,26 @@ opinion.
 | `cca_scorecard.py` | Step 2.6 | Per-`(auditor, category)` precision over a 90-day window. Enforces the `n < 10` guard mechanically. |
 | `cca_tautology_check.py` | Step 4 (`snapshot`) + Step 5.6 (`verify`) | Whether each claimed red→green test was *actually red* against the pre-fix code. |
 
-## Why they are here and not in `cca_checks/`
+## Why they are here, beside the agents rather than under `cca_checks/`
 
-These are **not** part of the installable package. `cca_checks` is imported
-(`python -m cca_checks ...`); these two are shelled out to *by path* from the
-orchestrator prompt. They live beside `agents/` and `commands/` because they are
-part of the same deployable bundle, and `install.sh` / `install.ps1` copy all
-three into `.claude/`.
+They ship as **package data, not as importable modules**. `cca_checks` is
+imported (`python -m cca_checks ...`); these two are shelled out to *by path*
+from the orchestrator prompt, so they must land on disk in `.claude/tools/` as
+well as inside the wheel. They sit next to `agents/` and `commands/` because a
+wheel can only carry package data, which makes `cca_checks/plugin/` the one
+location both `pip install cca-audit` and `claude-code/install.sh` can serve from
+— one copy on disk, so the install paths cannot drift.
 
-That the installer copies them is the point. Before 2026-07-24 these files lived
-in a different repository altogether and were synced to `~/.claude/tools/` by
-hand, so `audit-fix.md` shipped referencing two paths that nothing ever created:
-Steps 2.6 and 5.6 were "command not found" on every machine except the author's,
-and the pipeline reported no scorecard and no red-state proof without ever saying
-why. The prompt now resolves `.claude/tools/` first and falls back to
-`$HOME/.claude/tools/`, so both a project-local install and a global one work.
+All three install paths copy them: `install.sh`, `install.ps1`, and
+`cca-audit install`.
+
+That they are installed at all is the point. Before 2026-07-24 these files lived
+in a different repository and were synced to `~/.claude/tools/` by hand, so
+`audit-fix.md` shipped referencing two paths that nothing ever created: Steps 2.6
+and 5.6 were "command not found" on every machine except the author's, and the
+pipeline reported no scorecard and no red-state proof without ever saying why.
+The prompt now resolves `.claude/tools/` first and falls back to
+`$HOME/.claude/tools/`, so a project-local install and a global one both work.
 
 **Edit here, never in `.claude/tools/`.** The deployed copy is downstream. A
 divergent pair is the drift class that left the orchestrator prompt itself
@@ -52,11 +57,11 @@ mean the test never reached the code under test.
 ## Run the tests
 
 They are in this directory, not under `tests/`, because they import the modules
-as bare siblings (`import cca_scorecard`). `claude-code/tools` is listed in
+as bare siblings (`import cca_scorecard`). `cca_checks/plugin/tools` is listed in
 `testpaths`, so a plain `pytest` at the repo root collects them.
 
 ```bash
-pytest claude-code/tools -q
+pytest cca_checks/plugin/tools -q
 ```
 
 Provenance: ported from WecoAI's AIDE (the third layer of its
