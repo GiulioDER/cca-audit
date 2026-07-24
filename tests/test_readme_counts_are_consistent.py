@@ -1,4 +1,4 @@
-"""The README states two counts twice each; the copies must not disagree.
+"""Counts stated twice on the README must not disagree -- or be stated twice.
 
 Both defects this guards against were live on master at 0.8.0, on the page
 that is also the PyPI project description:
@@ -57,18 +57,26 @@ def _auditor_rows(text: str) -> list[str]:
     return [m.group(1).strip() for m in _AUDITOR_ROW.finditer(section.group(0))]
 
 
-def test_the_two_test_counts_agree():
-    """The badge and the Engineering table state the same number."""
-    text = _text()
-    badge = _BADGE_TESTS.search(text)
-    table = _TABLE_TESTS.search(text)
-    assert badge, "no tests badge found in README.md"
-    assert table, "no `| Tests | N` row found in the Engineering table"
+def test_the_test_count_is_stated_exactly_once():
+    """The Engineering table is the only copy; the badge was removed in 0.8.1.
 
-    assert badge.group(1) == table.group(1), (
-        f"README states the test count twice and the copies disagree: badge says "
-        f"{badge.group(1)}, the Engineering table says {table.group(1)}. This page is "
-        f"also the PyPI project description, so the contradiction ships. Update both."
+    The original defect was two copies disagreeing. 0.8.1 resolved it by
+    deleting one copy rather than syncing it, because nothing in the release
+    path updated the badge and it had already drifted. So the invariant is no
+    longer "the copies agree" -- with one copy that assertion cannot fail, and a
+    check that cannot fail is exactly what this project exists to prevent. It is
+    now "there is still only one copy": reintroducing the badge brings back a
+    hand-maintained number with nothing to keep it current.
+    """
+    text = _text()
+    assert not _BADGE_TESTS.search(text), (
+        "README carries a hardcoded tests badge again. Nothing in the release path "
+        "updates it, so it will drift from the Engineering table -- which is what "
+        "shipped on the PyPI page through 0.8.0. State the count once, in the table."
+    )
+    assert _TABLE_TESTS.search(text), (
+        "no `| Tests | N` row found in the Engineering table -- the count is now stated "
+        "only there, so losing that row means the page states it nowhere"
     )
 
 
