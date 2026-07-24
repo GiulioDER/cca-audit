@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml"><img src="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10–3.13"/>
-  <img src="https://img.shields.io/badge/tests-306%20passing-brightgreen" alt="306 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-376%20passing-brightgreen" alt="376 tests passing"/>
   <img src="https://img.shields.io/badge/typed-pyright-informational" alt="Type-checked with pyright"/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
 </p>
@@ -235,18 +235,31 @@ upstream, and survivable under adversarial review. That is the process that prod
 ## Install
 
 ```bash
-# Unix/macOS — installs into your project's .claude/ directory (requires git)
+pip install cca-audit
+cca-audit install          # run from the root of the project you want to audit
+```
+
+That copies the auditor agents into `.claude/agents/` and `/audit-fix` into `.claude/commands/`, and
+puts the `cca_checks` verifier (`python -m cca_checks`) on the same interpreter. Re-run
+`cca-audit install` to upgrade — files you have customized are preserved as `<name>.md.bak` rather
+than overwritten.
+
+<details>
+<summary>Install without pip (shell script, requires git)</summary>
+
+```bash
+# Unix/macOS
 curl -fsSL https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.sh | bash
 ```
 
 ```powershell
-# Windows PowerShell (requires git)
+# Windows PowerShell
 irm https://raw.githubusercontent.com/GiulioDER/cca-audit/master/claude-code/install.ps1 | iex
 ```
 
-This copies the commands into `.claude/commands/`, the agents into `.claude/agents/`, and installs the
-**`cca_checks`** helper package (`python -m cca_checks`) that powers the deterministic verifier. Run
-it from the root of the project you want to audit.
+Same result: it clones the repo to a temp directory and copies the same files. Both paths read the
+markdown from `cca_checks/plugin/`, so there is one copy on disk and they cannot drift.
+</details>
 
 **For the deterministic verification layer**, have `pyright`, `pytest` and `semgrep` on your `PATH`.
 Without them the `definedness` / `nullability` / `type` / `taint` claim types fall back to LLM-only
@@ -259,12 +272,14 @@ as `UNCERTAIN`. DEEP is forced for every high-stakes or numeric diff and for all
 That is deliberate — a sign error reads fluently, so a second LLM opinion is not evidence — but it is
 a hard stop, not graceful degradation.
 
-`cca_checks` is not published on PyPI, so install it from a clone:
+The extras carry it:
 
 ```bash
-pip install -e ".[numeric]"     # adds hypothesis + mpmath
-pip install -e ".[verify]"      # the whole deterministic layer in one install
+pip install 'cca-audit[verify]'    # the whole deterministic layer in one install
+pip install 'cca-audit[numeric]'   # just hypothesis + mpmath + pytest
 ```
+
+From a clone, the editable equivalents are `pip install -e ".[verify]"` / `-e ".[numeric]"`.
 
 Worked example: [`examples/sign-trap`](examples/sign-trap/) — a real sign error, the property that
 catches it, and the resulting artifact.
@@ -303,7 +318,7 @@ is still relevant, fixes what remains and marks the rest stale — so no audit l
 
 | | |
 |---|---|
-| Tests | 306, on every push and PR |
+| Tests | 376, on every push and PR |
 | Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |

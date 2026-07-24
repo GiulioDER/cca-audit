@@ -8,6 +8,40 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.0] - 2026-07-24
+
+- **Published to PyPI as `cca-audit`** — the first release installable with `pip`. The distribution
+  was renamed from `cca_checks` because the *product* is the auditor agents and the `/audit-fix`
+  orchestrator, not the verification helpers they shell out to; a PyPI page named after the helper
+  would have advertised a tool you could not install from it. **The import name is unchanged**
+  (`python -m cca_checks` still works, and every agent prompt that invokes it is untouched).
+  Nothing was ever published under `cca_checks`, so there is no migration.
+- **New `cca-audit install` console script.** `pip install cca-audit && cca-audit install` installs
+  the whole plugin into `<target>/.claude/`, replacing `curl … | bash` as the primary path — piping
+  a network fetch into a shell is an install step a large share of developers decline outright, and
+  that refusal is invisible. It mirrors the shell installer: customized files are preserved as
+  `<name>.md.bak` before being replaced, backups happen only when content actually differs, and a
+  pre-existing agent whose frontmatter `name:` collides with one we dispatch is reported rather
+  than silently shadowed.
+- **The agent and command markdown moved into the package**, from `claude-code/{agents,commands}/`
+  to `cca_checks/plugin/{agents,commands}/`. A wheel can only carry package data, so this is the
+  only location both install paths can serve from — one copy on disk, so the two cannot drift.
+  `claude-code/install.sh` and `install.ps1` read from the new location and behave as before.
+- **The wheel is now checked for the markdown, not just for imports.** A wheel missing the plugin
+  files installs cleanly, imports cleanly, and `cca-audit install` exits 0 having written an empty
+  `.claude/` — a total silent failure the previous import-only smoke test could not see. CI installs
+  the built wheel into a clean venv, runs the console script against a scratch project, and asserts
+  every agent in the source tree arrived; `tests/test_plugin_install.py` asserts the same invariant
+  through `importlib.resources`.
+- **The shell installer falls back to PyPI.** Under Git Bash on Windows `$REPO_ROOT` is an MSYS path
+  (`/c/Users/…`) that pip rejects as a requirement, which silently downgraded the install to
+  LLM-only verification. There is now a published source that always parses.
+- Fixed a stale README badge: the test count read 306 against an actual 376.
+
+## [0.6.1] - 2026-07-24
+
 - **Second field result, merged upstream** (docs only — no `cca_checks` change). Hunt mode on
   `scipy/scipy` found a copy-paste defect in `signal.decimate`'s complex-coefficient guard
   (`system.poles` tested twice, `system.zeros` never), which crashed valid `dlti` filters with real

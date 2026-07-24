@@ -71,3 +71,22 @@ jobs:
               assert os.path.exists(path), f"rule file missing from the wheel: {name}"
           print("packaged rules OK")
           PY
+
+      - name: Install the plugin from the wheel into a scratch project
+        # The agent/command markdown IS the product, and a wheel that omits it
+        # still installs, still imports, and `cca-audit install` still exits 0 --
+        # leaving an empty .claude/. Only running the console script against a
+        # real directory and counting what landed catches that, which is why
+        # this asserts on files rather than on the exit code.
+        run: |
+          mkdir -p /tmp/scratch-project
+          cd /tmp/scratch-project
+          /tmp/wheeltest/bin/cca-audit install
+          # Every agent that ships in the source tree must arrive. A package-data
+          # glob that silently stops matching would otherwise install a partial
+          # auditor set -- findings would just quietly stop being raised.
+          expected=$(ls "$GITHUB_WORKSPACE"/cca_checks/plugin/agents/cca-*.md | wc -l)
+          actual=$(ls .claude/agents/cca-*.md | wc -l)
+          test "$expected" -eq "$actual" || { echo "wheel shipped $actual of $expected agents"; exit 1; }
+          test -n "$(ls .claude/commands/audit-fix*.md)" || { echo "no commands installed"; exit 1; }
+          echo "plugin install OK ($actual agents)"

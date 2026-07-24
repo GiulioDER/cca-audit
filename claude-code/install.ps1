@@ -23,9 +23,14 @@ if ($PSCommandPath) {
 $CleanupDir = $null
 try {
     # Decide where to copy the files from.
-    if ($ScriptDir -and (Test-Path (Join-Path $ScriptDir "agents"))) {
+    # The agent/command markdown lives under cca_checks/plugin/ rather than beside
+    # this script: a wheel can only carry package data, so that is the only location
+    # from which BOTH `pip install cca-audit` and this script can serve the same
+    # files. One copy on disk, so the two install paths cannot drift.
+    $AssetsRel = "cca_checks\plugin"
+    if ($ScriptDir -and (Test-Path (Join-Path (Join-Path (Split-Path -Parent $ScriptDir) $AssetsRel) "agents"))) {
         # Local mode: run from a checkout.
-        $SrcDir = $ScriptDir
+        $SrcDir = Join-Path (Split-Path -Parent $ScriptDir) $AssetsRel
     } else {
         # Standalone mode: fetch the repo into a temp dir.
         if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -44,7 +49,7 @@ try {
         if ($LASTEXITCODE -ne 0) {
             throw "could not clone $RepoUrl (network/proxy/auth?)."
         }
-        $SrcDir = Join-Path (Join-Path $CleanupDir "repo") "claude-code"
+        $SrcDir = Join-Path (Join-Path $CleanupDir "repo") $AssetsRel
     }
 
     $AgentsDir = ".claude\agents"
@@ -104,7 +109,10 @@ try {
     # agent prompts actually invoke (`python -m cca_checks ...`). Installing into a
     # different interpreter yields a "successful" install whose deterministic layer
     # never runs, degrading silently to LLM-only verification.
-    $RepoRoot = Split-Path -Parent $SrcDir
+    # $SrcDir is <root>\cca_checks\plugin, so the project root is two levels up.
+    # A single Split-Path here would point pip at cca_checks\, which has no
+    # pyproject.toml -- the install would be skipped with a misleading note.
+    $RepoRoot = Split-Path -Parent (Split-Path -Parent $SrcDir)
     $py = Get-Command python -ErrorAction SilentlyContinue
     if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
     if ($py -and (Test-Path (Join-Path $RepoRoot "pyproject.toml"))) {
