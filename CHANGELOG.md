@@ -6,7 +6,17 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.8.1] - 2026-07-24
+
+- **Dropped two hardcoded figures that nothing keeps current.** The banner
+  (`docs/banner.svg`) carried `v0.6.0` as static SVG text and the README carried a
+  `tests-613 passing` shields.io badge; no release step touched either, so the version had already
+  drifted two minors behind the published package. Neither is replaced: the version lives in
+  `pyproject.toml` and on the PyPI page, and the CI badge already reports whether the suite is
+  green. This release exists mainly to re-upload the description — the PyPI project page is frozen
+  at upload time, so the stale banner and badge stayed visible on 0.8.0 after they left master.
+
+## [0.8.0] - 2026-07-24
 
 - **Corrected three stale figures in the README**, which is also the PyPI project description.
   The tests badge said 610 while the Engineering table said 378 — the same fact stated twice, in
