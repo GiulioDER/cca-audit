@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml"><img src="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10–3.13"/>
-  <img src="https://img.shields.io/badge/tests-610%20passing-brightgreen" alt="610 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-613%20passing-brightgreen" alt="613 tests passing"/>
   <img src="https://img.shields.io/badge/typed-pyright-informational" alt="Type-checked with pyright"/>
   <a href="https://github.com/GiulioDER/cca-audit/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
 </p>
@@ -14,7 +14,7 @@
 
 **A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in which no finding reaches your code unverified.**
 
-Ten specialised auditors read your diff in parallel. Their findings are deduplicated, then each one is
+Eleven specialised auditors read your diff in parallel. Their findings are deduplicated, then each one is
 **re-derived against the real code** — mechanically, by `pyright`, `clippy`, `semgrep`, `pytest` or
 `hypothesis` wherever a tool can settle the claim, and by adversarial review where none can. Only
 findings that survive that gate are eligible to be fixed. The fix is then checked for scope creep,
@@ -367,12 +367,12 @@ is still relevant, fixes what remains and marks the rest stale — so no audit l
 
 | | |
 |---|---|
-| Tests | 378, on every push and PR |
+| Tests | 613, on every push and PR |
 | Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |
 | Types | `pyright` |
-| Design of record | [`docs/v3-design.md`](https://github.com/GiulioDER/cca-audit/blob/master/docs/v3-design.md), versioned slices v3.0 → v3.5 |
+| Design of record | [`docs/v3-design.md`](https://github.com/GiulioDER/cca-audit/blob/master/docs/v3-design.md), versioned slices v3.0 → v3.6 |
 
 Every deterministic-verification slice ships with a written spec and an implementation plan under
 [`docs/superpowers/`](https://github.com/GiulioDER/cca-audit/tree/master/docs/superpowers), including the measured dead ends — approaches that were
