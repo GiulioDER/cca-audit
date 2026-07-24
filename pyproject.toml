@@ -70,7 +70,12 @@ include = ["cca_checks*"]
 cca_checks = ["rules/*.yaml"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# claude-code/tools is a testpath, not a stray directory: those two checkers gate
+# the audit pipeline itself (Step 2.6 and Step 5.6), so a regression there is a
+# regression in what /audit-fix is willing to confirm. Their tests import the
+# modules as bare siblings, which is why they live beside them rather than under
+# tests/.
+testpaths = ["tests", "claude-code/tools"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

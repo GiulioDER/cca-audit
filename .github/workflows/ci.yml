@@ -45,7 +45,9 @@ jobs:
         run: pip install pyright semgrep
 
       - name: Lint
-        run: ruff check cca_checks tests
+        # claude-code/tools is linted too: those checkers gate Steps 2.6 and 5.6,
+        # so they are pipeline code, not scripts sitting beside it.
+        run: ruff check cca_checks tests claude-code/tools
 
       - name: Test
         run: pytest -q

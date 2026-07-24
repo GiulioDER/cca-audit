@@ -488,7 +488,8 @@ eyeballed from a JSONL file is not a measurement, and the `n < 10` guard is exac
 that quietly stops being applied when a human (or a model) is doing the arithmetic in its head:
 
 ```bash
-python "$HOME/.claude/tools/cca_scorecard.py" --json          # add --routing on to enable routing
+CCA=.claude/tools/cca_scorecard.py; [ -f "$CCA" ] || CCA="$HOME/.claude/tools/cca_scorecard.py"
+python "$CCA" --json          # add --routing on to enable routing
 ```
 
 It reads `.claude/audits/AUDITOR_SCORECARD.jsonl` over a trailing 90-day window and returns
@@ -552,7 +553,8 @@ journal (it has no L5.5/L6 mapping loop).
 red-state proof at Step 5.6 needs it, and it becomes unrecoverable the moment the fixes land:
 
 ```bash
-python "$HOME/.claude/tools/cca_tautology_check.py" snapshot <every file you will edit>
+TC=.claude/tools/cca_tautology_check.py; [ -f "$TC" ] || TC="$HOME/.claude/tools/cca_tautology_check.py"
+python "$TC" snapshot <every file you will edit>
 ```
 
 Per fix: Read current file → apply via Edit → note which finding ID it resolves.
@@ -617,7 +619,8 @@ the cheapest way to turn L5 green is a test that was never red. Do not eyeball t
 against the pre-fix code:
 
 ```bash
-python "$HOME/.claude/tools/cca_tautology_check.py" verify \
+TC=.claude/tools/cca_tautology_check.py; [ -f "$TC" ] || TC="$HOME/.claude/tools/cca_tautology_check.py"
+python "$TC" verify \
   --proof FIX-002=tests/test_x.py::test_fee \
   --proof FIX-004=tests/test_x.py::test_injection --json
 ```

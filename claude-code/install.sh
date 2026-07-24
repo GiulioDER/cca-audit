@@ -44,7 +44,8 @@ fi
 
 AGENTS_DIR=".claude/agents"
 COMMANDS_DIR=".claude/commands"
-mkdir -p "$AGENTS_DIR" "$COMMANDS_DIR"
+TOOLS_DIR=".claude/tools"
+mkdir -p "$AGENTS_DIR" "$COMMANDS_DIR" "$TOOLS_DIR"
 
 BACKED_UP=0
 
@@ -92,6 +93,18 @@ commands=("$SRC_DIR/commands/"audit-fix*.md)
 [[ ${#commands[@]} -gt 0 ]] || { echo "Error: no command files found in $SRC_DIR/commands/" >&2; exit 1; }
 for cmd in "${commands[@]}"; do
   install_file "$cmd" "$COMMANDS_DIR"
+done
+
+# Copy the pipeline checkers. These are NOT part of the cca_checks package -- the
+# orchestrator shells out to them by path (Step 2.6 scorecard, Step 5.6 red-state
+# proof). Before they were installed here, a fresh install had an audit-fix.md
+# that referenced two files nothing ever placed on disk, so both gates degraded to
+# "command not found" on every machine except the author's.
+tools=("$SRC_DIR/tools/"cca_*.py)
+[[ ${#tools[@]} -gt 0 ]] || { echo "Error: no checker files found in $SRC_DIR/tools/" >&2; exit 1; }
+for tool in "${tools[@]}"; do
+  case "$(basename "$tool")" in test_*) continue ;; esac
+  install_file "$tool" "$TOOLS_DIR"
 done
 
 # Install the cca_checks package so the deterministic verifier works.
