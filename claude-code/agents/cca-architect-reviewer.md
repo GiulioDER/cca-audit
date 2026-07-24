@@ -29,6 +29,7 @@ timestamp: [ISO timestamp]
 duration: [seconds]
 verdict: APPROVED | REVISE | BLOCKED
 issues_found: [count]
+revised_findings: []      # FIX-ids sent back this cycle, each with its attempts[FIX-id] count
 errors: []
 ---
 ```
@@ -45,7 +46,10 @@ Review the full diff and assess:
 
 1. Read the consolidated fix plan from the orchestrator's Layer 2 output (the canonical pipeline
    consolidates inline from structured findings, so `.claude/audits/FIXES.md` may not exist — use it
-   only if present)
+   only if present). For any finding you are about to REVISE, also read its prior attempts in
+   `.claude/audits/FIX_JOURNAL.md` (orchestrator-maintained), so your feedback does not repeat or
+   contradict an edit already tried and rejected — a finding already at `attempts=3` must NOT be REVISEd
+   again: return it BLOCKED (needs human), per the shared per-finding attempt budget
 2. Read the full diff of changes (`git diff` or `git diff HEAD~N`)
 3. For each P1/P2 fix, verify:
    - The fix addresses the root cause (not just the symptom)
