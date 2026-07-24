@@ -10,6 +10,28 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 Nothing yet.
 
+## [0.7.1] - 2026-07-24
+
+- **Fixed the PyPI project page: every relative link and image in the README is now absolute.**
+  0.7.0's page shipped a **broken banner image** and **15 links returning 404**. GitHub resolves a
+  relative path against the repository; PyPI renders the same markdown standalone, so
+  `docs/banner.svg` and `docs/v3-design.md` resolved against `pypi.org` and did not exist. Verified
+  against the live page: `https://pypi.org/project/cca-audit/LICENSE` → 404,
+  `.../docs/v3-design.md` → 404, `.../examples/sign-trap/` → 404, and the banner `<img>` reported
+  `naturalWidth == 0`. Dead links covered LICENSE, CHANGELOG, CONTRIBUTING, SECURITY, all six
+  `docs/` pages and the `examples/sign-trap` worked example the README cites as proof.
+- **Why this needed a version bump at all:** PyPI freezes a release's description at upload, so a
+  project page can only be repaired by publishing a new version. 0.7.0 is unfixable in place. This
+  is the same defect class that cost `recall-rag` a release.
+- **Added `tests/test_readme_urls_are_absolute.py` so it cannot recur.** It asserts the invariant
+  ("no relative reference anywhere in README.md") rather than a list of today's known-bad paths, so
+  a link added next month is covered without anyone remembering the test exists. In-page anchors
+  (`#section`) stay exempt — they resolve correctly on both hosts. A second test exercises the
+  detection path against a known-bad sample, because a regex that silently stopped matching would
+  leave the guard green on a broken README — a check that verifies nothing.
+- Nothing in the installed package changed: same modules, same agents, same console script. 0.7.1
+  is a documentation-metadata release.
+
 ## [0.7.0] - 2026-07-24
 
 - **Published to PyPI as `cca-audit`** — the first release installable with `pip`. The distribution
