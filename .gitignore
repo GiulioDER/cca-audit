@@ -19,3 +19,9 @@ venv/
 # cca_checks/cargo_repro.py on why the repro path does not isolate it), and the
 # artifacts are large, machine-specific, and regenerated on every run.
 tests/fixtures/**/target/
+
+# Benchmark corpora: fetched upstream sources, ~5MB, fully regenerable from the
+# frozen manifest via `python harness/fresh_materialize.py`. The manifest and the
+# ground-truth index ARE committed; the sources they point at are not.
+benchmarks/data_fresh/
+benchmarks/BugsInPy/
