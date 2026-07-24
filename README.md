@@ -27,9 +27,48 @@ check that passed.**
 
 ## Verified in the field
 
-CCA's [hunt mode](#hunt-mode--auditing-code-you-did-not-write) was pointed at
-[Polymarket/py-sdk](https://github.com/Polymarket/py-sdk) — a third-party SDK, ~70 stars, actively
-maintained — and found a client-side price-validation defect:
+Two upstream results, both from [hunt mode](#hunt-mode--auditing-code-you-did-not-write), both
+checkable in under a minute.
+
+### SciPy — merged upstream
+
+Hunt mode was pointed at [scipy/scipy](https://github.com/scipy/scipy) (~14.8k stars) and found a
+copy-paste defect in `signal.decimate`'s complex-coefficient guard:
+
+```python
+elif (any(np.iscomplex(system.poles))
+      or any(np.iscomplex(system.poles))   # <- should be system.zeros
+      or np.iscomplex(system.gain)):
+```
+
+> The guard exists to route complex-coefficient filters away from `zpk2sos`, which cannot represent
+> them. Because it tested the poles twice and never the zeros, a `dlti` filter with **real poles and
+> complex zeros** was not recognised as complex, was forced through `zpk2sos`, and raised
+> `ValueError: complex value with no matching conjugate` on valid input.
+
+| | |
+|---|---|
+| Submitted upstream | [PR #25654](https://github.com/scipy/scipy/pull/25654), 18 Jul 2026 |
+| Merged | 23 Jul 2026 by a SciPy maintainer — approved *"LGTM"*, labelled `defect` |
+| What shipped | the one-line fix **and our regression test**, `test_complex_zeros_real_poles_iir_dlti` |
+| Latent for | ~3 years 3 months — introduced by [gh-17881](https://github.com/scipy/scipy/pull/17881) (Apr 2023) |
+
+The defect is sharper than its one-line diff suggests: gh-17881 was itself titled *"Fix handling on
+user-supplied filters in `signal.decimate`"* and added complex-filter support. The typo silently
+defeated half of the feature that PR shipped — complex *poles* worked, complex *zeros* crashed — and
+survived review, three years of releases, and the surrounding test suite, which covered the working
+half only. It is still live in the current release, 1.18.0.
+
+**To be precise about what that means:** the fix was ours and it was merged into a core scientific
+library after maintainer review. What we did *not* do is submit it autonomously — SciPy's
+[AI policy](https://github.com/scipy/scipy/blob/main/doc/source/dev/conduct/ai_policy.rst) requires a
+human to check generated code and open the PR, and requires the PR prose to be the contributor's own
+words. Both were honoured, and the AI-assistance disclosure is in the PR body.
+
+### Polymarket py-sdk — reported, fixed by the maintainers
+
+Hunt mode was pointed at [Polymarket/py-sdk](https://github.com/Polymarket/py-sdk) — a third-party
+SDK, ~70 stars, actively maintained — and found a client-side price-validation defect:
 
 > `_resolve_price` and `_resolve_protected_market_price` validated prices by **decimal-place count**
 > rather than **tick-grid membership**. The two agree on power-of-ten ticks and diverge on `0.005`
@@ -43,15 +82,18 @@ maintained — and found a client-side price-validation defect:
 | Author of the fix | a Polymarket maintainer, independently |
 | Issue status | closed as **completed** |
 
-**To be precise about what that means:** the upstream fix was written by a Polymarket maintainer, not
-submitted by us. That is the stronger result — an outside bug report was credible and specific enough
-that the maintainers implemented and shipped it themselves. Every link above is checkable in under a
-minute, which is the point.
+**To be precise about what that means:** here the upstream fix was written by a Polymarket
+maintainer, not submitted by us — an outside bug report was specific enough that the maintainers
+implemented and shipped it themselves.
 
 How the finding survived to that point: `/audit-fix hunt` surfaced four candidates; the adversarial
 2-of-3 verifier **killed the flashiest one** (already fixed in an open upstream PR) and one
 deliberate-by-design finding; the survivor was reproduced against ~23,000 exhaustive price/tick cases
 before a line was written.
+
+Neither result was cherry-picked from a benchmark: both targets were third-party repos nobody here
+wrote, and in both cases the finding had to survive the same adversarial gate before it left the
+machine.
 
 ## It audits itself, and the self-audit finds things
 
@@ -187,8 +229,8 @@ What changes:
   reported is dropped as `DUPLICATE` rather than re-submitted.
 
 The output is a finding you can stand behind: reproduced with a failing test, not already known
-upstream, and survivable under adversarial review. That is the process that produced the Polymarket
-result above.
+upstream, and survivable under adversarial review. That is the process that produced both
+[field results](#verified-in-the-field) above — the merged SciPy fix and the Polymarket report.
 
 ## Install
 

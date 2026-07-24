@@ -8,7 +8,12 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
-Nothing yet.
+- **Second field result, merged upstream** (docs only — no `cca_checks` change). Hunt mode on
+  `scipy/scipy` found a copy-paste defect in `signal.decimate`'s complex-coefficient guard
+  (`system.poles` tested twice, `system.zeros` never), which crashed valid `dlti` filters with real
+  poles and complex zeros and had been latent since gh-17881 in April 2023. Fix and regression test
+  merged as [scipy/scipy#25654](https://github.com/scipy/scipy/pull/25654) on 2026-07-23. README's
+  "Verified in the field" now carries both this and the Polymarket py-sdk result.
 
 ## [0.6.0] - 2026-07-23
 
