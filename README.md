@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="CCA-Audit — multi-agent code audit for Claude Code. Pipeline: parallel auditors, consolidate, verify (L2.5), fix, regression diff (L5.5), architect gate (L6)." width="100%"/>
+  <img src="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/banner.svg" alt="CCA-Audit — multi-agent code audit for Claude Code. Pipeline: parallel auditors, consolidate, verify (L2.5), fix, regression diff (L5.5), architect gate (L6)." width="100%"/>
 </p>
 
 <p align="center">
   <a href="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml"><img src="https://github.com/GiulioDER/cca-audit/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"/></a>
   <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue" alt="Python 3.10–3.13"/>
-  <img src="https://img.shields.io/badge/tests-376%20passing-brightgreen" alt="376 tests passing"/>
+  <img src="https://img.shields.io/badge/tests-610%20passing-brightgreen" alt="610 tests passing"/>
   <img src="https://img.shields.io/badge/typed-pyright-informational" alt="Type-checked with pyright"/>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
+  <a href="https://github.com/GiulioDER/cca-audit/blob/master/LICENSE"><img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT license"/></a>
 </p>
 
 # CCA-Audit
@@ -330,7 +330,7 @@ separately, and `cargo`/`clippy` belong to the project you are auditing. Check w
 have with `python -m cca_checks capabilities --file <a source file>` — it names the missing tool for
 any claim type it cannot settle here, rather than leaving you to infer it from an escalation.
 
-Worked example: [`examples/sign-trap`](examples/sign-trap/) — a real sign error, the property that
+Worked example: [`examples/sign-trap`](https://github.com/GiulioDER/cca-audit/tree/master/examples/sign-trap) — a real sign error, the property that
 catches it, and the resulting artifact.
 
 ## Usage
@@ -367,33 +367,33 @@ is still relevant, fixes what remains and marks the rest stale — so no audit l
 
 | | |
 |---|---|
-| Tests | 376, on every push and PR |
+| Tests | 378, on every push and PR |
 | Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |
 | Types | `pyright` |
-| Design of record | [`docs/v3-design.md`](docs/v3-design.md), versioned slices v3.0 → v3.5 |
+| Design of record | [`docs/v3-design.md`](https://github.com/GiulioDER/cca-audit/blob/master/docs/v3-design.md), versioned slices v3.0 → v3.5 |
 
 Every deterministic-verification slice ships with a written spec and an implementation plan under
-[`docs/superpowers/`](docs/superpowers/), including the measured dead ends — approaches that were
+[`docs/superpowers/`](https://github.com/GiulioDER/cca-audit/tree/master/docs/superpowers), including the measured dead ends — approaches that were
 tried, failed, and are recorded so they are not re-attempted.
 
 ## Documentation
 
-- [Pipeline Diagram](docs/pipeline-diagram.md) — a walkthrough of each step
-- [Auditor Scopes](docs/auditor-scopes.md) — the full non-overlapping scope matrix
-- [Configuration](docs/configuration.md) — tiers, domain dispatch, project context
-- [Extending](docs/extending.md) — adding a custom auditor
-- [v3 Design](docs/v3-design.md) — the design of record for the deterministic verification layer
-- [Security Policy](SECURITY.md) — **this tool executes code from the repository under audit**
-- [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md)
+- [Pipeline Diagram](https://github.com/GiulioDER/cca-audit/blob/master/docs/pipeline-diagram.md) — a walkthrough of each step
+- [Auditor Scopes](https://github.com/GiulioDER/cca-audit/blob/master/docs/auditor-scopes.md) — the full non-overlapping scope matrix
+- [Configuration](https://github.com/GiulioDER/cca-audit/blob/master/docs/configuration.md) — tiers, domain dispatch, project context
+- [Extending](https://github.com/GiulioDER/cca-audit/blob/master/docs/extending.md) — adding a custom auditor
+- [v3 Design](https://github.com/GiulioDER/cca-audit/blob/master/docs/v3-design.md) — the design of record for the deterministic verification layer
+- [Security Policy](https://github.com/GiulioDER/cca-audit/blob/master/SECURITY.md) — **this tool executes code from the repository under audit**
+- [Changelog](https://github.com/GiulioDER/cca-audit/blob/master/CHANGELOG.md) · [Contributing](https://github.com/GiulioDER/cca-audit/blob/master/CONTRIBUTING.md)
 
 **Writing**
 
-- [Fluency isn't evidence](docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how a counterexample settles it
-- [Why AI code review hallucinates](docs/blog-why-ai-review-hallucinates.md) — and the two gates that close it
-- [The benchmark memorization gap](docs/blog-benchmark-memorization-gap.md) — what a passing benchmark score actually measures
+- [Fluency isn't evidence](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how a counterexample settles it
+- [Why AI code review hallucinates](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-why-ai-review-hallucinates.md) — and the two gates that close it
+- [The benchmark memorization gap](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-benchmark-memorization-gap.md) — what a passing benchmark score actually measures
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/GiulioDER/cca-audit/blob/master/LICENSE)
