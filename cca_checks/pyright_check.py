@@ -367,10 +367,11 @@ def verdict_for_claim(
         lo, hi = enclosing_span(claim.file, claim.line)
     except Exception:
         lo = hi = None
-    if lo is not None:
+    if lo is not None and hi is not None:
         nearby = _diags_in_span(diags, lo, hi, rules)
         if nearby:
-            where = ", ".join(sorted({f"{_line_bounds(d)[0]}" for d in nearby}))
+            bounds = [_line_bounds(d) for d in nearby]
+            where = ", ".join(sorted({f"{b[0]}" for b in bounds if b is not None}))
             ev = (f"pyright reported no {REFUTE_LABEL.get(claim.claim_type, claim.claim_type)} "
                   f"diagnostic exactly at {claim.file}:{claim.line}, but did report one in the "
                   f"enclosing scope (lines {lo}-{hi}, at {where}) -- the claim may be off by a "

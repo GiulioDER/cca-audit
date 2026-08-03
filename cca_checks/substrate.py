@@ -51,6 +51,7 @@ import math
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any, cast
 
 from .config import SUBSTRATE_DPS
 
@@ -195,8 +196,11 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
     # every access below, rather than suppressing the check.
     assert mpmath is not None
     observed = fn(*args)
-    reference = result.value
-    assert isinstance(reference, mpmath.mpf)
+    reference_value = result.value
+    assert isinstance(reference_value, mpmath.mpf)
+    # mpmath's runtime-generated context type is not statically narrowable in
+    # current pyright releases. The runtime check above remains authoritative.
+    reference = cast(Any, reference_value)
 
     # Finiteness is checked SYMMETRICALLY, mirroring properties.py::_close. Checking
     # only `observed` (as this used to) is one-directional and wrong in both

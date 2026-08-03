@@ -13,9 +13,10 @@ package exists to provide. Concretely:
   privileges and in your environment.** There is no sandboxing at this layer; the subprocess
   inherits the calling user's filesystem access, environment variables, and network reachability.
 - **`substrate.py` runs the audited target twice** — once at float64, once against a 50-digit
-  `mpmath` reference — and **monkeypatches the target module's `math`/`cmath` bindings for the
-  duration of each call.** A target with side effects fires them on both runs. This module is
-  explicitly documented as not thread-safe for the same reason.
+  `mpmath` reference — and **monkeypatches the target module's `math` bindings for the duration
+  of each call.** Complex arithmetic and `cmath` bindings are not supported. A target with side
+  effects fires them on both runs. This module is explicitly documented as not thread-safe for
+  the same reason.
 - **Hunt mode (`/audit-fix hunt <paths>`) is designed to be pointed at code you did not write** —
   an OSS dependency, a repo you're evaluating, a legacy service. That is exactly the untrusted
   case above, by design, not by accident.
@@ -37,10 +38,10 @@ first, too.
 
 ## Supported versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.6.x   | Yes — current release line |
-| < 0.6   | No — upgrade; the DEEP self-audit (PRs #18–#20, #22) fixed real security findings (see `CHANGELOG.md`) that are not backported |
+The current release and current `master` are supported. Older release lines do not receive
+guaranteed backports; upgrade before reporting a problem already fixed on `master`. The DEEP
+self-audit changes merged through PRs #18–#20 and #22 fixed security-relevant defects that were
+not backported to earlier releases.
 
 ## Reporting a vulnerability
 

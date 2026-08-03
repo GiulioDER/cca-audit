@@ -51,6 +51,9 @@ jobs:
         # checkers are linted as the pipeline code they are, without a second path.
         run: ruff check cca_checks tests
 
+      - name: Type check
+        run: python -m pyright
+
       - name: Test
         run: pytest -q
 
