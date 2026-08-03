@@ -111,8 +111,8 @@ def _run_one(nodeid: str, extra: list[str]) -> tuple[str, str]:
         return TAUTOLOGICAL, tail
     if proc.returncode == 5 or re.search(r"\b\d+ errors?\b", out):
         return INCONCLUSIVE, tail                      # not collected / collection error
-    if _UNREACHED.search(out):
-        m = _UNREACHED.search(out)
+    m = _UNREACHED.search(out)
+    if m is not None:
         return INCONCLUSIVE, f"{m.group(0)} — test never reached the code under test"
     if re.search(r"\b\d+ failed", out):
         return RED, tail

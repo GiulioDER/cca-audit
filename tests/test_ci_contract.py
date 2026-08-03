@@ -100,6 +100,11 @@ def test_ci_installs_the_dev_extra():
     assert 'pip install -e ".[dev]"' in _ci_text()
 
 
+def test_ci_runs_the_configured_type_checker():
+    """Installing pyright is not evidence that the project passes pyright."""
+    assert "run: python -m pyright" in _ci_text()
+
+
 @pytest.mark.parametrize("language", ["python", "rust"])
 def test_the_packaging_job_checks_every_backends_catalog(language):
     """A rule file missing from the wheel is invisible to the test job, which runs

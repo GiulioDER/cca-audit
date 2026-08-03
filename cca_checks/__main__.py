@@ -125,6 +125,7 @@ def _check(claim_type: str, args) -> Verdict:
     backend, unsupported = _resolve_backend(args.file, claim_type, args.finding_id)
     if unsupported is not None:
         return unsupported
+    assert backend is not None
     claim = Claim(args.finding_id, args.file, args.line, claim_type,
                   proposition=args.symbol, sink_class=args.sink_class)
     return backend.settle(claim)

@@ -446,7 +446,8 @@ def verdict_for_claim(claim: Claim, diagnostics: list[dict] | None,
     lo, hi = span
     nearby = _in_span(diagnostics, file, lo, hi, lints)
     if nearby:
-        where = ", ".join(sorted({str(line_bounds(d, file)[0]) for d in nearby}))
+        bounds = [line_bounds(d, file) for d in nearby]
+        where = ", ".join(sorted({str(b[0]) for b in bounds if b is not None}))
         return make_verdict(
             fid, "UNCERTAIN",
             f"clippy reported no {REFUTE_LABEL.get(claim_type, claim_type)} "

@@ -117,13 +117,19 @@ def load_rows(ledger: Path, now: datetime, window_days: int = WINDOW_DAYS):
         except json.JSONDecodeError:
             yield None, "malformed"
             continue
+        if not isinstance(row, dict):
+            yield None, "malformed"
+            continue
         if "verdict" not in row:
             yield row, "outcome"          # back-filled fix outcome, not a judgement
             continue
         try:
             if _parse_ts(row["ts"]) < cutoff:
                 continue
-            row["auditor"], row["category"]  # noqa: B018 - presence check
+            auditor = row["auditor"]
+            category = row["category"]
+            if not isinstance(auditor, str) or not isinstance(category, str):
+                raise TypeError
         except (KeyError, TypeError, ValueError):
             yield None, "malformed"
             continue
@@ -143,6 +149,9 @@ def build(ledger: Path = DEFAULT_LEDGER, now: datetime | None = None,
             continue
         if kind == "outcome":
             rep.rows_skipped_outcome += 1
+            continue
+        if row is None:
+            rep.rows_skipped_malformed += 1
             continue
         rep.rows_scored += 1
         verdict = row["verdict"]
