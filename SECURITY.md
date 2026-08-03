@@ -12,11 +12,12 @@ package exists to provide. Concretely:
   repository executes that repository's `conftest.py` — and anything it imports — with your
   privileges and in your environment.** There is no sandboxing at this layer; the subprocess
   inherits the calling user's filesystem access, environment variables, and network reachability.
-- **`substrate.py` runs the audited target twice** — once at float64, once against a 50-digit
-  `mpmath` reference — and **monkeypatches the target module's `math` bindings for the duration
-  of each call.** Complex arithmetic and `cmath` bindings are not supported. A target with side
-  effects fires them on both runs. This module is explicitly documented as not thread-safe for
-  the same reason.
+- **`substrate.py` runs the audited target three times** — float64, a 50-digit `mpmath`
+  reference, then float64 again to screen for output-changing state — and **monkeypatches the
+  target module's `math` bindings during the reference call.** It also installs a temporary
+  profile hook in the current thread to detect native conversion of an `mpf`. Complex arithmetic,
+  `cmath`, worker threads, and side effects are not supported. The module is explicitly documented
+  as not thread-safe.
 - **Hunt mode (`/audit-fix hunt <paths>`) is designed to be pointed at code you did not write** —
   an OSS dependency, a repo you're evaluating, a legacy service. That is exactly the untrusted
   case above, by design, not by accident.
