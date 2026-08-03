@@ -155,6 +155,12 @@ worked example above. Their helper-specific keys are:
   cancellation, accumulation error, and rounding direction. It is **blind to sign and
   formula errors** — both substrates compute the same wrong formula — so pair it with
   `assert_monotonic_in` or `assert_limit` when the finding is about direction.
+  The target MUST be a synchronous, deterministic, pure function with positional scalar-real
+  inputs and one scalar-real result. Do not use this helper for NumPy arrays, complex or structured
+  results, keyword-only interfaces, async/generator code, worker threads, I/O, or mutation. It runs
+  float64 before and after the reference call; a replay mismatch screens for output-changing state,
+  but does not prove purity. If the target is outside this contract, choose another property or
+  leave the finding for semantic adjudication.
 
 State the property as the **intended relation**, derived from what the function is supposed to
 mean — never from what the code does. A property read off the implementation is a tautology: it

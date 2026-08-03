@@ -4,8 +4,9 @@ vocabulary cannot provide.
 Every property in `properties.py` is authored by the same agent that raised the
 finding, so property and finding stay correlated: a wrong declared relation
 yields a real counterexample to a wrong claim. This module has no authored
-relation at all. It runs the target twice — once in float64, once at high
-precision — and lets the substrates disagree where an author could not.
+relation at all. It evaluates the target in float64 and at high precision, with a
+second float64 replay to screen for state, and lets the substrates disagree where
+an author could not.
 
 WHY mpmath AND NOT Fraction OR Decimal. Both were measured and both fail, in the
 worst direction. A float literal in the source (`0.5 * vol**2`) collapses a
@@ -16,29 +17,23 @@ float literals, which is at least loud, but then cannot run most targets at all.
 mpmath's own functions return `mpf`, so the substrate survives — provided the
 target's `math` bindings are swapped, which is what `mpmath_bindings` does.
 
-THE INTEGRITY GATE IS THE POINT. `run_under_substrate` checks the RESULT TYPE. If
-the value came back as anything but an `mpf`, the substrate was lost somewhere in
-the call and the comparison would be float-against-float. That returns a reason
-and NEVER a value, because a value could be compared and read as agreement. This
-is the package's own "a check that could not run never passes" rule applied to
-itself.
+THE INTEGRITY GATE IS THE POINT. `run_under_substrate` checks both the RESULT TYPE
+and the numeric provenance observed during the call. If the value came back as
+anything but an `mpf`, or an `mpf` was converted through `__float__`, `__int__`, or
+`__complex__` outside mpmath, the substrate was lost somewhere in the call. That
+returns a reason and NEVER a value, because a value could be compared and read as
+agreement. This also catches loss inside an unpatched helper module even when outer
+arithmetic re-promotes the degraded float into an `mpf` before it is returned.
 
-THE GATE'S SCOPE IS NARROWER THAN IT SOUNDS. It proves the RETURNED VALUE is an
-`mpf` — which catches substrate loss anywhere in the target's OWN module — but it
-does not prove every intermediate computation stayed at high precision. A target
-that delegates to a helper living in a second, unpatched module gets a plain
-`float` back from that helper's `math.sin(mpf)` call; the outer arithmetic then
-re-promotes that float back into an `mpf`, so the gate sees a real `mpf` and
-passes, while the value it holds is already float64-degraded. The consequence is
-bounded and one-directional: a degraded reference can only produce a false
-UNCERTAIN (no divergence found where a sound reference would have found one),
-never a false CONFIRMED — `assert_substrate_agrees` only ever raises on disagreement,
-so a reference silently carrying float64 precision biases toward agreement, not
-away from it. See `test_gate_does_not_catch_cross_module_precision_loss` in
-`tests/test_substrate.py` for a concrete, measured case.
+THE GATE IS CONSERVATIVE, NOT A PROOF OF EVERY INTERMEDIATE. It observes Python's
+numeric conversion hooks in the current thread. Native code that extracts a value
+without invoking those hooks, and work delegated to another thread, remain outside
+the supported scalar execution model. Those targets must not be sent to this helper.
 
-WARNING: this executes the target's code, twice. Targets must be pure. A target
-with side effects will fire them on both runs.
+WARNING: `assert_substrate_agrees` executes the target three times: float64, the
+reference substrate, then float64 again. Targets must be synchronous, deterministic,
+pure scalar functions. The two float runs screen for output-changing state, but no
+finite replay can prove purity. Side effects still fire on every run.
 
 NOT THREAD-SAFE. `mpmath_bindings` mutates the target module's globals for the
 duration of the call, so two threads checking targets in the same module would see
@@ -48,6 +43,7 @@ subprocess, single-threaded, which is the only context this is used from.
 
 import contextlib
 import math
+import struct
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -72,6 +68,27 @@ class SubstrateResult:
 
     value: object | None
     reason: str | None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.value is None) == (self.reason is None):
+            raise ValueError("SubstrateResult requires exactly one of value or reason")
+        if self.reason is None and self.detail is not None:
+            raise ValueError("a successful SubstrateResult cannot carry failure detail")
+
+
+@dataclass(frozen=True)
+class _PrecisionLoss:
+    conversion: str
+    module: str
+    function: str
+    line: int | None
+
+    def render(self) -> str:
+        location = f"{self.module}.{self.function}"
+        if self.line is not None:
+            location += f":{self.line}"
+        return f"{self.conversion} at {location}"
 
 
 _MATH_TO_MP_CACHE: dict | None = None
@@ -134,6 +151,62 @@ def mpmath_bindings(fn: Callable):
         globals_.update(saved)
 
 
+_LOSSY_CONVERSIONS = frozenset({"__float__", "__int__", "__complex__"})
+
+
+@contextlib.contextmanager
+def _mpf_conversion_guard(fn: Callable):
+    """Record the first externally initiated native conversion of an mpf.
+
+    The hook is active only while the target executes under mpmath. Calls made by
+    mpmath itself are implementation details of the reference substrate and are
+    ignored. A target that replaces the hook makes the run unverifiable, so that is
+    recorded as substrate loss too. The previous profiler is composed and restored.
+    """
+    losses: list[_PrecisionLoss] = []
+    previous = sys.getprofile()
+
+    def profiler(frame, event, arg):
+        if previous is not None:
+            previous(frame, event, arg)
+        if losses or event != "call" or frame.f_code.co_name not in _LOSSY_CONVERSIONS:
+            return
+        defining_module = str(frame.f_globals.get("__name__", ""))
+        if mpmath is None or not defining_module.startswith("mpmath."):
+            return
+        # mpmath names the receiver `s`, not `self`, and that is not a public
+        # contract. Inspect the tiny conversion frame by type instead of binding
+        # this safety gate to a private parameter name.
+        if not any(isinstance(value, mpmath.mpf) for value in frame.f_locals.values()):
+            return
+        caller = frame.f_back
+        if caller is None:
+            return
+        module = str(caller.f_globals.get("__name__", "<unknown>"))
+        if module == "mpmath" or module.startswith("mpmath."):
+            return
+        losses.append(_PrecisionLoss(
+            frame.f_code.co_name,
+            module,
+            caller.f_code.co_name,
+            caller.f_lineno,
+        ))
+
+    sys.setprofile(profiler)
+    try:
+        yield losses
+    finally:
+        replaced = sys.getprofile() is not profiler
+        sys.setprofile(previous)
+        if replaced and not losses:
+            losses.append(_PrecisionLoss(
+                "profile hook replaced",
+                str(getattr(fn, "__module__", "<unknown>")),
+                str(getattr(fn, "__name__", type(fn).__name__)),
+                None,
+            ))
+
+
 def run_under_substrate(fn: Callable, args: Sequence,
                         dps: int = SUBSTRATE_DPS) -> SubstrateResult:
     """Evaluate `fn(*args)` at `dps` decimal digits, or say why it could not be."""
@@ -146,16 +219,37 @@ def run_under_substrate(fn: Callable, args: Sequence,
         with mpmath_bindings(fn) as patched:
             if not patched:
                 return SubstrateResult(None, "not_patchable")
-            try:
-                value = fn(*[mpmath.mpf(a) for a in args])
-            except Exception:
-                # An mpmath-specific failure is not evidence about the code under
-                # test, so it escalates rather than counting as a divergence.
-                return SubstrateResult(None, "raised")
+            converted_args = [mpmath.mpf(a) for a in args]
+            with _mpf_conversion_guard(fn) as losses:
+                try:
+                    value = fn(*converted_args)
+                except Exception:
+                    # An mpmath-specific failure is not evidence about the code under
+                    # test, so it escalates rather than counting as a divergence.
+                    return SubstrateResult(None, "raised")
+
+    if losses:
+        return SubstrateResult(None, "substrate_lost", losses[0].render())
 
     if not isinstance(value, mpmath.mpf):
-        return SubstrateResult(None, "substrate_lost")
+        returned = f"reference returned {type(value).__module__}.{type(value).__name__}"
+        return SubstrateResult(None, "substrate_lost", returned)
     return SubstrateResult(value, None)
+
+
+def _same_replay_value(before: object, after: object) -> bool:
+    """Exact equality for the two native runs, including float representation."""
+    if type(before) is not type(after):
+        return False
+    if isinstance(before, float) and isinstance(after, float):
+        if math.isnan(before) and math.isnan(after):
+            return True
+        return struct.pack("!d", before) == struct.pack("!d", after)
+    try:
+        equal = before == after
+    except Exception:
+        return False
+    return equal if isinstance(equal, bool) else False
 
 
 def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
@@ -178,10 +272,21 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
     if not callable(fn):
         raise ValueError(f"target must be callable, got {type(fn).__name__}")
 
+    observed_before = fn(*args)
     result = run_under_substrate(fn, args)
-    if result.reason is not None:
+    # Deliberately run even when the reference failed. A stateful target must not
+    # hide behind a second failure reason and later be retried as if it were pure.
+    observed_after = fn(*args)
+    if not _same_replay_value(observed_before, observed_after):
         raise ValueError(
-            f"substrate check could not run ({result.reason}); "
+            "substrate check could not run (nondeterministic replay); "
+            "the two float64 evaluations differed, so substrate disagreement "
+            "would not be evidence about numeric precision"
+        )
+    if result.reason is not None:
+        detail = f": {result.detail}" if result.detail is not None else ""
+        raise ValueError(
+            f"substrate check could not run ({result.reason}{detail}); "
             f"this proves nothing about the code under test"
         )
 
@@ -195,7 +300,7 @@ def assert_substrate_agrees(fn: Callable, args: Sequence) -> None:
     # function alone -- assert it locally so pyright can narrow both names for
     # every access below, rather than suppressing the check.
     assert mpmath is not None
-    observed = fn(*args)
+    observed = observed_before
     reference_value = result.value
     assert isinstance(reference_value, mpmath.mpf)
     # mpmath's runtime-generated context type is not statically narrowable in

@@ -185,6 +185,12 @@ backend covers the file at all; every finding in it goes to Phase 2.
       assert_substrate_agrees(<target>, (x,))
   ```
 
+  Use this template only for a synchronous, deterministic, pure target with positional
+  scalar-real inputs and one scalar-real result. It executes float64, the reference substrate,
+  then float64 again. Do not use it for NumPy arrays, complex or structured results, keyword-only
+  interfaces, async/generator code, worker threads, I/O, or mutation. Replay mismatch screens for
+  output-changing state but does not prove purity.
+
   The `@given` strategy bounds shown (`st.floats(1e-9, 1e-6)`) are illustrative only — you MUST
   replace them with the finding's declared `domains`. This helper carries no authored relation
   (that is its entire point), so `domains` is the ONLY auditor-supplied input to this template;
@@ -193,10 +199,11 @@ backend covers the file at all; every finding in it goes to Phase 2.
   panel is told to skip it — so a magnitude production never sees can freeze a false CONFIRMED in
   place with no downstream check.
 
-  An `UNCERTAIN` whose evidence names `substrate_lost`, `not_patchable`, `raised`, `unavailable`,
-  or `bad_dps` means the reference substrate never ran — the two values compared would
-  have been float64 against float64. That is NOT agreement and NOT a refutation:
-  investigate or escalate, never drop the finding.
+  An `UNCERTAIN` whose evidence names `substrate_lost`, `nondeterministic replay`,
+  `not_patchable`, `raised`, `unavailable`, or `bad_dps` means the comparison was not valid.
+  `substrate_lost` includes provenance such as an `mpf` converted in an unpatched helper;
+  `nondeterministic replay` means the two float64 evaluations differed. Neither is agreement or
+  a refutation: investigate or escalate, never drop the finding.
 
   **Numeric verdicts are asymmetric, the mirror of taint.** The checker never returns
   `FALSE_POSITIVE` for a `numeric` claim: properties holding across a bounded search is not proof

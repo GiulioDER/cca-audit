@@ -28,6 +28,17 @@ E       vol=0.0,
 E   )
 """
 
+FALSIFYING_SUBSTRATE_FAILURE = """
+E   ValueError: substrate check could not run (substrate_lost: __float__ at helper_module.degraded_cos:12); this proves nothing about the code under test
+E
+E   Falsifying example: test_property(
+E       x=1e-08,
+E   )
+=========================== short test summary info ===========================
+FAILED t.py::test_property - ValueError
+1 failed in 0.37s
+"""
+
 
 class _Proc:
     def __init__(self, rc, out="", err=""):
@@ -104,6 +115,16 @@ def test_falsifying_banner_without_property_line_is_uncertain(monkeypatch):
     assert v.verdict != "CONFIRMED"
     assert "not a declared property violation" in v.evidence
     assert "ZeroDivisionError" in v.evidence
+
+
+def test_substrate_failure_has_stable_specific_evidence(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", fake(1, FALSIFYING_SUBSTRATE_FAILURE))
+    v = run_properties("NUM-1", "t.py")
+    assert v.verdict == "UNCERTAIN"
+    assert "substrate_lost" in v.evidence
+    assert "helper_module.degraded_cos:12" in v.evidence
+    assert "0.37s" not in v.evidence
+    assert "PROPERTY" not in v.evidence
 
 
 def test_timeout_escalates_to_uncertain(monkeypatch):
