@@ -40,6 +40,10 @@ _FALSIFYING = re.compile(
     r"(?=\n\s*\n|\n=+[ =]|\n-+[ -]|\n\+-+|\n(?:E\s+)?\d+ \w+ in \d|\Z)", re.S)
 # Our own violation message, which names the property and the required relation.
 _PROPERTY_LINE = re.compile(r"^.*PROPERTY .+ violated \|.*$", re.M)
+# A substrate helper fails closed with this prefix. Extract its stable reason
+# instead of returning pytest's timing-bearing output tail as the evidence.
+_SUBSTRATE_FAILURE = re.compile(
+    r"^E\s+ValueError: (substrate check could not run .+)$", re.M)
 _NO_HYPOTHESIS = "No module named 'hypothesis'"
 _NO_PYTEST = "No module named pytest"
 
@@ -149,6 +153,13 @@ def run_properties(finding_id: str, test_path: str) -> Verdict:
                           f"violation cannot be bound to a specific counterexample "
                           f"(likely an unrelated exception alongside the property "
                           f"failure); escalated:\n{tail}")
+
+    substrate_failure = _SUBSTRATE_FAILURE.search(out)
+    if substrate_failure:
+        return _uncertain(
+            finding_id,
+            substrate_failure.group(1).strip() + "; escalated",
+        )
 
     prop = _PROPERTY_LINE.search(out)
     if not prop:

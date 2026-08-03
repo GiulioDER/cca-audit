@@ -6,6 +6,15 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## Unreleased
+
+- **The scalar differential oracle now fails closed on hidden precision loss and state.** A
+  temporary provenance hook detects native conversion of an `mpf`, including conversion inside an
+  unpatched helper whose float result is later re-promoted. A float64 replay around the reference
+  call prevents a stateful target from manufacturing a binding `CONFIRMED`. Both conditions return
+  deterministic `UNCERTAIN` evidence. The supported contract remains synchronous, pure,
+  deterministic scalar-real functions.
+
 ## [0.8.1] - 2026-07-24
 
 - **Dropped two hardcoded figures that nothing keeps current.** The banner

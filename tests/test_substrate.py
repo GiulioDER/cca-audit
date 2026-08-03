@@ -100,41 +100,64 @@ def test_dps_below_floor_is_rejected():
     assert r.value is None
 
 
-def test_gate_does_not_catch_cross_module_precision_loss():
-    """PROVES the integrity gate's blind spot, rather than merely describing it.
-
-    `cross_module_cancellation` delegates its `cos()` call to
-    `helper_module.degraded_cos`, a module `mpmath_bindings` never patches — it only
-    patches the CALLING target's own `__module__`. The gate checks only the RETURNED
-    value's type, and the value returned here IS a genuine `mpf` (the outer
-    `1.0 - float` subtraction, divided by the still-`mpf` `x * x`, re-promotes the
-    float64-degraded intermediate back into an `mpf`), so `run_under_substrate` reports
-    success (`reason is None`) for a "reference" that never actually computed `cos` at
-    50-digit precision.
-    """
+def test_cross_module_precision_loss_is_detected_before_repromotion_can_hide_it():
     r = run_under_substrate(targets.cross_module_cancellation, (1e-8,))
+    assert r.reason == "substrate_lost"
+    assert r.value is None
+    assert r.detail is not None
+    assert "__float__" in r.detail
+    assert "helper_module.degraded_cos" in r.detail
 
-    # The gate does NOT catch this: a clean value, not a reason.
-    assert r.reason is None
-    assert isinstance(r.value, mpmath.mpf)
 
-    # Prove the degradation is real: compare against the TRUE high-precision answer,
-    # computed by the identical formula but entirely through mpmath (no cross-module
-    # hop), at the same input.
-    with mpmath.workdps(50):
-        x = mpmath.mpf(1e-8)
-        true_reference = (1 - mpmath.cos(x)) / (x * x)
+@pytest.mark.parametrize(
+    "target",
+    [targets.default_binding_cancellation, targets.closure_binding_cancellation],
+)
+def test_non_global_math_bindings_are_detected_as_precision_loss(target):
+    r = run_under_substrate(target, (1e-8,))
+    assert r.reason == "substrate_lost"
+    assert r.value is None
+    assert r.detail is not None and "__float__" in r.detail
 
-    degraded = r.value
-    relative_error = abs(degraded - true_reference) / abs(true_reference)
 
-    # Catastrophic cancellation in helper_module's float64 cos() collapses the
-    # numerator to exactly 0.0, so the "reference" the gate approved is 0 where the
-    # true 50-digit answer is ~0.5 -- a relative error of ~1.0, not the ~1e-15 that
-    # ordinary float64 rounding would produce.
-    assert float(degraded) == pytest.approx(0.0)
-    assert float(true_reference) == pytest.approx(0.5, rel=1e-9)
-    assert relative_error > 1e-6
+def test_explicit_float_conversion_carries_actionable_detail():
+    r = run_under_substrate(targets.loses_substrate, (0.5,))
+    assert r.reason == "substrate_lost"
+    assert r.detail is not None
+    assert "__float__" in r.detail
+    assert "targets.loses_substrate" in r.detail
+
+
+def test_profile_replacement_is_substrate_loss():
+    def existing(frame, event, arg):
+        return None
+
+    sys.setprofile(existing)
+    try:
+        r = run_under_substrate(targets.replaces_profiler, (0.5,))
+        assert r.reason == "substrate_lost"
+        assert r.detail is not None
+        assert "profile hook replaced" in r.detail
+        assert sys.getprofile() is existing
+    finally:
+        sys.setprofile(None)
+
+
+def test_existing_profiler_is_composed_and_restored():
+    events = []
+
+    def existing(frame, event, arg):
+        if event == "call":
+            events.append(frame.f_code.co_name)
+
+    sys.setprofile(existing)
+    try:
+        r = run_under_substrate(targets.stable, (1e-8,))
+        assert r.reason is None
+        assert sys.getprofile() is existing
+        assert events
+    finally:
+        sys.setprofile(None)
 
 
 def test_bindings_are_restored_after_success():
@@ -173,6 +196,16 @@ def test_result_is_frozen():
         r.value = 1
 
 
+@pytest.mark.parametrize(
+    "value,reason,detail",
+    [(None, None, None), (mpmath.mpf("1.0"), "raised", None),
+     (mpmath.mpf("1.0"), None, "impossible")],
+)
+def test_result_rejects_invalid_state(value, reason, detail):
+    with pytest.raises(ValueError):
+        SubstrateResult(value, reason, detail)
+
+
 
 
 def test_cancellation_is_a_violation():
@@ -200,6 +233,72 @@ def test_sign_trap_does_not_violate():
     # layer cannot see formula errors; properties cover that class. Asserting it
     # keeps the documented division of labour honest.
     assert_substrate_agrees(targets.sign_trap, (0.1, 0.3, 1.0))
+
+
+def test_stateful_target_escalates_instead_of_manufacturing_a_confirmation():
+    targets.reset_stateful_counter()
+    with pytest.raises(ValueError) as e:
+        assert_substrate_agrees(targets.stateful_counter, (1.0,))
+    assert "nondeterministic replay" in str(e.value)
+    assert not isinstance(e.value, PropertyViolation)
+
+
+def test_replay_treats_two_nans_as_stable():
+    import cca_checks.substrate as sub
+
+    monkeypatch_result = SubstrateResult(mpmath.mpf("nan"), None)
+    original = sub.run_under_substrate
+    sub.run_under_substrate = lambda fn, args, dps=None: monkeypatch_result
+    try:
+        with pytest.raises(PropertyViolation):
+            assert_substrate_agrees(lambda x: math.nan, (1.0,))
+    finally:
+        sub.run_under_substrate = original
+
+
+def test_replay_distinguishes_signed_zero():
+    calls = iter([0.0, 0.0, -0.0])
+
+    def alternating_zero(x):
+        return next(calls)
+
+    with pytest.raises(ValueError, match="nondeterministic replay"):
+        assert_substrate_agrees(alternating_zero, (1.0,))
+
+
+def test_second_float_run_happens_when_reference_fails(monkeypatch):
+    import cca_checks.substrate as sub
+
+    calls = []
+
+    def target(x):
+        calls.append(x)
+        return 1.0
+
+    monkeypatch.setattr(
+        sub, "run_under_substrate",
+        lambda fn, args: SubstrateResult(None, "bad_dps"),
+    )
+    with pytest.raises(ValueError, match="bad_dps"):
+        assert_substrate_agrees(target, (1.0,))
+    assert calls == [1.0, 1.0]
+
+
+def test_replay_mismatch_takes_priority_over_reference_failure(monkeypatch):
+    import cca_checks.substrate as sub
+
+    values = iter([1.0, 2.0])
+
+    def target(x):
+        return next(values)
+
+    monkeypatch.setattr(
+        sub, "run_under_substrate",
+        lambda fn, args: SubstrateResult(None, "bad_dps"),
+    )
+    with pytest.raises(ValueError, match="nondeterministic replay") as error:
+        assert_substrate_agrees(target, (1.0,))
+    assert "bad_dps" not in str(error.value)
 
 
 def test_substrate_failure_raises_value_error_not_violation():

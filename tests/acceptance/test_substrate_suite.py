@@ -11,6 +11,30 @@ pytest.importorskip("mpmath", reason="numeric extra not installed")
 UNSTABLE = "tests/fixtures/substrate/props_unstable.py"
 STABLE = "tests/fixtures/substrate/props_stable.py"
 SIGN_TRAP = "tests/fixtures/substrate/props_sign_trap.py"
+CROSS_MODULE = "tests/fixtures/substrate/props_cross_module.py"
+DEFAULT_BINDING = "tests/fixtures/substrate/props_default_binding.py"
+CLOSURE_BINDING = "tests/fixtures/substrate/props_closure_binding.py"
+STATEFUL = "tests/fixtures/substrate/props_stateful.py"
+
+
+@pytest.mark.parametrize(
+    "finding_id,path,verdict,evidence",
+    [
+        ("SUB-MATRIX-1", UNSTABLE, "CONFIRMED", "substrate_agrees"),
+        ("SUB-MATRIX-2", STABLE, "UNCERTAIN", "no counterexample"),
+        ("SUB-MATRIX-3", SIGN_TRAP, "UNCERTAIN", "no counterexample"),
+        ("SUB-MATRIX-4", CROSS_MODULE, "UNCERTAIN", "substrate_lost"),
+        ("SUB-MATRIX-5", DEFAULT_BINDING, "UNCERTAIN", "substrate_lost"),
+        ("SUB-MATRIX-6", CLOSURE_BINDING, "UNCERTAIN", "substrate_lost"),
+        ("SUB-MATRIX-7", STATEFUL, "UNCERTAIN", "nondeterministic replay"),
+    ],
+)
+def test_scalar_oracle_capability_matrix(finding_id, path, verdict, evidence):
+    result = run_properties(finding_id, path)
+    assert result.verdict == verdict
+    assert evidence in result.evidence
+    if verdict == "UNCERTAIN":
+        assert "PROPERTY substrate_agrees violated" not in result.evidence
 
 
 def test_cancellation_is_confirmed_with_a_falsifying_example():
@@ -26,6 +50,13 @@ def test_cancellation_is_confirmed_with_a_falsifying_example():
 def test_confirmation_is_reproducible():
     a = run_properties("SUB-ACC-1", UNSTABLE)
     b = run_properties("SUB-ACC-1", UNSTABLE)
+    assert a.evidence == b.evidence
+
+
+@pytest.mark.parametrize("path", [CROSS_MODULE, STATEFUL])
+def test_fail_closed_evidence_is_reproducible(path):
+    a = run_properties("SUB-ACC-FAIL", path)
+    b = run_properties("SUB-ACC-FAIL", path)
     assert a.evidence == b.evidence
 
 
