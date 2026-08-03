@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/banner.svg" alt="CCA-Audit — multi-agent code audit for Claude Code. Pipeline: parallel auditors, consolidate, verify (L2.5), fix, regression diff (L5.5), architect gate (L6)." width="100%"/>
+  <img src="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/banner.svg" alt="CCA-Audit for Claude Code and Codex. Pipeline: parallel auditors, consolidate, verify (L2.5), fix, regression diff (L5.5), architect gate (L6)." width="100%"/>
 </p>
 
 <p align="center">
@@ -11,7 +11,7 @@
 
 # CCA-Audit
 
-**A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in which no finding reaches your code unverified.**
+**A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex in which no finding reaches your code unverified.**
 
 Eleven specialised auditors read your diff in parallel. Their findings are deduplicated, then each one is
 **re-derived against the real code** — mechanically, by `pyright`, `clippy`, `semgrep`, `pytest` or
@@ -280,6 +280,20 @@ upstream, and survivable under adversarial review. That is the process that prod
 
 ## Install
 
+### Codex
+
+```bash
+pip install cca-audit
+cca-audit install-codex
+```
+
+This installs the `cca-audit` skill in the Codex user skills directory. Start a new Codex task, open
+the project you want to audit, and say `audit+fix`. Codex runs the canonical pipeline in that task
+with parallel subagents. Reinstalling upgrades the adapter, auditor prompts, and checker scripts;
+customized files are preserved as `.bak` copies.
+
+### Claude Code
+
 ```bash
 pip install cca-audit
 cca-audit install          # run from the root of the project you want to audit
@@ -338,6 +352,21 @@ catches it, and the resulting artifact.
 
 ## Usage
 
+In Codex, use the phrase form:
+
+```text
+audit+fix
+audit+fix deferred
+audit+fix no-fix
+audit+fix p1-only
+audit+fix fast
+audit+fix deep commit 3
+audit+fix files src/app.py
+audit+fix hunt src/
+```
+
+In Claude Code, use the command form:
+
 ```
 /audit-fix                 # audit + fix uncommitted changes (tier auto-selected)
 /audit-fix deferred        # second pass: fix P3 items deferred by the previous round
@@ -370,7 +399,7 @@ is still relevant, fixes what remains and marks the rest stale — so no audit l
 
 | | |
 |---|---|
-| Tests | 613, on every push and PR |
+| Tests | 655, on every push and PR |
 | Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |

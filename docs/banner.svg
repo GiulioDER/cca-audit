@@ -17,7 +17,7 @@
 
   <!-- wordmark -->
   <text class="wordmk" x="56" y="72">CCA-Audit</text>
-  <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code. Every finding is verified against your</text>
+  <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code and Codex. Every finding is verified against your</text>
   <text class="lede" x="56" y="128">real code — mechanically, where a tool can settle it — before a line is edited.</text>
 
   <line class="rule" x1="56" y1="156" x2="1144" y2="156"/>
@@ -25,7 +25,7 @@
   <!-- pipeline -->
   <g transform="translate(56,182)">
     <rect class="box" x="0"   y="0" width="118" height="34" rx="3"/>
-    <text class="node" x="59" y="22" text-anchor="middle">auditors ×10</text>
+    <text class="node" x="59" y="22" text-anchor="middle">auditors ×11</text>
     <path class="arrow" d="M124 17 H150"/><path class="arrow" d="M144 12 l6 5 -6 5"/>
 
     <rect class="box" x="156" y="0" width="112" height="34" rx="3"/>
@@ -47,7 +47,7 @@
     <rect class="boxg" x="842" y="0" width="146" height="34" rx="3"/>
     <text class="gate" x="915" y="22" text-anchor="middle">architect · L6</text>
 
-    <text class="cap" x="0"   y="58">10 auditors, non-overlapping scopes</text>
+    <text class="cap" x="0"   y="58">11 auditors, non-overlapping scopes</text>
     <text class="cap" x="381" y="58" text-anchor="middle">pyright · semgrep · pytest · hypothesis</text>
     <text class="cap" x="915" y="58" text-anchor="middle">every finding maps to a fix, or REVISE</text>
   </g>

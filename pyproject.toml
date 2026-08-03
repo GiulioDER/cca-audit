@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cca-audit"
 version = "0.8.1"
-description = "Multi-agent code audit for Claude Code in which no finding reaches your code unverified"
+description = "Multi-agent code audit for Claude Code and Codex in which no finding reaches your code unverified"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Giulio D'Erme" }]
-keywords = ["static-analysis", "code-review", "verification", "claude-code", "llm", "ai-code-review", "code-audit"]
+keywords = ["static-analysis", "code-review", "verification", "claude-code", "codex", "llm", "ai-code-review", "code-audit"]
 dependencies = []
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -81,7 +81,13 @@ cca_checks = ["rules/*.yaml"]
 # tools/*.py ships for the same reason: the orchestrator shells out to the two
 # checkers BY PATH, so a wheel without them installs cleanly and then reports no
 # scorecard and no red-state proof, with the gates failing as "command not found".
-"cca_checks.plugin" = ["agents/*.md", "commands/*.md", "tools/*.py"]
+"cca_checks.plugin" = [
+  "agents/*.md",
+  "commands/*.md",
+  "tools/*.py",
+  "codex/cca-audit/SKILL.md",
+  "codex/cca-audit/agents/*.yaml",
+]
 
 [tool.pytest.ini_options]
 # cca_checks/plugin/tools is a testpath, not a stray directory: those two checkers
