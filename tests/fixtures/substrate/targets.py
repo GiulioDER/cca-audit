@@ -6,6 +6,7 @@ runner must handle.
 """
 
 import math
+import sys
 from math import cos
 
 from helper_module import degraded_cos
@@ -54,3 +55,40 @@ def cross_module_cancellation(x):
     never touched mpmath at all.
     """
     return (1.0 - degraded_cos(x)) / (x * x)
+
+
+def default_binding_cancellation(x, bound_cos=math.cos):
+    """A default argument keeps the original math function outside module globals."""
+    return (1.0 - bound_cos(x)) / (x * x)
+
+
+def _closure_target():
+    bound_cos = math.cos
+
+    def closure_binding_cancellation(x):
+        return (1.0 - bound_cos(x)) / (x * x)
+
+    return closure_binding_cancellation
+
+
+closure_binding_cancellation = _closure_target()
+
+_stateful_counter = 0
+
+
+def reset_stateful_counter():
+    global _stateful_counter
+    _stateful_counter = 0
+
+
+def stateful_counter(x):
+    """A correct expression whose mutable state used to manufacture divergence."""
+    global _stateful_counter
+    _stateful_counter += 1
+    return x + _stateful_counter * 0.001
+
+
+def replaces_profiler(x):
+    """A target cannot disable the provenance guard and still earn agreement."""
+    sys.setprofile(None)
+    return x * 2.0

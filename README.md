@@ -153,10 +153,14 @@ are enforced as **tests**, not disclaimers:
   *evaluation* and correlated on *transcription*: both substrates faithfully compute whatever
   structure was written down, so a flipped sign survives into both and they agree. That class belongs
   to the property helpers. `test_sign_trap_does_not_violate` asserts this.
-- **Its integrity gate proves the returned value, not every intermediate.** A target that delegates to
-  an unpatched second module can return a high-precision-typed value carrying float64 precision.
-  Measured: the gate passes a reference of `0.0` where the true answer is `0.5`.
-  `test_gate_does_not_catch_cross_module_precision_loss` asserts this.
+- **Its provenance gate observes Python conversion hooks, not every native intermediate.** An
+  `mpf` converted through `__float__`, `__int__` or `__complex__` in a helper module returns
+  `UNCERTAIN`, even when outer arithmetic re-promotes the float to `mpf`. Native code that extracts
+  a value without those hooks, and work delegated to another thread, remain unsupported.
+- **Its replay screens for state; it does not prove purity.** The float64 result is evaluated before
+  and after the reference run. A mismatch returns `UNCERTAIN`, closing the demonstrated false
+  confirmation from a counter-based target, but a finite replay cannot certify an arbitrary
+  function as side-effect free.
 - **A property is authored by the same agent that raised the finding**, so a wrong declared relation
   produces a real counterexample to a wrong claim. A confirmation obliges you to re-read the relation,
   not just the verdict.
