@@ -55,6 +55,17 @@ def test_install_codex_defaults_to_the_codex_user_skills_directory(
     assert (codex_home / "skills" / "cca-audit" / "SKILL.md").is_file()
 
 
+def test_install_codex_reports_a_file_at_the_skill_path(tmp_path, capsys):
+    skill_path = tmp_path / "cca-audit"
+    skill_path.write_text("not a directory", encoding="utf-8")
+
+    code = cli.main(["install-codex", "--target", str(tmp_path)])
+    captured = capsys.readouterr()
+
+    assert code != 0
+    assert str(skill_path) in captured.err
+
+
 def test_install_reports_backed_up_customizations(tmp_path, capsys):
     cli.main(["install", "--target", str(tmp_path)])
     target = tmp_path / ".claude" / "agents" / "cca-bug-auditor.md"

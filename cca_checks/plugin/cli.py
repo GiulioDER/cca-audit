@@ -104,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         # code the user can distinguish in a script.
         print(f"error: {exc}", file=sys.stderr)
         return 3
+    except OSError as exc:
+        if not is_codex:
+            raise
+        print(f"error: Codex skill installation failed: {exc}", file=sys.stderr)
+        return 1
 
     if is_codex:
         skills_root = (

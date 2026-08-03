@@ -399,7 +399,7 @@ is still relevant, fixes what remains and marks the rest stale — so no audit l
 
 | | |
 |---|---|
-| Tests | 646, on every push and PR |
+| Tests | 655, on every push and PR |
 | Python | 3.10, 3.11, 3.12, 3.13 — full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |

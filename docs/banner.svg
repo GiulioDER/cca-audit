@@ -47,7 +47,7 @@
     <rect class="boxg" x="842" y="0" width="146" height="34" rx="3"/>
     <text class="gate" x="915" y="22" text-anchor="middle">architect · L6</text>
 
-    <text class="cap" x="0"   y="58">10 auditors, non-overlapping scopes</text>
+    <text class="cap" x="0"   y="58">11 auditors, non-overlapping scopes</text>
     <text class="cap" x="381" y="58" text-anchor="middle">pyright · semgrep · pytest · hypothesis</text>
     <text class="cap" x="915" y="58" text-anchor="middle">every finding maps to a fix, or REVISE</text>
   </g>
