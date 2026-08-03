@@ -8,6 +8,10 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+- **CCA now runs natively inside Codex tasks.** `cca-audit install-codex` installs an `audit+fix`
+  skill that maps the canonical pipeline to Codex subagents. The installer projects the existing
+  pipeline, auditor prompts, and checker scripts into the skill instead of maintaining a second
+  copy of the audit contract.
 - **The scalar differential oracle now fails closed on hidden precision loss and state.** A
   temporary provenance hook detects native conversion of an `mpf`, including conversion inside an
   unpatched helper whose float result is later re-promoted. A float64 replay around the reference

@@ -1,4 +1,4 @@
-"""The CCA-Audit Claude Code plugin: agent + command markdown, and its installer.
+"""The CCA-Audit agent resources and installers for Claude Code and Codex.
 
 This package exists so that `pip install cca-audit` delivers the *product* and
 not just its verifier. CCA-Audit is the agent prompts in `agents/` and the
@@ -17,12 +17,22 @@ install, which is exactly the environment `pip install` produces.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 from dataclasses import dataclass, field
 from importlib import resources
 
-__all__ = ["InstallResult", "install", "iter_agents", "iter_commands", "iter_tools"]
+__all__ = [
+    "InstallResult",
+    "default_codex_skills_root",
+    "install",
+    "install_codex",
+    "iter_agents",
+    "iter_codex_skill",
+    "iter_commands",
+    "iter_tools",
+]
 
 # Our own files are named `cca-*.md`; the orchestrator commands `audit-fix*.md`
 # (canonical plus the DEEP alias). Globs, not hardcoded lists: an auditor added
@@ -33,6 +43,7 @@ _COMMAND_GLOB = "audit-fix*.md"
 # Step 5.6 red-state proof). `test_*` is excluded: their tests run in this
 # repo's CI and have no business in a user's .claude/.
 _TOOL_GLOB = "cca_*.py"
+_CODEX_SKILL_NAME = "cca-audit"
 
 # Agent names CCA-Audit dispatches. Our *files* are cca-*.md but their
 # frontmatter `name:` is generic, so a project that already defines one of
@@ -85,6 +96,49 @@ def iter_tools():
         for name, text in _iter_resources("tools", _TOOL_GLOB)
         if not name.startswith("test_")
     )
+
+
+def _iter_tree(subdir: str):
+    """Yield relative paths and text for every packaged file below `subdir`."""
+    root = resources.files(__name__)
+    for part in pathlib.PurePosixPath(subdir).parts:
+        root = root.joinpath(part)
+
+    def walk(directory, prefix: pathlib.PurePosixPath):
+        for entry in sorted(directory.iterdir(), key=lambda item: item.name):
+            relative = prefix / entry.name
+            if entry.is_dir():
+                yield from walk(entry, relative)
+            elif entry.is_file():
+                yield relative.as_posix(), entry.read_text(encoding="utf-8")
+
+    return walk(root, pathlib.PurePosixPath())
+
+
+def iter_codex_skill():
+    """Yield the complete Codex skill, reusing canonical pipeline resources.
+
+    The adapter itself is Codex specific. The pipeline, role prompts, and checker
+    scripts are projected from their canonical package resources at install time,
+    so the Claude and Codex surfaces cannot acquire independent audit contracts.
+    """
+    yield from _iter_tree(f"codex/{_CODEX_SKILL_NAME}")
+
+    commands = dict(iter_commands())
+    pipeline = commands.get("audit-fix.md")
+    if pipeline is not None:
+        yield "references/pipeline.md", pipeline
+    for name, text in iter_agents():
+        yield f"references/agents/{name}", text
+    for name, text in iter_tools():
+        yield f"scripts/{name}", text
+
+
+def default_codex_skills_root() -> pathlib.Path:
+    """Return the user skill root Codex auto-discovers."""
+    configured = os.environ.get("CODEX_HOME")
+    codex_home = pathlib.Path(configured) if configured else pathlib.Path.home() / ".codex"
+    return codex_home / "skills"
 
 
 def _write(dest: pathlib.Path, text: str, result: InstallResult) -> None:
@@ -176,4 +230,43 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
     for name, text in tools:
         _write(tools_dir / name, text, result)
 
+    return result
+
+
+def install_codex(target: str | pathlib.Path | None = None) -> InstallResult:
+    """Install the CCA skill below a Codex skills root.
+
+    `target` names the skills directory, not the final skill directory. When it
+    is omitted, use `$CODEX_HOME/skills` or `~/.codex/skills`, matching Codex's
+    discovery contract.
+    """
+    skills_root = pathlib.Path(target) if target is not None else default_codex_skills_root()
+    if skills_root.exists() and not skills_root.is_dir():
+        raise NotADirectoryError(f"Codex skills target is not a directory: {skills_root}")
+
+    files = list(iter_codex_skill())
+    paths = [name for name, _ in files]
+    required = {
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/pipeline.md",
+        "scripts/cca_scorecard.py",
+        "scripts/cca_tautology_check.py",
+    }
+    missing = sorted(required.difference(paths))
+    if missing:
+        raise RuntimeError(
+            "Codex skill resources are incomplete; missing "
+            + ", ".join(missing)
+            + ". Reinstall with `pip install --force-reinstall cca-audit`."
+        )
+    if len(paths) != len(set(paths)):
+        raise RuntimeError("Codex skill resources contain duplicate destination paths")
+
+    skill_dir = skills_root / _CODEX_SKILL_NAME
+    result = InstallResult()
+    for relative, text in files:
+        destination = skill_dir.joinpath(*pathlib.PurePosixPath(relative).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        _write(destination, text, result)
     return result
