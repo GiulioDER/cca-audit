@@ -30,6 +30,31 @@ def test_install_defaults_to_the_current_directory(tmp_path, monkeypatch, capsys
     assert (tmp_path / ".claude" / "agents").is_dir()
 
 
+def test_install_codex_writes_the_skill_and_exits_zero(tmp_path, capsys):
+    code = cli.main(["install-codex", "--target", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert code == 0
+    skill = tmp_path / "cca-audit"
+    assert (skill / "SKILL.md").is_file()
+    assert (skill / "references" / "pipeline.md").is_file()
+    assert (skill / "scripts" / "cca_scorecard.py").is_file()
+    assert "audit+fix" in out
+
+
+def test_install_codex_defaults_to_the_codex_user_skills_directory(
+    tmp_path, monkeypatch, capsys
+):
+    codex_home = tmp_path / "codex-home"
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+
+    code = cli.main(["install-codex"])
+    capsys.readouterr()
+
+    assert code == 0
+    assert (codex_home / "skills" / "cca-audit" / "SKILL.md").is_file()
+
+
 def test_install_reports_backed_up_customizations(tmp_path, capsys):
     cli.main(["install", "--target", str(tmp_path)])
     target = tmp_path / ".claude" / "agents" / "cca-bug-auditor.md"

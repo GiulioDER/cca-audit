@@ -140,3 +140,17 @@ jobs:
           test "$expected" -eq "$actual" || { echo "wheel shipped $actual of $expected agents"; exit 1; }
           test -n "$(ls .claude/commands/audit-fix*.md)" || { echo "no commands installed"; exit 1; }
           echo "plugin install OK ($actual agents)"
+
+      - name: Install the Codex skill from the wheel
+        run: |
+          /tmp/wheeltest/bin/cca-audit install-codex --target /tmp/codex-skills
+          skill=/tmp/codex-skills/cca-audit
+          test -s "$skill/SKILL.md" || { echo "Codex skill missing"; exit 1; }
+          test -s "$skill/references/pipeline.md" || { echo "canonical pipeline missing"; exit 1; }
+          test -s "$skill/scripts/cca_scorecard.py" || { echo "scorecard missing"; exit 1; }
+          test -s "$skill/scripts/cca_tautology_check.py" || { echo "tautology checker missing"; exit 1; }
+          expected=$(ls "$GITHUB_WORKSPACE"/cca_checks/plugin/agents/cca-*.md | wc -l)
+          actual=$(ls "$skill"/references/agents/cca-*.md | wc -l)
+          test "$expected" -eq "$actual" || { echo "Codex skill installed $actual of $expected agents"; exit 1; }
+          grep -q 'audit+fix' "$skill/SKILL.md" || { echo "Codex trigger missing"; exit 1; }
+          echo "Codex skill install OK ($actual agent prompts)"

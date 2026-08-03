@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCA Audit + Fix"
+  short_description: "Verified multi agent code audit and repair"
+  default_prompt: "Use $cca-audit to audit+fix the current changes with verified findings."
