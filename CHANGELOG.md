@@ -8,6 +8,8 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+## [0.9.0] - 2026-08-04
+
 - **CCA now runs natively inside Codex tasks.** `cca-audit install-codex` installs an `audit+fix`
   skill that maps the canonical pipeline to Codex subagents. The installer projects the existing
   pipeline, auditor prompts, and checker scripts into the skill instead of maintaining a second
@@ -18,6 +20,15 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
   call prevents a stateful target from manufacturing a binding `CONFIRMED`. Both conditions return
   deterministic `UNCERTAIN` evidence. The supported contract remains synchronous, pure,
   deterministic scalar-real functions.
+- **CI type-checks again.** `pyright` was named as the verification contract but no workflow step
+  ran it, so a type regression in the checkers themselves merged green; the step is restored and
+  `tests/test_ci_contract.py` now fails if it is removed again. The eight type errors it had been
+  silently accumulating are fixed with it.
+- **The Codex install path was hardened against its own self-audit.** Six confirmed findings:
+  untrusted hunt execution is gated, the install is transactional (staged, then swapped, with
+  rollback), link and reparse-point redirects under the skill tree are rejected, every required
+  agent prompt must be present or the install refuses, and a Codex install failure is reported
+  rather than raised as a bare `OSError`.
 
 ## [0.8.1] - 2026-07-24
 
