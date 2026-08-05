@@ -2,7 +2,7 @@
 
 A small, **honest** benchmark of CCA's auditors + anti-hallucination gate on real bugs, designed to
 separate *finding a bug* from *remembering a public patch*. Full write-up:
-[**Your AI code reviewer's benchmark score is probably inflated**](../docs/blog-benchmark-memorization-gap.md).
+[**Your AI code reviewer's benchmark is memorized**](../docs/blog-benchmark-memorization-gap.md).
 
 ## Headline
 
@@ -17,9 +17,45 @@ separate *finding a bug* from *remembering a public patch*. Full write-up:
 | — **bugs lost to the gate** | 0 | **1** |
 | — false alarms prevented by the gate | 0 | 1 |
 
-**The 40-point gap between memorized (83%) and novel (43%) code is the finding.** Full numbers +
+⚠️ **The 83-vs-43 gap is a hypothesis this pilot generated, not a result it established.** Read
+[the retraction](#what-this-pilot-does-not-establish) before citing either number. Full numbers +
 per-bug detail + caveats: [results/RESULTS.md](results/RESULTS.md) ·
 [results/PILOT_FINDINGS.md](results/PILOT_FINDINGS.md).
+
+## What this pilot does not establish
+
+An earlier version of this file, of `results/RESULTS.md` and of the write-up led with *"the 40-point
+gap between memorized (83%) and novel (43%) code is the finding."* That sentence is **withdrawn**.
+Two independent reasons, either one sufficient:
+
+**1. The interval on the difference contains zero.** The arms are 10/12 and 3/7. Nobody had computed
+the interval on the *difference*, which is what the claim is about:
+
+| quantity | value | 95% interval |
+|---|---|---|
+| BugsInPy recall | 10/12 = 0.833 | [0.552, 0.953] (Wilson) |
+| Fresh, clean recall | 3/7 = 0.429 | [0.158, 0.750] (Wilson) |
+| **gap** | **+0.405** | **[−0.022, +0.700]** (Newcombe) |
+
+Fisher exact on the 2×2 gives **p = 0.129**. At n=12 against n=7 this pilot cannot distinguish a
+40-point memorization gap from no gap at all. `harness/interval.py` recomputes every figure in that
+table from the two counts, and `tests/test_bench_headline_is_qualified.py` fails if the retraction
+weakens.
+
+**2. The comparison is cross-corpus, so recognition is not the only variable.** The 83% arm is
+BugsInPy (2018–2020 libraries) and the 43% arm is the 2026 fresh corpus. Those arms differ in **four**
+ways at once: era, repository selection, fix-hunk size (BugsInPy hunks are tighter; fresh hunks run
+9–56 lines) and recognition. Recognition is the variable the claim is about; the other three ride
+along uncontrolled. Even had the interval excluded zero, it would not have been attributable to
+memorization.
+
+**What the pilot does support**, stated at its real strength: BugsInPy came back **12/12 recognized**,
+which is a contamination measurement in its own right and needs no cross-corpus comparison to stand.
+The pilot also shows that a within-corpus recognition split is *measurable*. The design that would
+actually settle the gap, one corpus mined by one process and split by the recognition probe at
+n≥30 clean, is specified in
+[`docs/specs/2026-07-24-fresh-corpus-scale-design.md`](../docs/specs/2026-07-24-fresh-corpus-scale-design.md)
+and **has not been run**.
 
 ## Method
 
@@ -84,7 +120,11 @@ python harness/score.py results/wf_fresh_output.json harness/bugs_fresh_index.js
 
 ## Honest caveats
 
-Pilot scale (7 clean bugs; 3/7 has wide error bars) · the gate dropped one *real* localized catch
+Pilot scale, and it is fatal to the cross-corpus headline rather than merely loosening it: 3/7 is
+Wilson [0.158, 0.750], and the interval on the BugsInPy-vs-fresh **difference** is
+[−0.022, +0.700], Fisher exact p = 0.129, so the gap is
+[not established](#what-this-pilot-does-not-establish) · the two arms are different corpora and
+differ in four ways, only one of which is under test · the gate dropped one *real* localized catch
 (satpy #3367 — now flagged `FATAL` automatically, not by hand) · both stored runs predate the
 `drop_reason` field, so their refuted/inconclusive split is **unmeasured**, not zero ·
 one false alarm on a 318 KB file (clu-comics) · ±3-line localization tolerance ·
