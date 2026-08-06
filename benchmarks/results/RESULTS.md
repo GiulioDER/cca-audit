@@ -24,10 +24,26 @@ fixed file at the fix site. Two corpora, same harness.
 
 ## The two findings that matter
 
-1. **The 40-point memorization gap.** Confirmed recall is **83% on the classic benchmark the model
-   has memorized (100% recognized) vs 43% on code it has not.** Anyone citing a raw AI-auditor
-   benchmark score without measuring recognition is reporting a number inflated by memorization.
-   We measured it.
+1. ~~**The 40-point memorization gap.**~~ **WITHDRAWN 2026-08-06.** This section read: *"Confirmed
+   recall is 83% on the classic benchmark the model has memorized (100% recognized) vs 43% on code
+   it has not. [...] We measured it."* The comparison does not survive its own numbers.
+
+   **The interval on the difference contains zero.** 10/12 against 3/7 gives a gap of +0.405 with a
+   Newcombe 95% interval of **[−0.022, +0.700]** and Fisher exact **p = 0.129**. The arm intervals
+   were noted as "wide" here from the start; the interval that carries the *claim* is the one on the
+   difference, and it was never computed until 2026-08-06. It crosses zero.
+
+   **And the comparison is cross-corpus.** The arms differ in era, repository selection, fix-hunk
+   size and recognition simultaneously. Recognition is the variable the claim is about; the other
+   three are uncontrolled. So even a significant gap would not have been attributable to
+   memorization.
+
+   **What stands without the comparison:** BugsInPy returned `recognized = true` on **12/12** files.
+   That is a direct contamination measurement of a widely-cited benchmark and it needs no second arm.
+   The claim that survives is *"this benchmark is memorized"*, not *"memorization costs 40 points"*.
+   The design that would settle the second one, one corpus split by the recognition probe at n≥30
+   clean, is in [`docs/specs/2026-07-24-fresh-corpus-scale-design.md`](../../docs/specs/2026-07-24-fresh-corpus-scale-design.md)
+   and has not been run.
 
 2. **The anti-hallucination gate is busiest exactly where it matters — but a drop rate is not a
    score.** fp-check dropped **42% of raw findings on novel code vs 17% on memorized code**: on
@@ -53,8 +69,15 @@ Pre-gate, the same auditors caught **4 / 7**. The gate is the difference between
 and it bought one specificity point for it.
 
 ## Honest caveats (state these in any write-up)
-- **Pilot scale.** 7 clean bugs is small; "43%" is 3/7 with wide error bars. Scaling to ~30–50 clean
-  bugs is the obvious next step to tighten it.
+- **Pilot scale, and what it costs the headline.** 7 clean bugs is small: 3/7 carries a Wilson 95%
+  interval of [0.158, 0.750]. The consequence is not merely imprecision. The interval on the
+  BugsInPy-vs-fresh **difference** is [−0.022, +0.700] (Fisher exact p = 0.129), so the pilot cannot
+  separate a 40-point gap from no gap. Scaling to ~30–50 clean bugs is not a tightening exercise;
+  it is what the claim needs in order to exist. Recompute with `python harness/interval.py`.
+- **The two arms differ in four ways, not one.** BugsInPy (2018–2020 libraries) versus the 2026
+  fresh corpus differ in era, repository selection, fix-hunk size and recognition simultaneously.
+  Only the last is the variable under test. Any cross-corpus gap is therefore unattributable, which
+  is why the fix is a within-corpus recognition split rather than a bigger version of this design.
 - **The gate costs catches too.** On satpy #3367 a raw finding localized to the fix site but fp-check
   **dropped it** (raw hit → confirmed miss). The anti-hallucination gate is not free — it removed one
   real localization among the 8 it dropped. This is now measured rather than hand-noted: `score.py`
@@ -70,6 +93,6 @@ and it bought one specificity point for it.
   the fresh localization target is somewhat more lenient.
 - **Detection & localization only** — not fix-correctness (that needs each project's test harness).
 
-## Reproates
+## Reproduce
 Seeded sampler + `gh`-based materializer + parallel workflow + deterministic scorer, all in
 `cca-bench/harness/`. Fresh run: workflow `wf_d337c98f-0b9`, 61 agents, 4.27M tokens, ~34 min.
