@@ -118,3 +118,97 @@ def test_no_unlisted_markdown_quotes_the_gap_bare() -> None:
         "these documents quote the 83/43 gap with no retraction: "
         f"{offenders}. Either qualify them or add them to _GATED."
     )
+
+
+# --- the figures themselves, recomputed rather than pinned as strings ------------------
+
+def _interval_module():
+    """Import `benchmarks/harness/interval.py` by path.
+
+    `benchmarks/harness/` is a directory of runnable scripts, not an installed package,
+    so there is no import path to it from `tests/`.
+    """
+    import importlib.util
+
+    path = _ROOT / "benchmarks" / "harness" / "interval.py"
+    spec = importlib.util.spec_from_file_location("_cca_interval", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_retraction_figures_are_what_the_module_computes() -> None:
+    """The documents quote three figures; nothing recomputed them until this test.
+
+    They were asserted as string literals only, so a change to `interval.py` could not be
+    detected: the retraction would keep quoting numbers the code no longer produced. Since
+    the retraction is the whole point of the change, its arithmetic has to be checkable.
+    """
+    interval = _interval_module()
+    bugsinpy, fresh = interval.RETRACTED_COMPARISON
+    assert (bugsinpy.hits, bugsinpy.n) == (10, 12)
+    assert (fresh.hits, fresh.n) == (3, 7)
+
+    lo, hi = interval.wilson(3, 7)
+    assert (round(lo, 3), round(hi, 3)) == (0.158, 0.750)
+    lo, hi = interval.wilson(10, 12)
+    assert (round(lo, 3), round(hi, 3)) == (0.552, 0.953)
+
+    lo, hi = interval.newcombe_difference(bugsinpy, fresh)
+    assert (round(lo, 3), round(hi, 3)) == (-0.022, 0.700), (
+        f"the published difference interval is [-0.022, +0.700]; the module now computes "
+        f"[{lo:.4f}, {hi:.4f}]. If that is intended, the retraction text has to be rewritten "
+        f"rather than silently inherited."
+    )
+    p = interval.fisher_exact_two_sided(bugsinpy, fresh)
+    assert round(p, 3) == 0.129, f"published p = 0.129, module computes {p:.6f}"
+    assert lo < 0 < hi, "the retraction rests on the interval containing zero"
+
+
+def test_fisher_exact_matches_exact_rational_arithmetic_at_scale() -> None:
+    """Guards the specific defect the epsilon fix removed.
+
+    The comparison used an ABSOLUTE `+ 1e-9` tolerance on a probability, so once the
+    observed table's probability fell below ~1e-9 it swept in strictly more probable
+    tables and the function could not return anything smaller. At (300,100 / 100,300) it
+    returned 1.61e-9 for a true 6.01e-47.
+
+    The pilot's own counts sit nowhere near that floor, which is why it was invisible, and
+    this module exists precisely to be re-run at the larger n the scale design calls for.
+    So the guard is a large-count case against an independent exact reference, not a
+    re-assertion of the small numbers above.
+    """
+    from fractions import Fraction
+    from math import comb
+
+    interval = _interval_module()
+
+    def reference(a1: int, a2: int, b1: int, b2: int) -> Fraction:
+        """The same hypergeometric definition, in exact rationals, written independently."""
+        row1, row2, col1 = a1 + a2, b1 + b2, a1 + b1
+        total = a1 + a2 + b1 + b2
+
+        def table(x: int) -> Fraction:
+            return Fraction(comb(row1, x) * comb(row2, col1 - x), comb(total, col1))
+
+        observed = table(a1)
+        lo, hi = max(0, col1 - row2), min(row1, col1)
+        return sum((table(x) for x in range(lo, hi + 1) if table(x) <= observed), Fraction(0))
+
+    cases = [
+        (10, 2, 3, 4),        # the pilot itself
+        (300, 100, 100, 300),  # p ~ 6e-47: below the old absolute floor
+        (200, 0, 0, 200),      # p ~ 2e-119: far below it
+        (1, 1, 1, 1),          # every table equiprobable by symmetry -> p = 1
+        (7, 7, 7, 7),          # ditto, larger
+        (0, 5, 5, 0),          # a zero cell in each arm
+    ]
+    for a1, a2, b1, b2 in cases:
+        got = interval.fisher_exact_two_sided(
+            interval.Arm("a", a1, a1 + a2), interval.Arm("b", b1, b1 + b2)
+        )
+        want = float(reference(a1, a2, b1, b2))
+        assert got == pytest.approx(want, rel=1e-12, abs=0.0), (
+            f"({a1},{a2} / {b1},{b2}): module {got:.6e} vs exact {want:.6e}"
+        )

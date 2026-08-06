@@ -26,6 +26,7 @@ recorded in `results/RESULTS.md`.
 from __future__ import annotations
 
 import math
+from fractions import Fraction
 from typing import NamedTuple
 
 Z95 = 1.959963984540054
@@ -84,26 +85,41 @@ def fisher_exact_two_sided(a: Arm, b: Arm) -> float:
     definition rather than an approximation to it. Exact because the counts are
     small enough that an asymptotic chi-square would not be trustworthy -- the
     same reason the intervals above are Wilson and not Wald.
+
+    Arithmetic in `Fraction`, converted once at the end. `math.comb` is exact,
+    but the division that turns three integers into a probability is not, and
+    the comparison below is between two such probabilities.
     """
     a1, a2 = a.hits, a.n - a.hits
     b1, b2 = b.hits, b.n - b.hits
     row1, row2 = a1 + a2, b1 + b2
     col1, total = a1 + b1, a1 + a2 + b1 + b2
 
-    def table_p(x: int) -> float:
-        return (
-            math.comb(row1, x)
-            * math.comb(row2, col1 - x)
-            / math.comb(total, col1)
+    def table_p(x: int) -> Fraction:
+        return Fraction(
+            math.comb(row1, x) * math.comb(row2, col1 - x),
+            math.comb(total, col1),
         )
 
-    observed = table_p(a1)
     lo = max(0, col1 - row2)
     hi = min(row1, col1)
-    # 1e-9 absorbs float error on tables that are equiprobable by symmetry;
-    # without it, a table exactly as extreme as the observed one can be dropped
-    # and the p-value comes back too small.
-    return min(1.0, sum(table_p(x) for x in range(lo, hi + 1) if table_p(x) <= observed + 1e-9))
+    # Evaluated ONCE per table: the previous form called `table_p(x)` twice per
+    # x, in the filter and again in the sum.
+    probabilities = [table_p(x) for x in range(lo, hi + 1)]
+    observed = table_p(a1)
+    # `<=` on exact rationals, so the tables that are equiprobable by symmetry
+    # compare equal outright and need no tolerance at all.
+    #
+    # This was an ABSOLUTE `+ 1e-9` on a probability, which silently floored the
+    # result: any table more probable than the observed one was swept in once
+    # the observed probability fell below ~1e-9, so the function could not
+    # return a p below roughly 1e-9. Measured against this same definition in
+    # `Fraction`: at (300,100 / 100,300) it returned 1.61e-9 for a true
+    # 6.01e-47, and at (200,0 / 0,200) 7.87e-10 for a true 1.94e-119. The
+    # pilot's own counts (10/12 vs 3/7) were far from that floor, which is
+    # exactly why it was invisible -- and this module exists to be re-run at the
+    # n>=30 the scale design calls for.
+    return min(1.0, float(sum((p for p in probabilities if p <= observed), Fraction(0))))
 
 
 def _pct(x: float) -> str:
