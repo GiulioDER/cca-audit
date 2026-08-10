@@ -127,8 +127,10 @@ This matches `repro_runner.py:31-34`, where a *passing* repro yields UNCERTAIN r
 FALSE_POSITIVE. Same principle, so the rule an agent must remember stays one rule, not two.
 
 `hypothesis` is an optional dependency, declared in `pyproject.toml` as a
-`[project.optional-dependencies]` extra named `numeric` (`pip install cca_checks[numeric]`). The
-core install stays dependency-free. Absent ⇒ UNCERTAIN, never a silent pass.
+`[project.optional-dependencies]` extra named `numeric`. The current published package is
+`cca-audit`, so the install form is `pip install "cca-audit[numeric]"`; older notes in this design
+slice used the internal package name. The core install stays dependency-free. Absent ⇒ UNCERTAIN,
+never a silent pass.
 
 ## Data flow
 

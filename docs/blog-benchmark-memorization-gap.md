@@ -1,10 +1,17 @@
-# Your AI code reviewer's benchmark score is probably inflated — here's how much
+# Your AI code reviewer's benchmark is memorized. Mine was 12/12.
 
-*A small, honest benchmark of an AI bug-hunter on memorized vs. novel code — and the 40-point gap between them.*
+> **Correction, 2026-08-06.** This article previously led with **83% memorized versus 43% novel**
+> as a measured gap. That gap is withdrawn. The interval on the difference contains zero, and the
+> two arms were different corpora, so the pilot cannot attribute the apparent gap to memorization.
+> The contamination measurement still stands: BugsInPy was recognized 12/12.
+
+*A small benchmark of an AI bug-hunter, designed to separate finding a bug from remembering a public patch.*
 
 Every AI code tool ships a number. "Finds N% of bugs." The trouble is that almost every public bug benchmark was fixed in public, years ago, and now sits in the training data of the model doing the finding. So when an AI auditor flags a bug in a famous library, you can't tell whether it *reasoned about the code* or *remembered the patch*.
 
-We built a way to tell those two apart, ran it on our own tool, and the gap was bigger than we expected: **83% on the benchmark the model had memorized, 43% on bugs it hadn't.** Here's the method, the numbers, and the parts that didn't flatter us.
+We built a probe that asks the question directly, ran it on our own tool, and on **BugsInPy the model
+recognized 12 files out of 12**. Not "some contamination": all of it. What that costs a score is a
+question this pilot was too small to answer.
 
 ## What we tested
 
@@ -36,7 +43,7 @@ On BugsInPy, confirmed recall was **10/12 (83%)** with **perfect specificity (12
 
 That's not bug detection. That's memory recall. **The 83% is a contamination score.**
 
-## Result 2: novel code, and the 40-point gap
+## Result 2: novel code, and the gap I cannot claim
 
 On the fresh post-cutoff bugs, the recognition probe dropped to **3/10 recognized** — and on the 7 it genuinely did *not* recognize (including aiohttp and pipx, despite their fame — the probe discriminates at the *code* level, not by star count), it reported honestly:
 
@@ -50,7 +57,14 @@ On those 7 clean bugs, confirmed recall was **3/7 (43%)**:
 | **allaboutduncan/clu-comics** | wanted-issue matching not month-agnostic | [PR #389](https://github.com/allaboutduncan/clu-comics/pull/389) |
 | **pypa/pipx** | local `--find-links` not resolved | [PR #1860](https://github.com/pypa/pipx/pull/1860) |
 
-**83% memorized → 43% novel.** That 40-point gap is the number nobody reports, because measuring it requires admitting your benchmark is contaminated.
+Here is where the original article overreached. 10/12 against 3/7 is a 40-point gap on its face, but
+seven clean bugs cannot carry that claim, and the two arms are different corpora besides. Recognition
+is not the only thing that changed between them.
+
+**So the honest reading is: 43% on novel code is what this tool did on seven bugs, and BugsInPy is
+12/12 memorized. Whether the second causes the first is unmeasured.** The design that would settle
+it, one corpus mined by one process and split by the recognition probe at n≥30 clean, is written up
+in [`docs/specs/2026-07-24-fresh-corpus-scale-design.md`](https://github.com/GiulioDER/cca-audit/blob/master/docs/specs/2026-07-24-fresh-corpus-scale-design.md) and has not been run.
 
 ## Result 3: the gate earns its keep exactly where it should
 
@@ -60,7 +74,12 @@ The anti-hallucination gate dropped **17% of raw findings on memorized code, but
 
 If we're going to accuse everyone else of inflated numbers, ours had better be honest:
 
-- **Pilot scale.** Seven clean bugs is small; 3/7 has wide error bars. This is a method and a signal, not a leaderboard.
+- **Pilot scale, and it cost me the headline.** Seven clean bugs is small. I originally carried the
+  40-point gap anyway, which was the mistake: the interval on the difference contains zero. This is a
+  method and a contamination measurement, not a leaderboard.
+- **The comparison was cross-corpus.** Era, repository selection, hunk size and recognition all differ
+  between the two arms. Only the last is under test. A within-corpus split is the fix, not a bigger
+  version of the same design.
 - **The gate costs catches too.** On one bug (satpy #3367) a raw finding *did* localize to the fix — and `fp-check` **dropped it**. The gate that kills false positives also killed one true one. That trade-off is real and we're not hiding it.
 - **One false alarm.** A 318 KB file (clu-comics) produced a confirmed finding on the *fixed* version inside the fix window — possibly a genuine nearby bug, possibly noise.
 - **Localization, not fix-correctness.** We measure whether it finds and localizes the bug, not whether it would write the right patch.

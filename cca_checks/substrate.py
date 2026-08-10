@@ -8,6 +8,11 @@ relation at all. It evaluates the target in float64 and at high precision, with 
 second float64 replay to screen for state, and lets the substrates disagree where
 an author could not.
 
+ORIGIN. The approach (run one numeric rule under two arithmetics, and treat their
+disagreement as the signal) was suggested by Erik Hill (AgentDev9 on dev.to,
+github.com/egnaro9) in public review, along with the float64 versus exact rational
+question the next paragraph answers. See README "Acknowledgements".
+
 WHY mpmath AND NOT Fraction OR Decimal. Both were measured and both fail, in the
 worst direction. A float literal in the source (`0.5 * vol**2`) collapses a
 Fraction argument back to float, and `math.cos(Fraction)` returns a float — both

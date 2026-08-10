@@ -58,13 +58,14 @@ expect those findings to escalate. Adding a language is documented in [extending
 
 | extra | pulls in | enables |
 |---|---|---|
-| `pip install cca_checks[verify]` | everything below | the whole deterministic layer |
-| `pip install cca_checks[numeric]` | `hypothesis`, `pytest`, `mpmath` | `numeric` claims |
-| `pip install cca_checks[rust]` | `tree-sitter`, `tree-sitter-rust` | Rust `clock_leak` + span resolution |
+| `pip install "cca-audit[verify]"` | everything below | the whole deterministic layer |
+| `pip install "cca-audit[numeric]"` | `hypothesis`, `pytest`, `mpmath` | `numeric` claims |
+| `pip install "cca-audit[rust]"` | `tree-sitter`, `tree-sitter-rust` | Rust `clock_leak` + span resolution |
 
-`pyright`, `semgrep` and `cargo`/`clippy` are **not** pip extras — the first two are installed
-separately, and the Rust toolchain belongs to the target project. Missing any of them escalates the
-affected claim types; it never silently passes them.
+The `verify` extra installs `pyright` and `semgrep` through pip. You can also install them
+separately if you want to manage those tools outside this package. The Rust toolchain is different:
+`cargo` and `clippy` belong to the target project and are not pip extras. Missing any of them
+escalates the affected claim types; it never silently passes them.
 
 ### Environment knobs
 

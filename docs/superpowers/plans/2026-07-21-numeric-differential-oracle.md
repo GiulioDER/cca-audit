@@ -1189,7 +1189,7 @@ layer**") with:
 ```markdown
 **For the deterministic verification layer**, also have `pyright`, `pytest`, and `semgrep` on your `PATH` (`pip install pyright pytest semgrep`). Without `cca_checks` or those tools, `/audit-fix` gracefully **falls back to LLM-only verification** — no crash, no regression. See the [Claude Code README](claude-code/README.md) for local-clone install and details.
 
-**For numeric findings**, install the `numeric` extra (`pip install "cca_checks[numeric]"`). It adds
+**For numeric findings**, install the `numeric` extra (`pip install "cca-audit[numeric]"`). It adds
 the `numeric` claim type, which settles arithmetic defects — wrong sign, mixed units, bad scaling —
 by running declared metamorphic properties under Hypothesis. It confirms with a falsifying example
 and never refutes, because properties holding is not proof of correctness. Worked example:

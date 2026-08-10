@@ -46,7 +46,8 @@ flowchart TD
     H -->|"BLOCKED"| BLOCK["Stop — needs human"]
 ```
 
-The **FAST** tier runs only the 3 core auditors (security, bug, code) and skips Steps 2.5 and 5.5.
+The **FAST** tier runs only the 3 core auditors (security, bug, code), verifies P1 findings in
+Step 2.5, and skips Step 5.5. P2 and P3 findings on FAST are reported rather than fixed.
 
 ## Step-by-Step
 
@@ -116,18 +117,19 @@ Findings are merged deterministically on `(file, line, category)`:
 2. **Same category on the same file within ±3 lines** — merge, cite all source auditors.
 3. **Missing config/table/grant findings** — flagged for Step 2.5 verification (common false positive).
 
-### Step 2.5: Findings Verification (anti-hallucination) — STANDARD / DEEP
+### Step 2.5: Findings Verification (anti-hallucination)
 
-Before any fix, P1/P2 findings are re-checked against the real code by an `fp-check` agent: does the
-issue exist, is it in changed code, is the impact real, does it contradict a settled decision, or is it
-already reported/fixed upstream? Verdict per finding: CONFIRMED / FALSE_POSITIVE / DUPLICATE (hunt
-mode — cite the upstream URL) / UNCERTAIN. False positives and duplicates are dropped; uncertain ones
-are escalated to the user (never fixed blind). **High-stakes P1 findings** get an adversarial **2-of-3**
-check (three independent skeptics, default-to-refute) on the DEEP tier — **except** findings whose
-verdict already rests on a tool artifact (`pyright`, `clippy`, `ast`, `semgrep`, `pytest`, `hypothesis`), notably a
-`NUM-*` P1 carrying a `hypothesis` artifact. The artifact settles it; an LLM majority does not get to
-outvote a falsifying example. Conversely, on DEEP a `NUM-*` P1 may **not** enter the fix plan without
-that artifact.
+Before any fix, findings are re-checked against the real code by an `fp-check` agent: does the issue
+exist, is it in changed code, is the impact real, does it contradict a settled decision, or is it
+already reported/fixed upstream? FAST verifies P1 only. STANDARD and DEEP verify P1 and P2. Verdict
+per finding: CONFIRMED / FALSE_POSITIVE / DUPLICATE (hunt mode — cite the upstream URL) / UNCERTAIN.
+False positives and duplicates are dropped; uncertain ones are escalated to the user (never fixed
+blind). **High-stakes P1 findings** get an adversarial **2-of-3** check (three independent skeptics,
+default-to-refute) on the DEEP tier — **except** findings whose verdict already rests on a tool
+artifact (`pyright`, `clippy`, `ast`, `semgrep`, `pytest`, `hypothesis`), notably a `NUM-*` P1
+carrying a `hypothesis` artifact. The artifact settles it; an LLM majority does not get to outvote a
+falsifying example. Conversely, on DEEP a `NUM-*` P1 may **not** enter the fix plan without that
+artifact.
 
 ### Step 3: Fix Plan
 

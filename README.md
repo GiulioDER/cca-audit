@@ -11,12 +11,12 @@
 
 # CCA-Audit
 
-**A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex in which no finding reaches your code unverified.**
+**A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex in which no unverified finding is allowed into the fix plan.**
 
 Eleven specialised auditors read your diff in parallel. Their findings are deduplicated, then each one is
 **re-derived against the real code** — mechanically, by `pyright`, `clippy`, `semgrep`, `pytest` or
 `hypothesis` wherever a tool can settle the claim, and by adversarial review where none can. Only
-findings that survive that gate are eligible to be fixed. The fix is then checked for scope creep,
+verified findings that survive that gate are eligible to be fixed. The fix is then checked for scope creep,
 and the whole change is gated on a mapping proving every confirmed finding has a fix and every edit
 has a finding.
 
@@ -27,6 +27,9 @@ a backend does not declare, escalates rather than being settled by a tool built 
 
 The design constraint throughout: **a check that could not run must never be indistinguishable from a
 check that passed.**
+
+For the shortest reader path, use the [documentation map](https://github.com/GiulioDER/cca-audit/blob/master/docs/README.md):
+install, run, tune, extend, then inspect the design evidence behind each verifier.
 
 ---
 
@@ -102,7 +105,8 @@ machine.
 
 ## It audits itself, and the self-audit finds things
 
-The most recent release, `v3.5`, shipped through five task reviews and a whole-branch review. CCA was
+The substrate-differential design slice shipped through five task reviews and a whole-branch review.
+CCA was
 then pointed at it. It found **two Critical defects that the entire review process had missed**:
 
 - **CI had never executed the feature's test suite.** The workflow installed an extra that omitted
@@ -262,6 +266,10 @@ write — a dependency, a repo you are evaluating, a legacy service — to find 
 /audit-fix hunt path/to/file.py     # or specific files
 ```
 
+For third-party code, run hunt mode in a disposable sandbox. The deterministic layer can execute
+the audited repository's tests and imports. The threat model and mitigation are in the
+[Security Policy](https://github.com/GiulioDER/cca-audit/blob/master/SECURITY.md).
+
 What changes:
 
 - **Whole-file audit.** *"Pre-existing bugs are the target"* replaces *"only audit the diff."* Age is
@@ -270,7 +278,9 @@ What changes:
   does it accept contributions, is there a test harness, is the language one this pipeline audits
   well. An archived or deprecated repo is rejected up front — auditing a corpse burns the run and
   produces a fix nobody can merge.
-- **Forced DEEP tier**, so every finding faces the adversarial 2-of-3 verifier.
+- **Forced DEEP tier**, so P1/P2 findings are verified, high-stakes P1s get the adversarial
+  2-of-3 verifier when they do not already carry a tool artifact, and `NUM-*` P1s need a
+  `hypothesis` artifact before they can enter the fix plan.
 - **Upstream-duplicate check.** L2.5 searches the target's own issues and PRs; a bug someone already
   reported is dropped as `DUPLICATE` rather than re-submitted.
 
@@ -342,10 +352,11 @@ pip install 'cca-audit[rust]'      # just the tree-sitter Rust grammar
 
 From a clone, the editable equivalents are `pip install -e ".[verify]"` / `-e ".[numeric]"`.
 
-`pyright`, `semgrep` and the Rust toolchain are **not** pip extras: the first two install
-separately, and `cargo`/`clippy` belong to the project you are auditing. Check what you actually
-have with `python -m cca_checks capabilities --file <a source file>` — it names the missing tool for
-any claim type it cannot settle here, rather than leaving you to infer it from an escalation.
+The `verify` extra installs `pyright` and `semgrep` through pip. You can also install them
+separately if you want to manage those tools outside this package. The Rust toolchain is different:
+`cargo` and `clippy` belong to the project you are auditing and are not pip extras. Check what you
+actually have with `python -m cca_checks capabilities --file <a source file>` — it names the missing
+tool for any claim type it cannot settle here, rather than leaving you to infer it from an escalation.
 
 Worked example: [`examples/sign-trap`](https://github.com/GiulioDER/cca-audit/tree/master/examples/sign-trap) — a real sign error, the property that
 catches it, and the resulting artifact.
@@ -412,11 +423,7 @@ tried, failed, and are recorded so they are not re-attempted.
 
 ## Documentation
 
-- [Pipeline Diagram](https://github.com/GiulioDER/cca-audit/blob/master/docs/pipeline-diagram.md) — a walkthrough of each step
-- [Auditor Scopes](https://github.com/GiulioDER/cca-audit/blob/master/docs/auditor-scopes.md) — the full non-overlapping scope matrix
-- [Configuration](https://github.com/GiulioDER/cca-audit/blob/master/docs/configuration.md) — tiers, domain dispatch, project context
-- [Extending](https://github.com/GiulioDER/cca-audit/blob/master/docs/extending.md) — adding a custom auditor
-- [v3 Design](https://github.com/GiulioDER/cca-audit/blob/master/docs/v3-design.md) — the design of record for the deterministic verification layer
+- [Documentation map](https://github.com/GiulioDER/cca-audit/blob/master/docs/README.md) — start here for install, pipeline, configuration, extension, and design evidence
 - [Security Policy](https://github.com/GiulioDER/cca-audit/blob/master/SECURITY.md) — **this tool executes code from the repository under audit**
 - [Changelog](https://github.com/GiulioDER/cca-audit/blob/master/CHANGELOG.md) · [Contributing](https://github.com/GiulioDER/cca-audit/blob/master/CONTRIBUTING.md)
 
@@ -425,6 +432,17 @@ tried, failed, and are recorded so they are not re-attempted.
 - [Fluency isn't evidence](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-fluency-isnt-evidence.md) — why a sign error survives review, and how a counterexample settles it
 - [Why AI code review hallucinates](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-why-ai-review-hallucinates.md) — and the two gates that close it
 - [The benchmark memorization gap](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-benchmark-memorization-gap.md) — what a passing benchmark score actually measures
+
+## Acknowledgements
+
+The substrate-differential check in [`cca_checks/substrate.py`](https://github.com/GiulioDER/cca-audit/blob/master/cca_checks/substrate.py) began as a
+suggestion from **Erik Hill** (AgentDev9 on dev.to, [@egnaro9](https://github.com/egnaro9),
+[egnaro9.github.io](https://egnaro9.github.io)), in a public comment thread on differential checking
+for numeric code. He made the case for running the same numeric rule under two arithmetics and
+letting the substrates disagree where an author cannot, and he pressed specifically on float64
+versus exact rational, which is the tradeoff that module now documents at length. The idea is his,
+offered freely in review with nothing asked in return. The implementation, the measured rejection of
+`Fraction` and `Decimal`, and the integrity gate are mine.
 
 ## License
 
