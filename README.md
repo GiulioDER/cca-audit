@@ -345,18 +345,27 @@ a hard stop, not graceful degradation.
 The extras carry it:
 
 ```bash
-pip install 'cca-audit[verify]'    # the whole deterministic layer in one install
+pip install 'cca-audit[verify]'    # the deterministic layer, except taint
+pipx install semgrep               # taint checking, isolated — see below
 pip install 'cca-audit[numeric]'   # just hypothesis + mpmath + pytest
 pip install 'cca-audit[rust]'      # just the tree-sitter Rust grammar
 ```
 
 From a clone, the editable equivalents are `pip install -e ".[verify]"` / `-e ".[numeric]"`.
 
-The `verify` extra installs `pyright` and `semgrep` through pip. You can also install them
-separately if you want to manage those tools outside this package. The Rust toolchain is different:
-`cargo` and `clippy` belong to the project you are auditing and are not pip extras. Check what you
-actually have with `python -m cca_checks capabilities --file <a source file>` — it names the missing
-tool for any claim type it cannot settle here, rather than leaving you to infer it from an escalation.
+**Why semgrep is installed separately.** `cca_checks` never imports semgrep; it resolves it on PATH
+and spawns it, exactly like `cargo`. But semgrep hard-pins `mcp==1.29.0`, `ruamel.yaml.clib` and
+`pywin32`, so putting it in `verify` meant `pip install 'cca-audit[verify]'` could downgrade
+packages that have nothing to do with auditing. `pipx` gives it its own environment and puts the
+binary on PATH, which is all this package ever needed. If you would rather have it in the same
+environment and accept those pins, `pip install 'cca-audit[taint]'` does exactly that.
+
+The `verify` extra still installs `pyright` through pip, which carries no such pins. The Rust
+toolchain is different again: `cargo` and `clippy` belong to the project you are auditing and are
+not pip extras. Check what you actually have with
+`python -m cca_checks capabilities --file <a source file>` — it probes each tool by running it, so
+a tool that is on PATH but cannot execute is reported with its reason rather than counted as
+present.
 
 Worked example: [`examples/sign-trap`](https://github.com/GiulioDER/cca-audit/tree/master/examples/sign-trap) — a real sign error, the property that
 catches it, and the resulting artifact.

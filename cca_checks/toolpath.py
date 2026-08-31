@@ -15,8 +15,10 @@ unavailable -> UNCERTAIN" escalation. Failing closed here costs a confirmation; 
 alternative costs the auditor's machine.
 """
 
+import functools
 import os
 import shutil
+import subprocess
 
 
 def _is_inside(path: str, root: str) -> bool:
@@ -74,3 +76,56 @@ def resolve_tool(name: str, cwd: str | None = None) -> str | None:
         # A real toolchain is never installed in the root of the repo under audit.
         return None
     return launch
+
+
+#: How long a `--version` probe may take before the tool counts as unusable. A
+#: healthy analyzer answers in well under a second; anything that hangs here would
+#: hang the audit too, so a timeout IS an unavailability rather than a reason to
+#: wait longer.
+PROBE_TIMEOUT_S = 20
+
+
+@functools.cache
+def tool_unavailable_reason(name: str, cwd: str | None = None) -> str | None:
+    """None when `name` can actually RUN. Otherwise why it cannot, in one line.
+
+    WHY PRESENCE IS NOT AVAILABILITY. Every caller used to decide this with
+    `resolve_tool(name) is not None`, which answers a different question: whether a
+    file with that name is on PATH. A binary can be found and still be unable to
+    execute, and the failure modes are ordinary rather than exotic -- a Windows
+    Application Control policy refusing the image, a console-script shim whose
+    interpreter has moved, a wheel for the wrong architecture, a missing shared
+    library.
+
+    That gap was measured on 2026-08-31: `semgrep` resolved fine on PATH, so
+    `capabilities` reported `taint` fully available with `unavailable: {}`, while
+    every taint claim on that machine escalated to UNCERTAIN because the console
+    script died with `OSError: [WinError 4551] An Application Control policy has
+    blocked this file`. The command whose entire job is to say where the verifier
+    is blind was blind to it, which is worse than not having the command: a
+    coverage report that overstates coverage is trusted precisely because it is
+    specific.
+
+    So probe by execution. A non-zero exit from `--version` counts as unavailable
+    too, and deliberately: in the case above the OSError happened INSIDE the tool's
+    own process, so nothing was raised here -- the only visible symptom was the
+    exit code. Checking only for OSError would have reproduced the original bug.
+    """
+    exe = resolve_tool(name, cwd)
+    if exe is None:
+        return f"{name} is not on PATH"
+    try:
+        proc = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace",
+                              timeout=PROBE_TIMEOUT_S)
+    except OSError as exc:
+        return (f"{name} is on PATH at {exe} but cannot be executed "
+                f"({exc.__class__.__name__}: {exc})")
+    except subprocess.TimeoutExpired:
+        return (f"{name} at {exe} did not answer --version within "
+                f"{PROBE_TIMEOUT_S}s")
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = detail[-1] if detail else "no output"
+        return (f"{name} at {exe} exited {proc.returncode} on --version ({tail})")
+    return None
