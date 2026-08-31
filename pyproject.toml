@@ -63,7 +63,7 @@ verify = ["hypothesis>=6.0", "pytest>=7", "pyright>=1.1.411", "semgrep>=1.50", "
 # installs `.[dev]` -- so without it here the entire Rust parsing layer would skip
 # silently on every CI run and a regression in it would merge green.
 # test_dev_extra_completeness.py asserts this invariant rather than this list.
-dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.4", "mpmath>=1.3",
+dev = ["hypothesis>=6.0", "pytest>=7", "ruff>=0.16.5", "mpmath>=1.3",
        "tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
 
 [tool.setuptools.packages.find]
