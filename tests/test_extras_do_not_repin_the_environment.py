@@ -19,7 +19,10 @@ from __future__ import annotations
 import pathlib
 import re
 
-import tomllib
+try:  # tomllib is 3.11+, and requires-python here is >=3.10.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - taken on the 3.10 CI job
+    import tomli as tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 EXTRAS = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
