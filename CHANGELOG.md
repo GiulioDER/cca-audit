@@ -8,6 +8,8 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+## [0.10.1] - 2026-08-31
+
 - **`pip install 'cca-audit[verify]'` no longer rewrites unrelated packages.** semgrep hard-pins
   `mcp==1.29.0`, `ruamel.yaml.clib` and `pywin32`, so installing the verification layer silently
   downgraded a user's `mcp` from 2.1.0 and broke unrelated MCP tooling. `cca_checks` never imports

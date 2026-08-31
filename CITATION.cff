@@ -11,7 +11,7 @@ authors:
 repository-code: "https://github.com/GiulioDER/cca-audit"
 url: "https://github.com/GiulioDER/cca-audit"
 license: MIT
-version: 0.10.0
+version: 0.10.1
 date-released: "2026-08-31"
 keywords:
   - static-analysis
