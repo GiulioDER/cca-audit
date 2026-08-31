@@ -17,6 +17,7 @@ install, which is exactly the environment `pip install` produces.
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import re
@@ -29,11 +30,13 @@ from importlib import resources
 __all__ = [
     "InstallResult",
     "default_codex_skills_root",
+    "hook_snippet",
     "install",
     "install_codex",
     "iter_agents",
     "iter_codex_skill",
     "iter_commands",
+    "iter_hooks",
     "iter_tools",
 ]
 
@@ -46,6 +49,10 @@ _COMMAND_GLOB = "audit-fix*.md"
 # Step 5.6 red-state proof). `test_*` is excluded: their tests run in this
 # repo's CI and have no business in a user's .claude/.
 _TOOL_GLOB = "cca_*.py"
+# PreToolUse guards. Unlike tools/, these are not invoked by the orchestrator:
+# the harness runs them, which is the entire point -- a gate the orchestrator
+# has to remember to call is a gate it can forget to call.
+_HOOK_GLOB = "cca_*.py"
 _CODEX_SKILL_NAME = "cca-audit"
 _REQUIRED_CODEX_AGENT_FILES = frozenset(
     {
@@ -114,6 +121,15 @@ def iter_tools():
     return (
         (name, text)
         for name, text in _iter_resources("tools", _TOOL_GLOB)
+        if not name.startswith("test_")
+    )
+
+
+def iter_hooks():
+    """Yield (filename, text) for every packaged harness guard."""
+    return (
+        (name, text)
+        for name, text in _iter_resources("hooks", _HOOK_GLOB)
         if not name.startswith("test_")
     )
 
@@ -246,6 +262,58 @@ def _warn_on_shadowing_agents(agents_dir: pathlib.Path, result: InstallResult) -
             )
 
 
+_GUARD_NAME = "cca_pipeline_guard.py"
+
+
+def _guard_is_registered(root: pathlib.Path) -> bool:
+    """Is the commit guard named by any settings file that would run it?
+
+    A substring search over the raw text rather than a parse of the hook tree:
+    the same guard can legitimately be wired as a bare command, inside a `case`
+    wrapper, or via a console script, and a structural check that understood only
+    one of those shapes would report a correctly armed guard as missing. The cost
+    of the loose check is a false "registered" if the name appears in a comment,
+    which produces no warning rather than a wrong one.
+    """
+    candidates = [
+        root / ".claude" / "settings.json",
+        root / ".claude" / "settings.local.json",
+        pathlib.Path.home() / ".claude" / "settings.json",
+    ]
+    for path in candidates:
+        try:
+            if _GUARD_NAME in path.read_text(encoding="utf-8"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def hook_snippet(target: str | pathlib.Path = ".") -> str:
+    """The settings.json fragment that arms the commit guard."""
+    guard = pathlib.Path(target).resolve() / ".claude" / "hooks" / _GUARD_NAME
+    return json.dumps(
+        {
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f'python "{guard.as_posix()}"',
+                                "timeout": 15,
+                                "statusMessage": "Checking the CCA pipeline gate",
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+        indent=2,
+    )
+
+
 def install(target: str | pathlib.Path = ".") -> InstallResult:
     """Install the agents, commands and pipeline checkers into `<target>/.claude/`.
 
@@ -259,6 +327,7 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
     agents = list(iter_agents())
     commands = list(iter_commands())
     tools = list(iter_tools())
+    hooks = list(iter_hooks())
     # A wheel missing its markdown would install "successfully" into an empty
     # .claude/ -- a total, silent failure. Refuse before creating anything.
     if not agents:
@@ -282,12 +351,23 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
             "incomplete -- reinstall with `pip install --force-reinstall cca-audit`"
         )
 
+    # A missing guard fails the quietest way of all: the pipeline still runs,
+    # still reports, and simply stops being enforced, so a skipped layer becomes
+    # invisible again. That is the exact regression the guard was added to end.
+    if not hooks:
+        raise RuntimeError(
+            "no pipeline guards found in the installed package; the wheel is "
+            "incomplete -- reinstall with `pip install --force-reinstall cca-audit`"
+        )
+
     agents_dir = root / ".claude" / "agents"
     commands_dir = root / ".claude" / "commands"
     tools_dir = root / ".claude" / "tools"
+    hooks_dir = root / ".claude" / "hooks"
     agents_dir.mkdir(parents=True, exist_ok=True)
     commands_dir.mkdir(parents=True, exist_ok=True)
     tools_dir.mkdir(parents=True, exist_ok=True)
+    hooks_dir.mkdir(parents=True, exist_ok=True)
 
     result = InstallResult()
     # Check *before* writing: afterwards our own cca-*.md files are present and
@@ -300,6 +380,19 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
         _write(commands_dir / name, text, result)
     for name, text in tools:
         _write(tools_dir / name, text, result)
+    for name, text in hooks:
+        _write(hooks_dir / name, text, result)
+
+    # Copying the guard into place does not arm it: Claude Code only runs a hook
+    # that settings.json names. Saying so here is the difference between an
+    # installed guard and an installed guard that guards -- and the two are
+    # indistinguishable from the install output otherwise.
+    if not _guard_is_registered(root):
+        result.warnings.append(
+            "the commit guard is installed but not registered; add the PreToolUse "
+            "hook from `cca-audit install --print-hook` to your settings.json, or "
+            "the pipeline's layers stay advisory"
+        )
 
     return result
 

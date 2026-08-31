@@ -97,11 +97,16 @@ def test_install_writes_agents_commands_and_checkers(tmp_path):
     agents = {p.name for p in (tmp_path / ".claude" / "agents").glob("*.md")}
     commands = {p.name for p in (tmp_path / ".claude" / "commands").glob("*.md")}
     tools = {p.name for p in (tmp_path / ".claude" / "tools").glob("*.py")}
+    hooks = {p.name for p in (tmp_path / ".claude" / "hooks").glob("*.py")}
 
     assert agents == {name for name, _ in plugin.iter_agents()}
     assert commands == {name for name, _ in plugin.iter_commands()}
     assert tools == {name for name, _ in plugin.iter_tools()}
-    assert result.installed == len(agents) + len(commands) + len(tools)
+    # The commit guard ships with the pipeline it enforces. An install that
+    # delivers the layers but not the guard leaves them advisory again, which is
+    # indistinguishable from a correct install until a layer is skipped.
+    assert hooks == {name for name, _ in plugin.iter_hooks()}
+    assert result.installed == len(agents) + len(commands) + len(tools) + len(hooks)
     assert result.backed_up == 0
 
 
@@ -171,7 +176,34 @@ def test_install_does_not_warn_about_our_own_files(tmp_path):
     """cca-*.md files are ours; re-running must not warn about the ones we just wrote."""
     plugin.install(tmp_path)
     result = plugin.install(tmp_path)
-    assert result.warnings == []
+    # The unregistered-guard warning is expected here and is asserted on its own
+    # below: a temp directory has no settings.json, so the guard is genuinely
+    # installed-but-not-armed. Filtering it rather than dropping the assertion
+    # keeps this test's actual subject, agent-name shadowing, still tested.
+    shadowing = [w for w in result.warnings if "commit guard" not in w]
+    assert shadowing == []
+
+
+def test_install_warns_when_the_commit_guard_is_not_registered(tmp_path, monkeypatch):
+    """Copying the guard into place does not arm it; only settings.json does.
+
+    Without this warning an install reports complete success while the pipeline's
+    layers remain exactly as advisory as they were before the guard existed --
+    the failure mode is silence, which is the one this whole mechanism replaces.
+
+    `Path.home` is redirected because the registration check legitimately reads
+    the user's own settings.json: on a machine where the developer has already
+    armed the guard globally, an un-redirected test would pass for a reason that
+    has nothing to do with the code under test.
+    """
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    result = plugin.install(tmp_path)
+    assert any("commit guard" in w for w in result.warnings), result.warnings
+
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.write_text(plugin.hook_snippet(tmp_path), encoding="utf-8")
+    rearmed = plugin.install(tmp_path)
+    assert not any("commit guard" in w for w in rearmed.warnings), rearmed.warnings
 
 
 def test_install_creates_the_target_tree_when_absent(tmp_path):

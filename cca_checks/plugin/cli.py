@@ -17,7 +17,7 @@ import argparse
 import sys
 from importlib import metadata
 
-from . import default_codex_skills_root, install_codex
+from . import default_codex_skills_root, hook_snippet, install_codex
 from . import install as install_plugin
 
 
@@ -55,6 +55,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=".",
         help="project directory to install into (default: the current directory)",
     )
+    install_cmd.add_argument(
+        "--print-hook",
+        action="store_true",
+        help=(
+            "print the settings.json fragment that arms the commit guard, and "
+            "install nothing"
+        ),
+    )
     codex_cmd = sub.add_parser(
         "install-codex",
         help="install the audit+fix skill into Codex",
@@ -88,6 +96,14 @@ def main(argv: list[str] | None = None) -> int:
         # (`cca-audit && ...`) does not proceed as though something happened.
         parser.print_help()
         return 2
+
+    if args.command == "install" and args.print_hook:
+        # Deliberately the only thing this path does. Printing a config fragment
+        # and silently editing the user's settings.json are different acts, and a
+        # tool that arms a commit-blocking hook without being asked is one nobody
+        # should install twice.
+        print(hook_snippet(args.target))
+        return 0
 
     is_codex = args.command == "install-codex"
     try:
