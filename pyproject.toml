@@ -49,10 +49,35 @@ numeric = ["hypothesis>=6.165.10", "pytest>=9.1.1", "mpmath>=1.3"]
 # wheel always works, so `clock_leak` and enclosing-span resolution keep working on a
 # crate that does not build, which is exactly when an auditor most needs them.
 rust = ["tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
-# The whole deterministic layer in one install, so it is reproducible from the
-# manifest rather than from a sentence in the README.
-verify = ["hypothesis>=6.165.10", "pytest>=9.1.1", "pyright>=1.1.411", "semgrep>=1.175.0", "mpmath>=1.3",
+# The deterministic layer, minus semgrep. See `taint` below for why that one is
+# not here: this extra goes into a user's working environment, and must not be
+# able to rewrite packages that have nothing to do with auditing.
+verify = ["hypothesis>=6.165.10", "pytest>=9.1.1", "pyright>=1.1.411", "mpmath>=1.3",
           "tree-sitter>=0.23", "tree-sitter-rust>=0.23"]
+# SEMGREP IS DELIBERATELY NOT IN `verify`, AND THIS IS NOT AN OVERSIGHT.
+#
+# `cca_checks` never imports semgrep. It resolves it on PATH and spawns it
+# (`semgrep_check.py` -> `resolve_tool("semgrep")` -> `subprocess.run`), exactly
+# like cargo, which nobody would think to pip-install. So it is a TOOL, and it
+# only ever sat in a pip extra because "one install" read as tidy.
+#
+# It is not tidy, it is destructive. semgrep hard-pins `mcp==1.29.0`,
+# `ruamel.yaml.clib==0.2.15` and `pywin32==311`, so `pip install cca-audit[verify]`
+# silently downgraded a user's `mcp` from 2.1.0 to 1.29.0 on 2026-08-31, breaking
+# unrelated MCP tooling to satisfy a dependency the audit layer never imports.
+# An extra that rewrites packages outside its own concern is a bug in the extra.
+#
+# `pipx install semgrep` is the right install: isolated environment, binary on
+# PATH, which is all `resolve_tool` ever wanted. This extra exists for the case
+# where in-environment really is preferred, so the pins are accepted knowingly
+# rather than discovered afterwards.
+#
+# Removing it from `verify` would once have been the "extra that half-enables a
+# feature" mistake warned about above, silently. It is not silent any more:
+# `unavailable_claim_types` probes by EXECUTION since the same day, so a missing
+# or unrunnable semgrep is reported by `cca_checks capabilities` with its reason,
+# and every taint claim escalates visibly instead of being quietly skipped.
+taint = ["semgrep>=1.175.0"]
 # mpmath belongs here for the same reason pytest belongs in `numeric`: CI installs
 # `.[dev]`, and both tests/test_substrate.py and tests/acceptance/test_substrate_suite.py
 # `pytest.importorskip("mpmath")` at module scope -- without it here, ~25 substrate

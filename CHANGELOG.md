@@ -8,6 +8,21 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+- **`pip install 'cca-audit[verify]'` no longer rewrites unrelated packages.** semgrep hard-pins
+  `mcp==1.29.0`, `ruamel.yaml.clib` and `pywin32`, so installing the verification layer silently
+  downgraded a user's `mcp` from 2.1.0 and broke unrelated MCP tooling. `cca_checks` never imports
+  semgrep: it resolves it on PATH and spawns it, exactly like `cargo`, so it was never a library
+  dependency in the first place. It moves to its own `taint` extra, with `pipx install semgrep` as
+  the recommended install. `verify` now resolves to 15 packages instead of 68.
+- **`capabilities` probes tools by running them, not by finding them.** Availability was
+  `resolve_tool(name) is not None`, which answers whether a file is on PATH. On a machine where
+  semgrep resolved fine and then died with `OSError: [WinError 4551] An Application Control policy
+  has blocked this file`, `capabilities` reported `taint` fully available while every taint claim
+  escalated. A coverage report that overstates coverage is worse than none, because its specificity
+  is what makes it trusted. Each tool is now probed with `--version`, and a non-zero exit counts as
+  unavailable too: in that failure the `OSError` was raised inside the tool's own process, so an
+  exception check alone would have reproduced the bug.
+
 ## [0.10.0] - 2026-08-31
 
 - **The audit pipeline's layers are now enforced rather than requested.** Every layer of

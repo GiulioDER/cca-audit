@@ -18,11 +18,12 @@ deleted. End-to-end coverage of the launch itself lives in test_cargo_repro.py a
 test_clippy_check.py, which exercise a real toolchain in CI.
 """
 import os
+import subprocess
 
 import pytest
 
 from cca_checks import toolpath
-from cca_checks.toolpath import resolve_tool
+from cca_checks.toolpath import resolve_tool, tool_unavailable_reason
 
 
 @pytest.fixture
@@ -122,3 +123,75 @@ def test_a_missing_tool_is_none(fs):
     fs(None)
 
     assert resolve_tool("definitely-not-a-real-tool", cwd=REPO) is None
+
+
+# --- tool_unavailable_reason: presence is not availability -------------------
+#
+# Added 2026-08-31 after `pip install 'cca-audit[verify]'` produced a machine where
+# `capabilities` reported `taint` fully available and every taint claim escalated:
+# semgrep was on PATH and its console script died with
+# `OSError: [WinError 4551] An Application Control policy has blocked this file`.
+
+
+
+def _fresh():
+    """The probe is lru_cached for the process; tests must not inherit each other."""
+    tool_unavailable_reason.cache_clear()
+
+
+def test_a_tool_that_is_absent_says_so(monkeypatch):
+    _fresh()
+    monkeypatch.setattr("cca_checks.toolpath.resolve_tool", lambda name, cwd=None: None)
+    reason = tool_unavailable_reason("nosuchtool")
+    assert reason is not None and "not on PATH" in reason
+
+
+def test_a_tool_that_runs_cleanly_is_available(monkeypatch):
+    _fresh()
+    monkeypatch.setattr("cca_checks.toolpath.resolve_tool", lambda name, cwd=None: "/x/tool")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, "1.2.3", ""))
+    assert tool_unavailable_reason("tool") is None
+
+
+def test_a_tool_that_cannot_be_executed_is_unavailable(monkeypatch):
+    """The OSError-in-our-process case: a wrong-arch binary, a dead shim."""
+    _fresh()
+    monkeypatch.setattr("cca_checks.toolpath.resolve_tool", lambda name, cwd=None: "/x/tool")
+
+    def boom(*a, **k):
+        raise OSError("[WinError 4551] An Application Control policy has blocked this file")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    reason = tool_unavailable_reason("tool")
+    assert reason is not None and "4551" in reason, "the OS reason must reach the report"
+
+
+def test_a_nonzero_version_exit_is_unavailable(monkeypatch):
+    """The case that actually happened, and the reason a bare OSError check is not enough.
+
+    semgrep's OSError was raised INSIDE its own process, so nothing was raised here.
+    The only visible symptom was the exit code, which a presence check ignores and an
+    OSError-only check would also ignore.
+    """
+    _fresh()
+    monkeypatch.setattr("cca_checks.toolpath.resolve_tool", lambda name, cwd=None: "/x/semgrep")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "OSError: [WinError 4551] blocked"))
+    reason = tool_unavailable_reason("semgrep")
+    assert reason is not None
+    assert "exited 1" in reason and "4551" in reason
+
+
+def test_a_hanging_tool_is_unavailable_rather_than_waited_on(monkeypatch):
+    _fresh()
+    monkeypatch.setattr("cca_checks.toolpath.resolve_tool", lambda name, cwd=None: "/x/tool")
+
+    def hang(*a, **k):
+        raise subprocess.TimeoutExpired(cmd="tool", timeout=1)
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    reason = tool_unavailable_reason("tool")
+    assert reason is not None and "did not answer" in reason
+    _fresh()

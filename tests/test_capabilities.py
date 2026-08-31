@@ -78,10 +78,36 @@ def test_an_unavailable_tool_is_reported_not_subtracted(capsys, files, monkeypat
     """An agent that sees `overflow` listed as unavailable knows to escalate it. One
     that never sees it at all cannot tell that from a claim type nobody supports."""
     from cca_checks.languages import rust
-    monkeypatch.setattr(rust, "resolve_tool", lambda name: None)
+    monkeypatch.setattr(rust, "tool_unavailable_reason",
+                        lambda name: f"{name} is not on PATH")
     out = run(capsys, ["capabilities", "--file", "main.rs"])
     assert "overflow" in out["claim_types"], "must not vanish from the list"
     assert "cargo" in out["unavailable"]["overflow"]
+
+
+def test_a_tool_that_is_present_but_cannot_run_is_reported(capsys, files, monkeypatch):
+    """The bug this pins, measured 2026-08-31.
+
+    Availability used to be `resolve_tool(name) is not None`, which answers whether
+    a FILE is on PATH. semgrep resolved fine and then died with
+    `OSError: [WinError 4551] An Application Control policy has blocked this file`,
+    so capabilities reported `taint` fully available while every taint claim on that
+    machine escalated. A coverage report that overstates coverage is worse than none,
+    because its specificity is what makes it trusted.
+    """
+    from cca_checks.languages import rust
+
+    def blocked(name):
+        if name == "semgrep":
+            return "semgrep at /x/semgrep exited 1 on --version (WinError 4551)"
+        return None
+
+    monkeypatch.setattr(rust, "tool_unavailable_reason", blocked)
+    out = run(capsys, ["capabilities", "--file", "main.rs"])
+    assert "taint" in out["claim_types"], "must not vanish from the list"
+    assert "4551" in out["unavailable"]["taint"], "the REASON must survive to the report"
+    # Only taint is affected: a blocked semgrep must not be reported as a broken cargo.
+    assert "overflow" not in out["unavailable"]
 
 
 def test_a_missing_grammar_is_reported_against_clock_leak(capsys, files, monkeypatch):
