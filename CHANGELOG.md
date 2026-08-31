@@ -8,6 +8,34 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+## [0.10.0] - 2026-08-31
+
+- **The audit pipeline's layers are now enforced rather than requested.** Every layer of
+  `/audit-fix` was gated by prose alone: the command file said "This is a DETERMINISTIC workflow"
+  and nothing checked that it had been followed, so a run that skipped L2.5 (findings verification)
+  or L6 (the architect gate) produced a commit indistinguishable from a fully verified one, with
+  the same message shape, file list and claimed provenance. `python -m cca_checks pipeline` records
+  which layers a run reached, and a new `PreToolUse` guard refuses `git commit` until they carry
+  verdicts and L6 reads `APPROVED`. It fails closed only while a run is open, so it is invisible to
+  every commit that is not part of an audit, and the escape hatch (`pipeline abort --reason`)
+  appends to `EXECUTION_LOG.md`, so a skip that used to be silent now leaves a dated trail. FAST is
+  not asked for the layers its own tier table does not run.
+- **The installer ships the guard, and says so when it is not armed.** `cca-audit install` now
+  writes `.claude/hooks/` alongside the agents, commands and checkers, and warns when the guard is
+  installed but named by no settings.json, because copying it into place does not arm it.
+  `cca-audit install --print-hook` emits the settings fragment instead of editing anyone's
+  configuration. An install that reported success while the layers stayed advisory would fail in
+  exactly the silent way the guard exists to end.
+- **The pipeline re-anchors itself mid-run.** `audit-fix.md` gains a resident checklist, a record
+  call at the end of every step, and an explicit instruction to re-read the next sections at the
+  two points where a long run drifts: after the auditor fan-out, and after Layer 4's tests go
+  green. It also states that general-purpose "no further review passes" guidance does not apply
+  inside an audit, which is by construction a sequence of review passes over already-passing code.
+- **Tightened the package description and recorded the differential oracle's origin.** The PyPI
+  project page is frozen at upload time, so the description change reaches it with this release
+  rather than when it merged. `cca_checks/substrate.py` now credits the two-arithmetic approach to
+  Erik Hill, who suggested it in public review.
+
 ## [0.9.0] - 2026-08-04
 
 - **CCA now runs natively inside Codex tasks.** `cca-audit install-codex` installs an `audit+fix`
