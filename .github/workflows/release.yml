@@ -36,6 +36,11 @@ jobs:
   build:
     name: Build from the tag and prove it matches
     runs-on: ubuntu-latest
+    # checkout authenticates with GITHUB_TOKEN, and the workflow-level
+    # `permissions: {}` above leaves it with no scopes at all, so without this
+    # the job fails at its first step.
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.verify.outputs.version }}
     steps:
@@ -58,8 +63,12 @@ jobs:
 
       - name: The artifact must be the version the tag claims
         id: verify
+        env:
+          # Through the environment, never interpolated into the script body: a
+          # ${{ }} expansion is textual substitution into the shell source, so a
+          # tag name would be executable rather than data.
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          TAG="${{ github.event.release.tag_name || inputs.tag }}"
           EXPECTED="${TAG#v}"
           BUILT="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           echo "tag=$TAG expected=$EXPECTED built=$BUILT"
