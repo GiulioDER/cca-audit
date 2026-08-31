@@ -3,10 +3,23 @@ name: Publish
 # Publishing used to happen from a maintainer's laptop with a long-lived API
 # token. Two things were wrong with that, and only one of them is about secrets.
 #
-# The token is the obvious half: it does not expire, it lives in a shell history
-# and a ~/.pypirc, and nothing about an upload records where it came from.
-# Trusted publishing removes it entirely -- GitHub proves its own identity to
-# PyPI over OIDC, per workflow, per environment, and the upload is attested.
+# The token is the obvious half: on a laptop it does not expire, it lives in a
+# shell history and a ~/.pypirc, and nothing about an upload records where it
+# came from.
+#
+# This started out using trusted publishing, which removes the token entirely.
+# PyPI rejected it twice on 2026-08-31 with `invalid-publisher: valid token, but
+# no corresponding publisher`, while the claims GitHub sent were correct
+# (repo GiulioDER/cca-audit, workflow release.yml, environment pypi), so the
+# mismatch is in the record on PyPI's side and could not be diagnosed from here.
+# Rather than leave a release blocked on it, the upload uses an API token held as
+# an ENVIRONMENT secret on `pypi` -- readable only by a job that has already
+# passed the human approval gate below, unlike a repository secret which every
+# workflow in the repo can read.
+#
+# To go back to trusted publishing once the PyPI record is fixed: delete the
+# `with:` block on the publish step, restore `permissions: id-token: write` on
+# that job, and remove the secret. Nothing else changes.
 #
 # The half that actually bit us is provenance. A local `python -m build` builds
 # whatever is in the working tree, which is not necessarily the tag. On
@@ -101,14 +114,15 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    # The `pypi` environment is what pauses here for a human. Trusted publishing
-    # is scoped to this environment name on PyPI's side too, so a workflow that
-    # skipped it would be rejected by PyPI rather than silently publishing.
+    # The `pypi` environment does two jobs here. It pauses for a human, and it is
+    # what scopes the token: PYPI_API_TOKEN is an environment secret, so it does
+    # not exist for any job that has not passed this gate.
     environment:
       name: pypi
       url: https://pypi.org/project/cca-audit/${{ needs.build.outputs.version }}/
-    permissions:
-      id-token: write
+    # No `id-token: write`: that permission exists only for trusted publishing,
+    # and requesting a credential this job cannot use is the kind of leftover
+    # that reads as intentional to the next person.
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -117,3 +131,5 @@ jobs:
 
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
