@@ -4,7 +4,7 @@ import os
 import sys
 from dataclasses import asdict
 
-from . import languages
+from . import languages, pipeline_state
 from .cargo_repro import run_repro as run_cargo_repro
 from .claim import Claim, Verdict, make_verdict
 from .property_check import run_properties
@@ -188,6 +188,62 @@ def _capabilities(file: str) -> dict:
             "unavailable": unavailable}
 
 
+def _pipeline(a) -> int:
+    """Run the `pipeline` subcommand. Prints JSON; returns a process exit code.
+
+    Every path prints an object rather than a line of prose, because the caller
+    is usually an orchestrator reading the result back, and a status a model has
+    to parse out of English is a status it will eventually parse wrong.
+    """
+    try:
+        if a.pipeline_cmd == "start":
+            state = pipeline_state.start(
+                a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
+            )
+            print(json.dumps({"started": state.to_json()}))
+            return 0
+
+        if a.pipeline_cmd == "record":
+            state = pipeline_state.record(
+                a.layer, status=a.status, detail=a.detail, fixes=a.fixes, root=a.root
+            )
+            decision = pipeline_state.verify_commit_allowed(state)
+            print(json.dumps({
+                "recorded": a.layer,
+                "run_id": state.run_id,
+                "commit_allowed": decision.allowed,
+                "outstanding": decision.reasons if not decision.allowed else [],
+            }))
+            return 0
+
+        if a.pipeline_cmd == "status":
+            state = pipeline_state.load(a.root)
+            decision = pipeline_state.verify_commit_allowed(state)
+            print(json.dumps({
+                "open": state is not None,
+                "run": state.to_json() if state else None,
+                "required": list(pipeline_state.required_layers(state)) if state else [],
+                "commit_allowed": decision.allowed,
+                "outstanding": decision.reasons if not decision.allowed else [],
+            }))
+            return 0
+
+        if a.pipeline_cmd == "abort":
+            log = pipeline_state.abort(a.reason, root=a.root)
+            print(json.dumps({"aborted": log is not None, "logged_to": str(log) if log else None}))
+            return 0
+
+        log = pipeline_state.close(root=a.root)
+        print(json.dumps({"closed": log is not None, "logged_to": str(log) if log else None}))
+        return 0
+    except ValueError as exc:
+        # A bad tier, an unknown layer, or an unparseable state file. Exit
+        # non-zero so a shell chain stops here: a recording step that silently
+        # failed would leave the run looking less complete than it is, or more.
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 1
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     p = argparse.ArgumentParser(prog="cca_checks")
@@ -215,7 +271,51 @@ def main(argv=None) -> int:
                        help="which claim types can be settled about a file, here")
     k.add_argument("--file", required=True)
 
+    # The pipeline's own bookkeeping. Not a checker and never a Verdict: it
+    # records which LAYERS of /audit-fix were reached, so the commit gate in
+    # cca_checks/plugin/hooks/cca_pipeline_guard.py can refuse a commit from a
+    # run that skipped one. Every other subcommand answers a question about the
+    # code; this one answers a question about the audit.
+    pl = sub.add_parser("pipeline", help="record and enforce /audit-fix layer progress")
+    plsub = pl.add_subparsers(dest="pipeline_cmd", required=True)
+
+    pl_start = plsub.add_parser(
+        "start", help="open a run (call at Step 0.6, once the tier is known)"
+    )
+    pl_start.add_argument("--tier", required=True, choices=sorted(pipeline_state.TIERS))
+    pl_start.add_argument("--mode", default="DIFF", choices=["DIFF", "HUNT"])
+    pl_start.add_argument("--no-fix", action="store_true")
+    pl_start.add_argument("--run-id", default="")
+    pl_start.add_argument("--root", default=".")
+
+    pl_record = plsub.add_parser(
+        "record", help="record that a layer was reached and judged"
+    )
+    pl_record.add_argument("layer", choices=list(pipeline_state.LAYERS))
+    pl_record.add_argument("--status", default="done",
+                           choices=["done", "skipped", "failed", "n/a"])
+    # Free text, and load-bearing for L6: the gate reads this as the architect
+    # verdict, so an empty --detail on L6 is itself a refusal rather than a pass.
+    pl_record.add_argument("--detail", default="")
+    pl_record.add_argument("--fixes", type=int, default=None,
+                           help="number of fixes written to the tree (record at L4)")
+    pl_record.add_argument("--root", default=".")
+
+    pl_status = plsub.add_parser("status", help="print the open run and what it still owes")
+    pl_status.add_argument("--root", default=".")
+
+    pl_abort = plsub.add_parser(
+        "abort", help="close a run without satisfying its gates, on the record"
+    )
+    pl_abort.add_argument("--reason", required=True)
+    pl_abort.add_argument("--root", default=".")
+
+    pl_close = plsub.add_parser("close", help="retire a run that passed its gates")
+    pl_close.add_argument("--root", default=".")
+
     a = p.parse_args(argv)
+    if a.cmd == "pipeline":
+        return _pipeline(a)
     if a.cmd == "capabilities":
         # Not a Verdict: this reports what the installation can do, not what is true
         # of the code, and giving it a verdict shape would let it be mistaken for one.

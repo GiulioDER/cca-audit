@@ -11,6 +11,52 @@ description: "Canonical CCA audit+fix pipeline. TIERED: auto-selects FAST / STAN
 
 This is a DETERMINISTIC workflow — follow every step exactly.
 
+## The Contract (keep this in view for the whole run)
+
+**This checklist is the run. Everything below it is reference material you re-read as you reach it.**
+
+| # | Layer | Record when done |
+|---|-------|------------------|
+| 0.6 | tier chosen | `pipeline start --tier <TIER> [--mode HUNT] [--no-fix]` |
+| 1 | parallel auditors | `pipeline record L1 --detail "<N> auditors"` |
+| 2 | consolidate | `pipeline record L2 --detail "<raw> raw, <uniq> unique"` |
+| 2.5 | **verify findings** | `pipeline record L2.5 --detail "<C> confirmed, <F> FP"` |
+| 2.6 | scorecard *(STD/DEEP)* | `pipeline record L2.6 --detail "<cells> scored"` |
+| 3 | fix plan | `pipeline record L3 --detail "<N> to fix"` |
+| 4 | implement | `pipeline record L4 --fixes <N> --detail "<N> fixes"` |
+| 5 | re-verify | `pipeline record L5 --detail "tests green"` |
+| 5.5 | **regression diff** *(STD/DEEP)* | `pipeline record L5.5 --detail "all SAFE"` |
+| 5.6 | **red-state proof** *(STD/DEEP)* | `pipeline record L5.6 --detail "<N> RED"` |
+| 6 | **architect gate** | `pipeline record L6 --detail APPROVED\|REVISE\|BLOCKED` |
+| 7 | commit | `pipeline close` |
+
+Every command above is prefixed `python -m cca_checks `. Recording is not paperwork: a `PreToolUse`
+guard reads this state and **refuses `git commit`** until the bolded layers carry a verdict and L6
+reads `APPROVED`. If the run turns out to be unrelated or must be abandoned, say so on the record with
+`python -m cca_checks pipeline abort --reason "<why>"`. Deleting the state file by hand is not an
+alternative: it leaves no trail, which is the failure the guard replaces.
+
+> ### ⚠️ Read this before Step 2, and again whenever you are about to summarise
+>
+> **Between Step 1 and Step 6 you will feel finished several times, and you will not be.** Six to
+> eleven subagents return long reports; by the time they land, these steps are far behind the most
+> recent tokens, and the general-purpose instructions in your harness are pulling the other way. Those
+> instructions say things like *"do not add further review passes"*, *"once the checks pass, finish
+> with a brief summary"*, and *"when you have enough information to act, act"*. They are correct for
+> ordinary work and **they do not apply inside a CCA run**, which is by construction a sequence of
+> additional review passes over code whose checks already pass.
+>
+> Three rules follow, and they are not negotiable:
+>
+> 1. **Re-read this file's section for a step before you perform that step.** Do not run a layer from
+>    memory of having read it an hour ago. Reconstructing L2.5 from memory *is* the hallucination the
+>    layer exists to catch, one level up.
+> 2. **Never audit or verify a finding yourself when the step names a subagent.** Your own read of the
+>    code is not `fp-check`, and a summary you write is not the architect gate. If you catch yourself
+>    reviewing findings directly, you have already left the pipeline.
+> 3. **Never report a layer you did not run.** A gate that was skipped and a gate that passed must
+>    render differently in the output, in the state file, and in the commit message.
+
 ## Arguments ($ARGUMENTS)
 
 - (empty) = audit+fix all uncommitted changes (staged + unstaged), tier auto-selected
@@ -219,6 +265,16 @@ whether the answer is "install something" or "stop expecting coverage here".
 **In HUNT mode, also log every file under TARGETS that no auditor reached.** A hunt that silently
 truncates its own coverage reads as "audited everything" when it did not.
 
+**→ Open the run now, before a single agent is spawned.** The tier is known, which is everything the
+state file needs:
+
+```bash
+python -m cca_checks pipeline start --tier <TIER> [--mode HUNT] [--no-fix]
+```
+
+This arms the commit guard for the rest of the run. Skipping it does not make the run faster, it makes
+the run unverifiable, and an unverifiable run is the thing this pipeline exists to replace.
+
 ## Findings Schema (canonical)
 
 **Every auditor returns a JSON array as the FIRST thing in its response**, then optional prose. The
@@ -362,6 +418,17 @@ RULES:
   then a short prose summary. The JSON is the authoritative return value.
 ```
 
+**→ Record, then re-read.** When every auditor has returned:
+
+```bash
+python -m cca_checks pipeline record L1 --detail "<N> auditors, <R> raw findings"
+```
+
+Then **re-read § Step 2 and § Step 2.5 of this file before doing anything else.** You have just taken
+in several long agent reports, and the layers that follow are the ones most often skipped. They are
+skipped precisely here, at the point where the run first feels like it has produced an answer. It has
+produced raw claims. Nothing has been verified yet.
+
 ## Step 2: Layer 2 — Consolidate Findings (deterministic)
 
 Collect every auditor's JSON return value. Deterministic dedup:
@@ -378,6 +445,12 @@ Re-map each auditor `priority` to the canonical framework (auditors propose; orc
 - **P3 Nice-to-have**: cosmetic, style, naming, unused params.
 
 Output table: `| ID | Finding | Auditors | Severity | P | high-stakes? | File:line |`
+
+**→ Record.**
+
+```bash
+python -m cca_checks pipeline record L2 --detail "<R> raw, <U> unique"
+```
 
 ## Step 2.5: Layer 2.5 — Findings Verification (ANTI-HALLUCINATION) — STANDARD/DEEP
 
@@ -481,6 +554,15 @@ fixed/parked **outcome** is appended as a separate row after Step 6 (kept append
 
 If `no-fix`: STOP here. Report consolidated findings + verdicts.
 
+**→ Record.** Verification is `fp-check`'s job, never yours: your own re-read of the code is not this
+layer, and recording it as though it were is a false entry in the run's own evidence.
+
+```bash
+python -m cca_checks pipeline record L2.5 --detail "<C> confirmed, <F> false-positive, <U> uncertain"
+```
+
+Then **re-read § Step 3 and § Step 4 before touching a line of code.**
+
 ## Step 2.6: Auditor Scorecard — precision routing (STANDARD/DEEP; routing OFF by default)
 
 **Do NOT compute this by reading the ledger.** Run the checker and consume its output — a statistic
@@ -518,10 +600,22 @@ rate is not a score.* Bank ≥10-sample cells with routing off first, then turn 
 
 Print the checker's `Scorecard: …` summary line in the run output.
 
+**→ Record.**
+
+```bash
+python -m cca_checks pipeline record L2.6 --detail "<cells> cells scored, <n> rows"
+```
+
 ## Step 3: Layer 3 — Fix Plan
 
 (Reachable only when `no-fix` is absent.) From CONFIRMED findings only: always fix P1; fix P2 unless
 `p1-only`; skip P3 (report as deferred).
+
+**→ Record.**
+
+```bash
+python -m cca_checks pipeline record L3 --detail "<N> findings to fix, <D> deferred"
+```
 
 ## Fix Attempt Budget & Journal (STANDARD/DEEP)
 
@@ -570,6 +664,19 @@ Rules:
 3. Confirm the new test PASSES (green) and the baseline still passes.
 A P1 fix without a red→green test is incomplete (the architect gate will flag it). FAST tier skips this.
 
+**→ Record, with the count.** `--fixes` is what tells the commit guard that code was changed, and
+therefore that L5, L5.5 and L5.6 are now owed:
+
+```bash
+python -m cca_checks pipeline record L4 --fixes <N> --detail "<N> fixes applied"
+```
+
+Then **re-read § Step 5, § Step 5.5 and § Step 5.6.** The tests going green here is the single most
+reliable trigger for stopping early, because it is the point at which ordinary engineering instinct,
+and the general instructions in your harness, both say the work is done. In this pipeline it is not:
+three gates remain, and they exist because a green suite says nothing about whether the fix was in
+scope, whether it broke something adjacent, or whether the test that went green was ever red.
+
 ## Step 5: Layer 5 — Re-verify
 
 1. `{TEST_CMD}` on the relevant test file(s) — baseline + any new P1 tests must pass.
@@ -588,6 +695,12 @@ indistinguishable in the final diff from a bug you fixed.
 Changing an existing test's expectations IS legitimate when a CONFIRMED fix deliberately changes a
 contract (a test pinning the defect). Say so explicitly, name the finding ID, and keep a control test
 covering the behaviour that did NOT change.
+
+**→ Record.**
+
+```bash
+python -m cca_checks pipeline record L5 --detail "tests green, lint clean"
+```
 
 ## Step 5.5: Layer 5.5 — Regression Diff (ANTI-REGRESSION) — STANDARD/DEEP
 
@@ -610,6 +723,12 @@ and appends a FIX_JOURNAL row; a finding that hits the shared 3-cycle cap here i
 Scoping this gate to "Layer 4 changes" alone would leave a hole in exactly the place edits are made
 under pressure: a Step 5 repair, or a correction made in response to this gate's own verdict, would
 never be reviewed. Re-run it until it comes back clean on the diff as it actually stands.
+
+**→ Record.**
+
+```bash
+python -m cca_checks pipeline record L5.5 --detail "<N> hunks, all SAFE"
+```
 
 ## Step 5.6: Red-State Proof — tautological-test detector (STANDARD/DEEP)
 
@@ -642,6 +761,12 @@ failures mean the test never reached the code under test.
 Every CONFIRMED P1 must carry at least one `RED` proof. A P1 whose only proof is `TAUTOLOGICAL` or
 `INCONCLUSIVE` is an orphan P1 at the architect gate.
 
+**→ Record.**
+
+```bash
+python -m cca_checks pipeline record L5.6 --detail "<N> RED, <T> tautological, <I> inconclusive"
+```
+
 ## Step 6: Layer 6 — Architect Gate + Fix→Finding Mapping
 
 One `architect-reviewer` agent (read-only gate — it does NOT edit code; it returns REVISE with
@@ -672,6 +797,13 @@ so Step 2.6 can measure fix success, not just verification:
 `{"run_id": <short>, "fix_id": <FIX-id>, "result": "fixed|parked|reverted", "architect_verdict": <V>}`
 (Step 2.6 left-joins outcome rows to disposition rows on `run_id`+`fix_id`.)
 
+**→ Record the verdict verbatim.** The guard reads this field: anything other than `APPROVED` keeps
+the commit blocked, which is the intended behaviour for both REVISE and BLOCKED.
+
+```bash
+python -m cca_checks pipeline record L6 --detail APPROVED   # or REVISE, or BLOCKED
+```
+
 ## Step 7: Commit
 
 If APPROVED, a separate commit for the audit fixes:
@@ -690,6 +822,17 @@ Audit: <tier>, <K> auditors (STAKES/NUM/DAT/DEP/DEPLOY conditional) → X raw �
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
+
+**→ Close the run** once the commit has landed:
+
+```bash
+python -m cca_checks pipeline close
+```
+
+If `git commit` is refused here, the guard is doing its job: read the layers it names, run them, and
+record them. Do not work around the refusal by deleting `.claude/audits/run-state.json`. If the run
+genuinely must be abandoned, abandon it on the record with
+`python -m cca_checks pipeline abort --reason "<why>"`.
 
 ## Output Summary
 

@@ -85,6 +85,7 @@ cca_checks = ["rules/*.yaml"]
   "agents/*.md",
   "commands/*.md",
   "tools/*.py",
+  "hooks/*.py",
   "codex/cca-audit/SKILL.md",
   "codex/cca-audit/agents/*.yaml",
 ]
