@@ -135,8 +135,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         core = _load_core()
-    except (ImportError, OSError, SyntaxError) as exc:
-        # A run is open, so failing open here would ship unverified fixes.
+    except Exception as exc:  # noqa: BLE001
+        # A run is open, so failing open here would ship unverified fixes. Any
+        # exception, not only ImportError: a core that raises RuntimeError at import
+        # would otherwise exit 1, which Claude Code treats as non blocking.
         return refuse(root, [
             f"cca_gate_core.py could not be loaded next to this guard ({exc}); reinstall "
             "with `cca-audit install --target .`"

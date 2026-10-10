@@ -187,6 +187,37 @@ def test_guard_refuses_when_the_core_is_missing_and_a_run_is_open(
     assert lonely.main() == 2
 
 
+def test_guard_refuses_when_the_core_raises_at_import_and_a_run_is_open(
+    git_repo, tmp_path_factory
+):
+    """A core that raises at import (not only ImportError) must not fail open.
+
+    Invariant: with a run open and a core whose import raises RuntimeError, the guard
+    process exits 2, never 1 (an uncaught exception exits 1, which Claude Code treats as
+    non blocking). Run as a subprocess so an exception escaping main() shows up as the
+    exit code it really produces.
+    Mutation: `_load_core()` guarded by `except (ImportError, OSError, SyntaxError)`
+    instead of `except Exception` (the a8d7445 text).
+
+    Red 2026-10-10: baseline a8d7445; failed at `assert proc.returncode == 2` (1 == 2).
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    hooks = tmp_path_factory.mktemp("hooks_boom")
+    shutil.copy(_GUARD_PATH, hooks / "cca_pipeline_guard.py")
+    core_path = hooks / "cca_gate_core.py"
+    core_path.write_text('raise RuntimeError("boom")' + chr(10), encoding="utf-8")
+    ps.start("FAST", root=git_repo)
+    proc = subprocess.run(
+        [sys.executable, str(hooks / "cca_pipeline_guard.py")],
+        input="git commit -m x", cwd=git_repo, capture_output=True, text=True,
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "could not be loaded" in proc.stderr
+
+
 def test_guard_without_its_core_is_silent_when_no_run_is_open(
     monkeypatch, git_repo, tmp_path_factory
 ):
