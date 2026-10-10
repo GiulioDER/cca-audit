@@ -8,6 +8,21 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+### Changed
+- Every step of `/audit-fix` is now gated, not only L1, L2, L2.5 and L6. A HUNT owes L0.4 PASS; STANDARD and DEEP owe L2.6; every fixing run owes L3; L4 onward is owed whenever the working tree changed, whether or not L4 was recorded. In 0.10.x an unrecorded L4 switched off L5, L5.5 and L5.6.
+- `pipeline record` checks order and refuses a layer whose predecessors are missing (exit 2, with the section to re-read). L2, L2.5 and L3 take counts (`--unique`, `--confirmed`, `--fp`, `--uncertain`, `--duplicate`, `--to-fix`) that must agree with each other and with the disposition ledger.
+- Verdicts from L5 onward store the tree they judged; an edit after a verdict makes it stale.
+- `--status n/a` no longer satisfies a required layer.
+- `pipeline close` refuses an incomplete run; `no-fix` runs now close after verification instead of blocking the next commit.
+- L2.6 and L5.6 are recorded by their tools (`--record`), never by hand.
+
+### Added
+- `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
+- `pipeline status --require-complete` for Codex, which has no hooks.
+
+### Compatibility
+- A run started by 0.10.x finishes under 0.10.x rules.
+
 ## [0.10.1] - 2026-08-31
 
 - **`pip install 'cca-audit[verify]'` no longer rewrites unrelated packages.** semgrep hard-pins
