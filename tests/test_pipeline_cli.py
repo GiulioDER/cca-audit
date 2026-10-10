@@ -129,3 +129,65 @@ def test_status_require_complete_exits_2_for_a_complete_run_that_is_not_closed(
     assert _cli(capsys, "close", "--root", r)[0] == 0
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert code == 0 and out["open"] is False
+
+
+def test_record_output_reaches_the_state_and_is_echoed(capsys, git_repo):
+    """`--output` is passed through, copied into the run, and printed back.
+
+    Red 2026-10-11: mutation `output=a.output` became `output=None` in `_pipeline` (record);
+    failed at `assert code == 0 and out["output"] == ...` (exit 2: L1 needs --output).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--run-id", "r7", "--root", r)
+    code, out, _ = _cli(capsys, "record", "L1", "--output", write_output(r, [[]]), "--root", r)
+    assert code == 0 and out["output"] == ".claude/audits/runs/r7/L1.json"
+    assert (git_repo / ".claude/audits/runs/r7/L1.json").is_file()
+
+
+def test_status_shows_the_pause_and_require_complete_exits_2(capsys, git_repo):
+    """A paused run is reported at the top level and is never complete.
+
+    Red 2026-10-11: mutation the `if state is not None and state.paused:` block in `_pipeline`
+    (status) became `if False:`, on a complete FAST no-fix run whose only other item would be
+    `pipeline close`; failed at `assert any("run is paused" in x for x in
+    out["outstanding_to_close"])`.
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--no-fix", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2.5", "--confirmed", "0", "--fp", "0", "--uncertain", "0",
+         "--duplicate", "0", "--output", write_output(r), "--root", r)
+    assert _cli(capsys, "pause", "--reason", "end of day", "--root", r)[0] == 0
+    code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
+    assert code == 2
+    assert out["paused"]["reason"] == "end of day"
+    assert any("run is paused" in x for x in out["outstanding_to_close"])
+
+
+def test_pause_and_resume_through_the_cli(capsys, git_repo):
+    """pause prints the pause, a second pause and a paused record exit 2, resume prints JSON.
+
+    Red 2026-10-11: mutation `return 2` became `return 0` in the RecordRefused handler of the
+    pause/resume branch of `_pipeline`; failed at `assert code == 2 and err["refused"] ==
+    "pause" and "run is paused" in err["reason"]` (0 == 2).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--run-id", "r9", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    code, out, _ = _cli(capsys, "pause", "--reason", "machine restart", "--root", r)
+    assert code == 0 and out["paused"] == "r9" and out["reason"] == "machine restart"
+    code, _, err = _cli(capsys, "pause", "--reason", "again", "--root", r)
+    assert code == 2 and err["refused"] == "pause" and "run is paused" in err["reason"]
+    code, _, err = _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r),
+                        "--root", r)
+    assert code == 2 and err["refused"] == "L2" and "pipeline resume" in err["reason"]
+    code, out, _ = _cli(capsys, "resume", "--root", r)
+    assert code == 0
+    assert out == {"resumed": "r9", "tree_changed": False, "next": "L2", "heading": "Step 2",
+                   "outputs": {"L1": ".claude/audits/runs/r9/L1.json"},
+                   "outstanding": out["outstanding"]}
+    assert out["outstanding"]
+    code, _, err = _cli(capsys, "resume", "--root", r)
+    assert code == 2 and err["refused"] == "resume"
+
