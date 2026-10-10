@@ -114,8 +114,9 @@ python -m cca_checks pipeline status --require-complete
 ```
 
 Exit 2 means the run still owes the layers listed under `outstanding_to_close`. Run them, or retire
-the run on the record with `python -m cca_checks pipeline abort --reason "<why>"`. Never report a run
-this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
+the run on the record with `python -m cca_checks pipeline abort --reason "<why>"`. When the only item
+is the instruction to close the run, every layer is done: run `python -m cca_checks pipeline close`,
+then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
 same check without relying on the orchestrator to call it.
 
 ## Report completion

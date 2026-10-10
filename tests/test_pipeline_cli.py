@@ -96,3 +96,32 @@ def test_n_a_is_still_accepted_for_a_layer_this_run_does_not_require(capsys, git
     assert code == 0
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert any("L2.5 is recorded as n/a" in x for x in out["outstanding_to_close"])
+
+
+def test_status_require_complete_exits_2_for_a_complete_run_that_is_not_closed(
+    capsys, git_repo
+):
+    """A run with nothing owed is still open until `pipeline close`, so Codex must not report.
+
+    Invariant: `--require-complete` is 0 only when no run is open; an open run with an empty
+    `outstanding` exits 2 and `outstanding_to_close` names `pipeline close`.
+
+    Red 2026-10-10: baseline a8d7445 (`owed` empty, so exit 0); failed at `assert code == 2`.
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--no-fix", "--root", r)
+    _cli(capsys, "record", "L1", "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--root", r)
+    _cli(capsys, "record", "L2.5", "--confirmed", "0", "--fp", "0", "--uncertain", "0",
+         "--duplicate", "0", "--root", r)
+    code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
+    assert code == 2
+    assert len(out["outstanding_to_close"]) == 1
+    assert "pipeline close" in out["outstanding_to_close"][0]
+    # Without the flag the same state is reported but not an error.
+    code, out, _ = _cli(capsys, "status", "--root", r)
+    assert code == 0
+    # Once closed, no run is open and the check passes.
+    assert _cli(capsys, "close", "--root", r)[0] == 0
+    code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
+    assert code == 0 and out["open"] is False

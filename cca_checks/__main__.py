@@ -232,6 +232,11 @@ def _pipeline(a) -> int:
             state = pipeline_state.load(a.root)
             decision = pipeline_state.verify_commit_allowed(state, root=a.root)
             owed = pipeline_state.outstanding(state, a.root) if state else []
+            if a.require_complete and state is not None and not owed:
+                # Nothing is missing, but the run is still open: the Stop hook and the
+                # commit guard keep treating it as in flight until it is retired.
+                owed = ["every layer is recorded but the run is still open: run "
+                        "`python -m cca_checks pipeline close` to retire it"]
             required = pipeline_state.required_layers(state, a.root) if state else []
             print(json.dumps({
                 "open": state is not None,

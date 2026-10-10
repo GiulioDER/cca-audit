@@ -135,3 +135,14 @@ def test_step_4_says_the_gate_detects_change_from_the_working_tree():
     step4 = PIPELINE[PIPELINE.find("## Step 4:"):PIPELINE.find("## Step 5")]
     assert "is what tells the commit guard" not in step4
     assert "working tree" in step4
+
+
+def test_codex_closes_the_run_when_close_is_the_only_item_left():
+    """`status --require-complete` exits 2 for a complete but open run, so the skill must say
+    to close it.
+
+    Red 2026-10-10: baseline a8d7445 text (no mention of closing); failed at
+    `assert "pipeline close" in section`.
+    """
+    section = CODEX[CODEX.find("## Gate before reporting"):CODEX.find("## Report completion")]
+    assert "pipeline close" in section
