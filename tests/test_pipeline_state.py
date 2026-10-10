@@ -220,6 +220,33 @@ def test_unreadable_state_raises_rather_than_reading_as_no_run(tmp_path):
         ps.load(tmp_path)
 
 
+def test_a_second_start_is_refused_and_the_first_run_survives(git_repo):
+    """start() must not overwrite an open run, readable or not.
+
+    Invariant: with a state file present, start() raises RecordRefused naming `pipeline
+    abort`, and the open run's layers, base_tree, mode and stop_refusals are untouched.
+    A silent overwrite would re-baseline base_tree over edits (a run with no fixes then
+    owes nothing past L3), drop L0.4, and leave no trail.
+
+    Red 2026-10-10: baseline a8d7445 (second start succeeds); failed at
+    `pytest.raises(ps.RecordRefused)` (DID NOT RAISE).
+    """
+    first = ps.start("DEEP", mode="HUNT", root=git_repo)
+    ps.record("L0.4", root=git_repo)
+    (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="pipeline abort"):
+        ps.start("FAST", root=git_repo)
+    kept = ps.load(git_repo)
+    assert kept.run_id == first.run_id and kept.mode == "HUNT" and kept.tier == "DEEP"
+    assert kept.base_tree == first.base_tree and "L0.4" in kept.layers
+
+    path = ps.state_path(git_repo)
+    path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="pipeline abort"):
+        ps.start("FAST", root=git_repo)
+    assert path.read_text(encoding="utf-8") == "{not json"
+
+
 def test_unknown_tier_and_layer_are_refused(git_repo):
     with pytest.raises(ValueError):
         ps.start("THOROUGH", root=git_repo)

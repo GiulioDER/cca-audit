@@ -141,10 +141,23 @@ def _write(state: PipelineState, root) -> None:
 
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
           root: str | pathlib.Path = ".") -> PipelineState:
-    """Open a run: at Step 0.6, or at Step 0.4 for a hunt."""
+    """Open a run: at Step 0.6, or at Step 0.4 for a hunt.
+
+    Refused while a state file exists, readable or not. Overwriting an open run would
+    re-baseline `base_tree` over its edits (so a run with no fixes recorded would stop
+    owing L4 onward), drop an L0.4 recorded by a hunt, reset `stop_refusals`, and leave
+    no trail. Retiring a run is `abort()`, which is explicit and logged.
+    """
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError(f"unknown tier {tier!r} (expected one of {', '.join(TIERS)})")
+    if state_path(root).exists():
+        raise RecordRefused(
+            "a CCA run is already open in this checkout; starting another would replace it "
+            "and discard what it recorded. Finish it with `python -m cca_checks pipeline "
+            "close`, or retire it with `python -m cca_checks pipeline abort --reason "
+            '"<why>"`'
+        )
     stamp = core.now()
     state = PipelineState(
         run_id=run_id or stamp.replace(":", "").replace("-", ""), tier=tier,

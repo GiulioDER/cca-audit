@@ -197,9 +197,13 @@ def _pipeline(a) -> int:
     """
     try:
         if a.pipeline_cmd == "start":
-            state = pipeline_state.start(
-                a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
-            )
+            try:
+                state = pipeline_state.start(
+                    a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
+                )
+            except pipeline_state.RecordRefused as exc:
+                print(json.dumps({"refused": "start", "reason": str(exc)}), file=sys.stderr)
+                return 2
             print(json.dumps({"started": state.to_json()}))
             return 0
 

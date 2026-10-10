@@ -15,6 +15,7 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `--status n/a` no longer satisfies a required layer.
 - `pipeline close` refuses an incomplete run; `no-fix` runs now close after verification instead of blocking the next commit.
 - L2.6 and L5.6 are recorded by their tools (`--record`), never by hand.
+- A second `pipeline start` is refused (exit 2, `{"refused": "start"}`) while a run is open, instead of replacing it. Replacing re-baselined the tree over the run's edits, dropped L0.4, and left no trail. Retire a run with `pipeline close` or `pipeline abort --reason`.
 
 ### Added
 - `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.

@@ -25,6 +25,22 @@ def test_out_of_order_record_exits_2_with_the_reason(capsys, git_repo):
     assert code == 2 and err["refused"] == "L6" and "L3" in err["reason"]
 
 
+def test_a_second_start_exits_2_with_the_reason_and_keeps_the_run(capsys, git_repo):
+    """A second `pipeline start` is {"refused": "start"} with exit 2 and changes nothing.
+
+    Red 2026-10-10: baseline a8d7445 (second start exits 0 and replaces the run); failed at
+    `assert code == 2 and err["refused"] == "start"`.
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "DEEP", "--mode", "HUNT", "--root", r)
+    _cli(capsys, "record", "L0.4", "--root", r)
+    code, _, err = _cli(capsys, "start", "--tier", "FAST", "--root", r)
+    assert code == 2 and err["refused"] == "start"
+    assert "pipeline abort" in err["reason"]
+    raw = json.loads((git_repo / ".claude/audits/run-state.json").read_text(encoding="utf-8"))
+    assert raw["tier"] == "DEEP" and "L0.4" in raw["layers"]
+
+
 def test_count_flags_reach_the_state(capsys, git_repo):
     """--unique reaches the state file, and a recorded zero is kept, not dropped.
 
