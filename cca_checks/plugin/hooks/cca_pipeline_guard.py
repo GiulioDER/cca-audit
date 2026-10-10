@@ -139,16 +139,26 @@ def main(argv: list[str] | None = None) -> int:
         # A run is open, so failing open here would ship unverified fixes.
         return refuse(root, [
             f"cca_gate_core.py could not be loaded next to this guard ({exc}); reinstall "
-            "with `python -m cca_checks.plugin.cli install --target .`"
+            "with `cca-audit install --target .`"
         ])
     try:
-        state = core.read_state(root)
-    except ValueError as exc:
-        return refuse(root, [f"{exc}; a run was started and cannot be shown to have finished"])
-    if state is None:
-        return 0
-    tree = None if core.is_legacy(state) else core.fingerprint(root)
-    reasons = core.commit_reasons(state, tree)
+        try:
+            state = core.read_state(root)
+        except ValueError as exc:
+            return refuse(
+                root, [f"{exc}; a run was started and cannot be shown to have finished"]
+            )
+        if state is None:
+            return 0
+        tree = None if core.is_legacy(state) else core.fingerprint(root)
+        reasons = core.commit_reasons(state, tree)
+    except Exception as exc:  # noqa: BLE001
+        # An uncaught exception exits 1, which Claude Code treats as non blocking, so a
+        # run that cannot be evaluated would let the commit through. Refuse instead.
+        return refuse(root, [
+            f"the CCA gate could not evaluate this run ({exc.__class__.__name__}: {exc}); "
+            "a run was started and cannot be shown to have finished"
+        ])
     if reasons:
         return refuse(root, reasons)
     return 0

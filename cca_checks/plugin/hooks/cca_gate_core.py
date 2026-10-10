@@ -188,7 +188,8 @@ def fingerprint(root) -> str | None:
         rel = os.path.relpath(os.path.realpath(root), top).replace(os.sep, "/")
         if rel == ".." or rel.startswith("../"):
             return None
-        excluded = EXCLUDED if rel == "." else f"{rel}/{EXCLUDED}"
+        # `:(literal)`: a run directory named with glob characters is not a pattern.
+        excluded = ":(literal)" + (EXCLUDED if rel == "." else f"{rel}/{EXCLUDED}")
         index = run("rev-parse", "--path-format=absolute", "--git-path", "index", top=top)
         with tempfile.TemporaryDirectory(prefix="cca-fp-") as tmp:
             tmp_index = os.path.join(tmp, "index")
@@ -207,7 +208,8 @@ def fingerprint(root) -> str | None:
             run("rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", excluded,
                 top=top, env=env)
             return run("write-tree", top=top, env=env) or None
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # ValueError: os.path.relpath across drives. Fail closed (fixes become owed).
         return None
 
 

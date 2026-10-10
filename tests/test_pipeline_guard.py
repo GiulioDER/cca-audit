@@ -202,3 +202,38 @@ def test_guard_without_its_core_is_silent_when_no_run_is_open(
     monkeypatch.chdir(git_repo)
     monkeypatch.setattr("sys.stdin", io.StringIO("git commit -m x"))
     assert lonely.main() == 0
+
+
+def test_guard_refuses_a_malformed_legacy_state_instead_of_crashing(monkeypatch, git_repo):
+    """An exception after a run is found exits 1, which Claude Code treats as non blocking.
+
+    Invariant: any failure to evaluate an open run is a refusal (exit 2).
+    Mutation: remove main()'s `except Exception` around the evaluation.
+
+    Red 2026-10-10: baseline b106c3a; failed at
+        assert _run(monkeypatch, git_repo, "git commit -m x") == 2   (AttributeError raised)
+    """
+    path = ps.state_path(git_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"tier": "FAST", "layers": {"L1": "done"}, "fixes_applied": 0}),
+        encoding="utf-8",
+    )
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+
+
+def test_guard_refuses_when_the_rules_raise(monkeypatch, git_repo):
+    """Same invariant, with the exception coming out of commit_reasons.
+
+    Red 2026-10-10: baseline b106c3a; failed at
+        assert _run(monkeypatch, git_repo, "git commit -m x") == 2   (RuntimeError raised)
+    """
+    ps.start("FAST", root=git_repo)
+    core = guard._load_core()
+
+    def boom(state, tree):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(core, "commit_reasons", boom)
+    monkeypatch.setattr(guard, "_load_core", lambda: core)
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2

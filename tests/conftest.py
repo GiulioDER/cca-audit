@@ -33,7 +33,7 @@ def tree_of(repo) -> str:
     """
     top = _git(repo, "rev-parse", "--show-toplevel")
     rel = os.path.relpath(os.path.realpath(repo), os.path.realpath(top)).replace(os.sep, "/")
-    excluded = ".claude/audits" if rel == "." else f"{rel}/.claude/audits"
+    excluded = ":(literal)" + (".claude/audits" if rel == "." else f"{rel}/.claude/audits")
     index = _git(top, "rev-parse", "--path-format=absolute", "--git-path", "index")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_index = os.path.join(tmp, "index")

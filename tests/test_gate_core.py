@@ -393,3 +393,63 @@ def test_a_subdirectory_runs_artifacts_do_not_change_the_fingerprint(tmp_path, g
     for name in ("run-state.json", "EXECUTION_LOG.md"):
         (audits / name).write_text("{}\n", encoding="utf-8")
     assert core.fingerprint(sub) == before == tree_of(sub)
+
+
+def test_the_fingerprint_is_none_when_a_path_cannot_be_made_relative(monkeypatch, git_repo):
+    """os.path.relpath raises ValueError across drives; that must fail closed, not escape.
+
+    Red 2026-10-10: baseline b106c3a (ValueError not caught); failed at
+        assert core.fingerprint(git_repo) is None   (ValueError raised)
+    """
+    def boom(*args, **kwargs):
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+
+    monkeypatch.setattr(core.os.path, "relpath", boom)
+    assert core.fingerprint(git_repo) is None
+
+
+def test_a_run_directory_with_glob_characters_excludes_only_its_own_audits(tmp_path):
+    """Control, not a red proof: a run in `run[1]` drops only its own audits.
+
+    Measured 2026-10-10 with git on Windows: a plain pathspec already behaves this way,
+    because git tries the literal match first, and `*` and `?` cannot be created in a
+    Windows directory name, so a behavioural red is not reproducible here. The pin that
+    the exclusion is passed as `:(literal)` is the next test.
+    """
+    repo = make_repo(tmp_path, "")
+    run = repo / "run[1]"
+    sibling = repo / "run1" / ".claude" / "audits"
+    run.mkdir()
+    sibling.mkdir(parents=True)
+    (run / "inner.py").write_text("y = 1\n", encoding="utf-8")
+    (sibling / "notes.txt").write_text("a\n", encoding="utf-8")
+    before = core.fingerprint(run)
+    (sibling / "notes.txt").write_text("b\n", encoding="utf-8")
+    assert core.fingerprint(run) != before
+    own = run / ".claude" / "audits"
+    own.mkdir(parents=True)
+    (own / "run-state.json").write_text("{}\n", encoding="utf-8")
+    first = core.fingerprint(run)
+    (own / "run-state.json").write_text('{"a": 1}\n', encoding="utf-8")
+    assert core.fingerprint(run) == first == tree_of(run)
+
+
+def test_the_audits_exclusion_is_passed_to_git_as_a_literal_pathspec(monkeypatch, git_repo):
+    """A run directory named with `*`, `?` or `[` must not be read as a glob.
+
+    Implementation pin (a behavioural red needs a POSIX directory named with `*`).
+
+    Red 2026-10-10: baseline b106c3a (plain pathspec); failed at
+        assert rm_calls[0][-1] == ":(literal)" + core.EXCLUDED
+    """
+    rm_calls = []
+    real = core.subprocess.run
+
+    def spy(cmd, *args, **kwargs):
+        if "rm" in cmd:
+            rm_calls.append(cmd)
+        return real(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(core.subprocess, "run", spy)
+    assert core.fingerprint(git_repo) is not None
+    assert rm_calls[0][-1] == ":(literal)" + core.EXCLUDED
