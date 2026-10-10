@@ -181,6 +181,28 @@ def render(results: list[ProofResult]) -> str:
     return "\n".join(out)
 
 
+def _l5_6_entry(results: list[ProofResult]) -> tuple[str, str]:
+    red = sum(r.verdict == RED for r in results)
+    taut = sum(r.verdict == TAUTOLOGICAL for r in results)
+    inc = sum(r.verdict == INCONCLUSIVE for r in results)
+    status = "done" if taut == 0 and inc == 0 else "failed"
+    return status, f"{red} RED, {taut} tautological, {inc} inconclusive"
+
+
+def _record(status: str, detail: str) -> int:
+    try:
+        from cca_checks import pipeline_state
+    except ImportError:
+        print("cannot record L5.6: cca_checks is not importable here", file=sys.stderr)
+        return 3
+    try:
+        pipeline_state.record("L5.6", status=status, detail=detail, source="tool")
+    except ValueError as exc:
+        print(f"cannot record L5.6: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -195,10 +217,19 @@ def main() -> int:
                    help="repeatable, e.g. --proof FIX-004=tests/test_x.py::test_injection")
     v.add_argument("--snapdir", type=Path, default=DEFAULT_SNAPDIR)
     v.add_argument("--json", action="store_true")
+    v.add_argument("--record", action="store_true",
+                   help="record L5.6 in the open CCA run")
+    v.add_argument("--no-proofs", action="store_true",
+                   help="no CONFIRMED P1 needs a proof; records L5.6 with zero proofs")
 
     a = ap.parse_args()
     if a.cmd == "snapshot":
         return cmd_snapshot(a.files, a.snapdir)
+
+    if a.no_proofs:
+        if a.proof:
+            raise SystemExit("--no-proofs and --proof are mutually exclusive")
+        return _record("done", "0 proofs claimed (no P1 to prove)") if a.record else 0
 
     proofs = []
     for spec in a.proof:
@@ -215,7 +246,13 @@ def main() -> int:
     else:
         print(render(results))
     # Non-zero if any claimed proof is not a proof — this is a gate.
-    return 1 if any(r.verdict != RED for r in results) else 0
+    exit_code = 1 if any(r.verdict != RED for r in results) else 0
+    if a.record:
+        status, detail = _l5_6_entry(results)
+        recorded = _record(status, detail)
+        if recorded:
+            return recorded
+    return exit_code
 
 
 if __name__ == "__main__":
