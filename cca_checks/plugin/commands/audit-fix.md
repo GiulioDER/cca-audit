@@ -472,9 +472,10 @@ Output table: `| ID | Finding | Auditors | Severity | P | high-stakes? | File:li
 python -m cca_checks pipeline record L2 --unique <U> --detail "<R> raw, <U> unique"
 ```
 
-## Step 2.5: Layer 2.5 — Findings Verification (ANTI-HALLUCINATION) — STANDARD/DEEP
+## Step 2.5: Layer 2.5, Findings Verification (ANTI-HALLUCINATION), every tier
 
-Verify P1/P2 are real before any fix (P3 are deferred anyway). FAST tier skips this layer. If there
+Verify P1/P2 are real before any fix (P3 are deferred anyway). FAST verifies P1 only, with a single
+`fp-check`, and reports P2 unverified; the layer is still recorded on every tier. If there
 are zero P1/P2 findings, there is nothing to verify, but the layer is still owed: record it with zero
 counts (`python -m cca_checks pipeline record L2.5 --confirmed 0 --fp 0 --uncertain 0 --duplicate 0`).
 A layer with nothing to do is recorded, never skipped.

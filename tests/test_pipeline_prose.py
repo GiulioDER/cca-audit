@@ -68,10 +68,15 @@ def test_step_2_5_never_tells_the_agent_to_skip_a_required_layer():
     The gate refuses every later layer without L2.5, so an empty run records zero counts.
     Red receipt: run before the edit against cb62417, where the section read "skip it" and had
     no `--confirmed 0`; the failure is on the first assertion below.
+    Round 2 (the gate requires L2.5 at every tier; FAST runs a P1 only fp-check): against de34cde
+    the section still said "FAST tier skips this layer" and its heading ended in STANDARD/DEEP,
+    so the "skips this layer" assertion fails (receipt: pytest output quoted in task-7-report.md).
     """
     section = PIPELINE[PIPELINE.find("## Step 2.5:"):PIPELINE.find("### Step 2.5b")]
     assert section
     assert "skip it" not in section
+    assert "skips this layer" not in section
+    assert not section.splitlines()[0].rstrip().endswith("STANDARD/DEEP")
     assert "--confirmed 0" in section
 
 
