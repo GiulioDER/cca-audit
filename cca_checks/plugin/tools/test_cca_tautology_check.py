@@ -149,7 +149,8 @@ def test_l5_6_entry_fails_on_any_non_proof():
 
     Mutation: make _l5_6_entry always return status "done". Fails on the TAUTOLOGICAL case.
 
-    Red 2026-10-10: PENDING
+    Red 2026-10-10: _l5_6_entry always "done"; failed at
+    `assert tc._l5_6_entry([red, taut])[0] == "failed"`
     """
     red = tc.ProofResult("FIX-1", "t::a", tc.RED, "")
     taut = tc.ProofResult("FIX-2", "t::b", tc.TAUTOLOGICAL, "")
@@ -163,7 +164,7 @@ def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
     Mutation: record with source="cli" instead of "tool" in _record. record refuses, so
     main returns non-zero and the `== 0` assertion fails.
 
-    Red 2026-10-10: PENDING
+    Red 2026-10-10: _record with source="cli"; failed at `assert tc.main() == 0` (2 == 0)
     """
     from cca_checks import pipeline_state as ps
     ps.start("STANDARD", root=git_repo)

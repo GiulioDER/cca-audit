@@ -151,7 +151,7 @@ def test_record_writes_l2_6_as_a_tool_layer(git_repo, monkeypatch, capsys):
     Mutation: pass source="cli" to pipeline_state.record in cca_scorecard.main.
     Fails: RecordRefused, main returns 2, so the `== 0` assertion fails.
 
-    Red 2026-10-10: PENDING
+    Red 2026-10-10: source="cli" in cca_scorecard.main; failed at `assert sc.main() == 0` (2 == 0)
     """
     from cca_checks import pipeline_state as ps
     ps.start("STANDARD", root=git_repo)
