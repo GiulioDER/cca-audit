@@ -15,6 +15,9 @@ BEHAVIOUR (always exit 0; a block is the JSON decision on stdout)
                                       that fails open ships unverified fixes; a
                                       stop guard that fails closed holds a
                                       session hostage to its own bug
+  run state unreadable             -> block ONCE with the abort command; allow when
+                                      stop_hook_active is true, so a corrupt file
+                                      can cost one continuation, never a trap
   L6 recorded BLOCKED              -> allow: the run is waiting for a human
   incomplete, refusals < 3         -> block with what is owed, count the refusal
   complete but still open          -> block: "run pipeline close" (counted too)
@@ -91,6 +94,8 @@ def _decide(raw: str) -> int:
     try:
         state = core.read_state(root)
     except ValueError as exc:
+        if payload.get("stop_hook_active"):
+            return 0
         return _block(
             f"The CCA run state is unreadable ({exc}). Retire it with "
             '`python -m cca_checks pipeline abort --reason "<why>"`.'

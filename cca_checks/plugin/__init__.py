@@ -269,8 +269,12 @@ _STOP_GUARD_NAME = "cca_stop_guard.py"
 _HOOK_TIMEOUT_S = 60
 
 
-def _guard_is_registered(root: pathlib.Path) -> bool:
-    """Are the commit guard and the stop guard named by a settings file that would run them?
+def _registered_guards(root: pathlib.Path) -> tuple[bool, bool]:
+    """Is each guard named by some settings file that would run it? (commit, stop).
+
+    The two are judged independently: Claude Code merges hooks across settings
+    files, so the commit guard in `~/.claude/settings.json` and the stop guard in
+    `.claude/settings.json` together are fully armed.
 
     A substring search over the raw text rather than a parse of the hook tree:
     the same guard can legitimately be wired as a bare command, inside a `case`
@@ -284,14 +288,15 @@ def _guard_is_registered(root: pathlib.Path) -> bool:
         root / ".claude" / "settings.local.json",
         pathlib.Path.home() / ".claude" / "settings.json",
     ]
+    commit = stop = False
     for path in candidates:
         try:
             text = path.read_text(encoding="utf-8")
-            if _GUARD_NAME in text and _STOP_GUARD_NAME in text:
-                return True
         except OSError:
             continue
-    return False
+        commit = commit or _GUARD_NAME in text
+        stop = stop or _STOP_GUARD_NAME in text
+    return commit, stop
 
 
 def hook_snippet(target: str | pathlib.Path = ".") -> str:
@@ -406,11 +411,24 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
     # that settings.json names. Saying so here is the difference between an
     # installed guard and an installed guard that guards -- and the two are
     # indistinguishable from the install output otherwise.
-    if not _guard_is_registered(root):
+    commit_armed, stop_armed = _registered_guards(root)
+    if not commit_armed and not stop_armed:
         result.warnings.append(
-            "the commit guard and stop guard are installed but not both registered; add "
+            "the commit guard and stop guard are installed but not registered; add "
             "the hooks from `cca-audit install --print-hook` to your settings.json, or "
             "the pipeline's layers stay advisory"
+        )
+    elif not commit_armed:
+        result.warnings.append(
+            "the commit guard is installed but not registered; add the PreToolUse "
+            "hook from `cca-audit install --print-hook` to your settings.json, or "
+            "the pipeline's layers stay advisory"
+        )
+    elif not stop_armed:
+        result.warnings.append(
+            "the stop guard is installed but not registered (the commit guard is); add "
+            "the Stop hook from `cca-audit install --print-hook` to your settings.json, "
+            "or a run can end half done without anything noticing"
         )
 
     return result

@@ -21,6 +21,10 @@ def _stop(monkeypatch, capsys, repo, **payload) -> dict | None:
 
 
 def test_no_open_run_never_blocks(monkeypatch, capsys, git_repo):
+    """Mutation: the `root is None` branch returns `_block("x")`. Fails: a block is printed.
+
+    Red 2026-10-10: that mutation; failed at `assert _stop(...) is None`.
+    """
     assert _stop(monkeypatch, capsys, git_repo) is None
 
 
@@ -94,6 +98,10 @@ def test_a_complete_run_that_is_still_open_asks_for_close(monkeypatch, capsys, g
 
 
 def test_a_legacy_run_is_left_alone(monkeypatch, capsys, git_repo):
+    """Mutation: drop `or core.is_legacy(state)`. Fails: a legacy run is judged and blocked.
+
+    Red 2026-10-10: that mutation; failed at `assert _stop(...) is None`.
+    """
     path = ps.state_path(git_repo)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"run_id": "old", "tier": "FAST", "layers": {}}), encoding="utf-8")
@@ -135,3 +143,21 @@ def test_a_core_that_cannot_load_allows_the_stop(monkeypatch, capsys, git_repo):
 
     monkeypatch.setattr(stop, "_load_core", no_core)
     assert _stop(monkeypatch, capsys, git_repo) is None
+
+
+def test_an_unreadable_state_blocks_once_then_lets_go(monkeypatch, capsys, git_repo):
+    """A corrupt run-state.json costs one continuation, never a trapped session.
+
+    Mutation: drop the `stop_hook_active` early return in the ValueError branch
+    (the 2dd581f code). Fails: the second call still blocks.
+
+    Red 2026-10-10: that mutation; failed at `assert second is None`.
+    """
+    path = ps.state_path(git_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    first = _stop(monkeypatch, capsys, git_repo)
+    assert first is not None and first["decision"] == "block"
+    assert "pipeline abort" in first["reason"]
+    second = _stop(monkeypatch, capsys, git_repo, stop_hook_active=True)
+    assert second is None
