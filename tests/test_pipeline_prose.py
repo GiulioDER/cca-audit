@@ -60,3 +60,25 @@ def test_hunt_opens_the_run_at_step_0_4():
 
 def test_codex_checks_completeness_before_reporting():
     assert "pipeline status --require-complete" in CODEX
+
+
+def test_step_2_5_never_tells_the_agent_to_skip_a_required_layer():
+    """Round 1 fix. Invariant: the prose must not tell the agent to skip L2.5 on an empty list.
+
+    The gate refuses every later layer without L2.5, so an empty run records zero counts.
+    Red receipt: run before the edit against cb62417, where the section read "skip it" and had
+    no `--confirmed 0`; the failure is on the first assertion below.
+    """
+    section = PIPELINE[PIPELINE.find("## Step 2.5:"):PIPELINE.find("### Step 2.5b")]
+    assert section
+    assert "skip it" not in section
+    assert "--confirmed 0" in section
+
+
+def test_no_fix_argument_line_names_l2_6_and_the_close():
+    """Round 1 fix. Red receipt: against cb62417 the line read "run L1→L2.5" with no L2.6."""
+    lines = PIPELINE.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("- `no-fix` ="))
+    bullet = " ".join(lines[start:start + 2])  # the bullet wraps onto one continuation line
+    assert "L2.6" in bullet
+    assert "closes the run" in bullet

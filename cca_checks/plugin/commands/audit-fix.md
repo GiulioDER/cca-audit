@@ -68,7 +68,8 @@ not an alternative: it leaves no trail, which is the failure the guard replaces.
 - (empty) = audit+fix all uncommitted changes (staged + unstaged), tier auto-selected
 - `commit` = audit the diff of the last N commits (e.g. `commit 1`, `commit 2`)
 - `files path1 path2 ...` = audit specific files only
-- `no-fix` = audit only (run L1→L2.5, report findings + verdicts, do NOT implement fixes)
+- `no-fix` = audit only (runs L1 to L2.5, plus L2.6 on STANDARD or DEEP, then closes the run and
+  reports findings and verdicts; never edits or commits, do NOT implement fixes)
 - `p1-only` = only fix P1 Critical findings, skip P2/P3
 - `fast` = force FAST tier (3 core auditors, no gates) regardless of diff
 - `deep` = force DEEP tier (all domain auditors + adversarial verify) regardless of diff
@@ -132,7 +133,7 @@ table. If any REJECT fires, **STOP** — do not audit.
 
 ```bash
 python -m cca_checks pipeline start --tier DEEP --mode HUNT
-# ... the five checks below ...
+# ... the five gates above ...
 python -m cca_checks pipeline record L0.4 --detail PASS     # or REJECT, then: pipeline abort --reason "REJECT: <gate>"
 ```
 
@@ -287,6 +288,9 @@ python -m cca_checks pipeline start --tier <TIER> [--no-fix]   # a hunt already 
 ```
 
 Keep the printed run_id: the disposition ledger rows at Step 2.5b carry it.
+
+A HUNT already opened its run at Step 0.4 and must skip this command: a second `pipeline start` would
+replace the open run.
 
 This arms the commit guard for the rest of the run. Skipping it does not make the run faster, it makes
 the run unverifiable, and an unverifiable run is the thing this pipeline exists to replace.
@@ -471,7 +475,9 @@ python -m cca_checks pipeline record L2 --unique <U> --detail "<R> raw, <U> uniq
 ## Step 2.5: Layer 2.5 — Findings Verification (ANTI-HALLUCINATION) — STANDARD/DEEP
 
 Verify P1/P2 are real before any fix (P3 are deferred anyway). FAST tier skips this layer. If there
-are zero P1/P2 findings, skip it.
+are zero P1/P2 findings, there is nothing to verify, but the layer is still owed: record it with zero
+counts (`python -m cca_checks pipeline record L2.5 --confirmed 0 --fp 0 --uncertain 0 --duplicate 0`).
+A layer with nothing to do is recorded, never skipped.
 
 **Non-high-stakes P1/P2** — one `fp-check` agent over the list:
 ```
@@ -723,7 +729,8 @@ python -m cca_checks pipeline record L5 --detail "tests green, lint clean"
 
 ## Step 5.5: Layer 5.5 — Regression Diff (ANTI-REGRESSION) — STANDARD/DEEP
 
-If zero fixes were applied, skip. Otherwise one `differential-review` agent over the **whole
+If zero fixes were applied and the working tree is unchanged, the gate does not owe this layer, so say
+so in the report. Otherwise run one `differential-review` agent over the **whole
 working-tree diff since Layer 4 began** — the audit fixes, not the original feature, but including
 anything the Step 5 repair loop touched:
 ```
@@ -859,14 +866,17 @@ genuinely must be abandoned, abandon it on the record with
 
 | Stage | Status |
 |-------|--------|
+| 0.4 Viability | PASS (HUNT only) |
 | 0.6 Tier | <FAST/STANDARD/DEEP> (auto / forced) |
 | 1. Parallel Audit | DONE — X raw (gen + STAKES/NUM/DAT/DEP/DEPLOY on/off) |
 | 2. Consolidation | DONE — Y unique after dedup |
 | 2.5 Verification | DONE — V confirmed, F false-positives, U uncertain (adversarial: <n high-stakes P1>) |
+| 2.6 Scorecard | DONE, recorded by the tool (STANDARD/DEEP) |
 | 3. Fix Plan | DONE — Z planned (P1:A P2:B P3:C deferred) |
 | 4. Implementation | DONE — Z applied (P1 red→green tests: <m>) |
 | 5. Re-verify | DONE — tests pass, lint clean |
 | 5.5 Regression Diff | DONE — all hunks SAFE |
+| 5.6 Red-State Proof | DONE, recorded by the tool: <N> RED (STANDARD/DEEP) |
 | 6. Architect Gate | APPROVED — all P1/P2 mapped |
 | 7. Commit | <hash> |
 
