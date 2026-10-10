@@ -278,3 +278,118 @@ def test_legacy_state_is_judged_by_the_0_10_rules():
                          {"L1": "d", "L2": "d", "L2.5": "d", "L6": "APPROVED"}.items()}}
     assert core.is_legacy(legacy)
     assert core.commit_reasons(legacy, None) == []
+
+
+# --- fingerprint hardening (task 4 rulings A to C) ------------------------------
+
+def _spy_on_run(monkeypatch):
+    """Record the `timeout` of each subprocess.run the fingerprint makes."""
+    seen: list = []
+    real = core.subprocess.run
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(core.subprocess, "run", spy)
+    return seen
+
+
+def test_every_git_call_gets_what_is_left_of_one_fingerprint_deadline(monkeypatch, git_repo):
+    """FINGERPRINT_TIMEOUT_S bounds the WHOLE fingerprint, not each git call.
+
+    A per call bound allows several times the constant, past the hook timeout, and a hook
+    that times out fails open. A fake clock advances one second per reading, so the
+    remaining budget handed to successive calls must shrink strictly.
+
+    Red 2026-10-10: baseline 025e4ff (per call timeout=FINGERPRINT_TIMEOUT_S); failed at
+        assert all(a > b for a, b in zip(seen, seen[1:], strict=False))
+    """
+    seen = _spy_on_run(monkeypatch)
+    ticks = iter(range(1000, 2000))
+    monkeypatch.setattr(
+        core, "time", type("Clock", (), {"monotonic": staticmethod(lambda: next(ticks))}),
+        raising=False,
+    )
+    assert core.fingerprint(git_repo) is not None
+    assert len(seen) >= 4
+    assert all(t is not None and t <= core.FINGERPRINT_TIMEOUT_S for t in seen)
+    assert all(a > b for a, b in zip(seen, seen[1:], strict=False)), seen
+
+
+def test_the_fingerprint_gives_up_once_its_deadline_has_passed(monkeypatch, git_repo):
+    """After the first git call the clock jumps past the deadline: no tree, not a late one.
+
+    Red 2026-10-10: baseline 025e4ff (no deadline); failed at
+        assert core.fingerprint(git_repo) is None   (a tree id was returned)
+    """
+    seen = _spy_on_run(monkeypatch)
+    clock = type("Clock", (), {"monotonic": staticmethod(lambda: 0 if not seen else 10_000)})
+    monkeypatch.setattr(core, "time", clock, raising=False)
+    assert core.fingerprint(git_repo) is None
+    assert len(seen) == 1
+
+
+def test_a_git_planted_inside_a_subdirectory_of_the_audited_tree_is_refused(
+    monkeypatch, git_repo, tmp_path_factory
+):
+    """On Windows a `git.exe` in the hook's cwd can be found first, and cwd may be a subdir.
+
+    Red 2026-10-10: baseline 025e4ff (refuses only a git whose directory equals root); failed at
+        assert core._git_exe(str(git_repo)) is None
+    """
+    planted = git_repo / "tools"
+    planted.mkdir()
+    monkeypatch.setattr(core.shutil, "which", lambda *a, **k: str(planted / "git.exe"))
+    assert core._git_exe(str(git_repo)) is None
+
+
+def test_a_relative_git_path_is_refused(monkeypatch, git_repo):
+    """A relative result from which() resolves against the cwd, which is the audited tree.
+
+    Red 2026-10-10: baseline 025e4ff (abspath applied to it); failed at
+        assert core._git_exe(str(git_repo)) is None
+    """
+    monkeypatch.setattr(core.shutil, "which", lambda *a, **k: "git.exe")
+    assert core._git_exe(str(git_repo)) is None
+
+
+def test_a_git_outside_the_audited_tree_is_accepted(monkeypatch, git_repo, tmp_path_factory):
+    """Control for the two refusals above: over-refusing would disable every gate."""
+    outside = tmp_path_factory.mktemp("bin") / "git.exe"
+    monkeypatch.setattr(core.shutil, "which", lambda *a, **k: str(outside))
+    assert core._git_exe(str(git_repo)) == str(outside)
+
+
+def test_a_run_in_a_subdirectory_still_fingerprints_the_whole_repository(git_repo):
+    """An edit outside the run's directory must change the fingerprint.
+
+    Red 2026-10-10: baseline 025e4ff (`git add -A -- .` from the run root); failed at
+        assert core.fingerprint(sub) != before
+    """
+    sub = git_repo / "sub"
+    sub.mkdir()
+    (sub / "inner.py").write_text("y = 1\n", encoding="utf-8")
+    before = core.fingerprint(sub)
+    assert before == tree_of(sub)
+    (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+    assert core.fingerprint(sub) != before
+    assert core.fingerprint(sub) == tree_of(sub) == tree_of(git_repo)
+
+
+@pytest.mark.parametrize("gitignore", ["", ".claude/\n"])
+def test_a_subdirectory_runs_artifacts_do_not_change_the_fingerprint(tmp_path, gitignore):
+    """Control: the run's own `.claude/audits` under the subdirectory is excluded.
+
+    Not a red proof (the baseline also excludes it); it guards the new relative path.
+    """
+    repo = make_repo(tmp_path, gitignore)
+    sub = repo / "sub"
+    sub.mkdir()
+    (sub / "inner.py").write_text("y = 1\n", encoding="utf-8")
+    before = core.fingerprint(sub)
+    audits = sub / ".claude" / "audits"
+    audits.mkdir(parents=True)
+    for name in ("run-state.json", "EXECUTION_LOG.md"):
+        (audits / name).write_text("{}\n", encoding="utf-8")
+    assert core.fingerprint(sub) == before == tree_of(sub)

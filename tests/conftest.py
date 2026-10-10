@@ -26,17 +26,23 @@ def _git(root, *args, env=None) -> str:
 
 
 def tree_of(repo) -> str:
-    """Tree id of the working tree content, excluding .claude/audits."""
-    index = _git(repo, "rev-parse", "--path-format=absolute", "--git-path", "index")
+    """Tree id of the whole repository's working tree, excluding the run's .claude/audits.
+
+    `repo` may be a subdirectory: the tree is still the whole repository's, and the
+    excluded path is `repo`'s own `.claude/audits`. Mirrors cca_gate_core.fingerprint.
+    """
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    rel = os.path.relpath(os.path.realpath(repo), os.path.realpath(top)).replace(os.sep, "/")
+    excluded = ".claude/audits" if rel == "." else f"{rel}/.claude/audits"
+    index = _git(top, "rev-parse", "--path-format=absolute", "--git-path", "index")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_index = os.path.join(tmp, "index")
         if os.path.exists(index):
             shutil.copy2(index, tmp_index)  # keep mtime: see cca_gate_core.fingerprint
         env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
-        _git(repo, "add", "-A", "--", ".", env=env)
-        _git(repo, "rm", "--cached", "-r", "-q", "--ignore-unmatch", "--",
-             ".claude/audits", env=env)
-        return _git(repo, "write-tree", env=env)
+        _git(top, "add", "-A", "--", ".", env=env)
+        _git(top, "rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", excluded, env=env)
+        return _git(top, "write-tree", env=env)
 
 
 def load_hook(name: str):

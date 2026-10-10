@@ -33,6 +33,7 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 
 SCHEMA = 2
@@ -113,16 +114,41 @@ def append_log(root, line: str) -> pathlib.Path:
 
 # --- fingerprint -----------------------------------------------------------------
 
+def _inside(path: str, root: str) -> bool:
+    """True when `path` is `root` or lies anywhere under it (symlinks resolved)."""
+    real_root = os.path.realpath(root)
+    try:
+        return os.path.commonpath([os.path.realpath(path), real_root]) == real_root
+    except ValueError:  # different drives: certainly not inside
+        return False
+
+
 def _git_exe(root: str) -> str | None:
+    """The git to run, or None when the only candidate cannot be trusted.
+
+    `root` is the repository top level, i.e. the tree under audit. A git found
+    anywhere inside it is refused, not only one at its root: on Windows
+    `shutil.which` still prepends the current directory unless
+    NoDefaultCurrentDirectoryInExePath is set, and the hook's cwd may be any
+    subdirectory of the repository, whose contents the audited code controls.
+    """
     # Explicit PATH: without it Windows searches the current directory first, and
     # the current directory is the repository under audit (see cca_checks/toolpath.py).
     found = shutil.which("git", path=os.environ.get("PATH"))
-    if not found:
+    if not found or not os.path.isabs(found):
         return None
     exe = os.path.abspath(found)
-    if os.path.realpath(os.path.dirname(exe)) == os.path.realpath(root):
+    if _inside(os.path.dirname(exe), root):
         return None
     return exe
+
+
+def _top_hint(root: str) -> str:
+    """Nearest ancestor holding `.git`, found without running git; else `root` itself."""
+    for candidate in [pathlib.Path(root), *pathlib.Path(root).parents]:
+        if (candidate / ".git").exists():
+            return str(candidate)
+    return root
 
 
 def fingerprint(root) -> str | None:
@@ -131,22 +157,39 @@ def fingerprint(root) -> str | None:
     A tree id rather than a hash of `git diff HEAD`, so the value survives the
     commit at Step 7: committing the same content moves HEAD but not the tree.
     Built in a COPY of the index so the user's staging area is never touched, and
-    `.claude/audits` is removed from that copy so the run's own state, log and
+    the run's own `.claude/audits` is removed from that copy so its state, log and
     ledger cannot perturb it, whatever the repository's ignore rules say.
+
+    The tree covers the WHOLE repository even when `root` is a subdirectory, so an
+    edit elsewhere is seen. FINGERPRINT_TIMEOUT_S is one deadline for everything
+    here: each git call gets what is left of it, and past it there is no answer.
     """
     root = str(pathlib.Path(root).resolve())
-    git = _git_exe(root)
+    # Checked against the nearest `.git` ancestor BEFORE any execution, and again
+    # against git's own answer below.
+    git = _git_exe(_top_hint(root))
     if git is None:
         return None
+    deadline = time.monotonic() + FINGERPRINT_TIMEOUT_S
 
-    def run(*args, env=None) -> str:
+    def run(*args, top=None, env=None) -> str:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired([git, *args], FINGERPRINT_TIMEOUT_S)
         return subprocess.run(
-            [git, "-C", root, *args], capture_output=True, check=True,
-            timeout=FINGERPRINT_TIMEOUT_S, env=env,
+            [git, "-C", top or root, *args], capture_output=True, check=True,
+            timeout=max(0.1, remaining), env=env,
         ).stdout.decode("utf-8", "replace").strip()
 
     try:
-        index = run("rev-parse", "--path-format=absolute", "--git-path", "index")
+        top = os.path.realpath(run("rev-parse", "--show-toplevel"))
+        if _git_exe(top) is None:
+            return None
+        rel = os.path.relpath(os.path.realpath(root), top).replace(os.sep, "/")
+        if rel == ".." or rel.startswith("../"):
+            return None
+        excluded = EXCLUDED if rel == "." else f"{rel}/{EXCLUDED}"
+        index = run("rev-parse", "--path-format=absolute", "--git-path", "index", top=top)
         with tempfile.TemporaryDirectory(prefix="cca-fp-") as tmp:
             tmp_index = os.path.join(tmp, "index")
             if os.path.exists(index):
@@ -156,13 +199,14 @@ def fingerprint(root) -> str | None:
                 # (about 1 in 4 on a loaded Windows machine, measured 2026-10-10).
                 shutil.copy2(index, tmp_index)
             env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
-            run("add", "-A", "--", ".", env=env)
+            run("add", "-A", "--", ".", top=top, env=env)
             # Dropped from the index afterwards rather than excluded by pathspec: an
             # exclude pathspec naming an ignored path makes `git add` exit 1, and
             # which paths are ignored depends on the user's .gitignore, so only
             # removal is independent of every ignore rule.
-            run("rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", EXCLUDED, env=env)
-            return run("write-tree", env=env) or None
+            run("rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", excluded,
+                top=top, env=env)
+            return run("write-tree", top=top, env=env) or None
     except (OSError, subprocess.SubprocessError):
         return None
 
