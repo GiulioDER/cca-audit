@@ -96,6 +96,12 @@ A layer is satisfied only if its latest record has a higher `seq` than the lates
 predecessor. Re-recording L4 after a REVISE therefore invalidates L5 to L6 without any extra state,
 which is the repair loop the pipeline already describes.
 
+**Order alone is not enough after a REVISE.** An agent that re-edits code after L6 REVISE and then
+re-records only L5.5 and L6 satisfies every predecessor check, because L4 and L5 still sit below
+them. So L5, L5.5, L5.6 and L6 each store the tree fingerprint (section 1) at record time, and the
+commit guard and `close` require all four to equal the current fingerprint. Any edit after a verdict
+makes that verdict stale. (Found by the 2026-10-10 performance report, defect 3.)
+
 `record` refuses an out-of-order layer with exit code 2 and a JSON body naming the missing
 predecessor and the `audit-fix.md` heading to re-read. The commit guard and `close` apply the same
 check, so a hand-edited state file meets it too.
@@ -115,10 +121,22 @@ The ledger check gates Step 2.5b, which is currently prose only. The pipeline te
 the ledger's `run_id` **is** the pipeline's `run_id` (today it says `<short>`, undefined). Sub-project
 3 builds on these rows.
 
-### 5. Close and Stop
+### 5. Status vocabulary, close and Stop
+
+**`n/a` no longer satisfies a required layer.** Today the CLI accepts `--status n/a` and the guard
+blocks only `skipped` and `failed`, so `n/a` passes any gate (`cca_checks/__main__.py`, the
+`pl_record` `--status` choices). A required layer must be `done`. `n/a` and `skipped` remain valid
+only for a layer the condition table does not require for this run. A layer with nothing to do
+(L2.5 with zero P1/P2) is recorded `done` with zero counts, which renders differently from a skip.
 
 `close()` refuses unless the run is complete, and names what is missing. `abort` stays the only way
 to retire an incomplete run.
+
+**`no-fix` runs must close.** Step 2.5 says "If `no-fix`: STOP here" before the L2.5 record call and
+never calls `close`, so every `no-fix` run leaves its state open and blocks the user's next unrelated
+commit until someone aborts it. The prose moves the STOP after the record and adds
+`pipeline close`; `close` accepts a `no-fix` run once L1, L2, L2.5 (and L2.6 in STANDARD or DEEP)
+are satisfied.
 
 "Complete" means: every required layer satisfied in order; for `no-fix`, L1, L2, L2.5 (and L2.6 in
 STANDARD or DEEP) are enough.
@@ -170,6 +188,9 @@ before it counts. Each test's docstring records the baseline and the failure.
 | `close` on an incomplete run is refused | `d2317de` `close()` returns a log path |
 | L6 recorded before L4 is refused | `d2317de` `record` accepts it |
 | re-recorded L4 invalidates an earlier L6 | `d2317de` commit allowed |
+| an edit after L6 APPROVED, re-recording only L5.5 and L6, is refused | `d2317de` commit allowed |
+| `--status n/a` on a required layer does not satisfy it | `d2317de` commit allowed |
+| a `no-fix` run with L1, L2, L2.5 recorded can `close` | mutate the no-fix branch of completeness |
 | HUNT run without L0.4 `PASS` cannot commit | `d2317de` has no L0.4 |
 | L2.5 counts that do not sum to L2 unique are refused | mutate the sum check to `True` |
 | ledger row count mismatch is refused | mutate the ledger count to skip |
