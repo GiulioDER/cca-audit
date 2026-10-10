@@ -1,13 +1,11 @@
 """The PreToolUse guard, and the drift pin that keeps it honest.
 
-The guard carries its own copy of the required-layer table because it runs from
-the user's global hooks directory against repositories where `cca_checks` was
-never installed, and an ImportError in a PreToolUse hook fails in the worst
-available way: it either blocks every commit on the machine or is swallowed and
-silently stops guarding. Duplication is the right trade there, but only while
-something proves the two copies still agree. That is
-`test_guard_agrees_with_pipeline_state_across_a_matrix`, and it is the most
-important test in this file.
+The guard holds no rules of its own: it loads `cca_gate_core.py` from beside itself
+by path, because it runs from the user's global hooks directory against
+repositories where `cca_checks` was never installed. The drift pin
+`test_guard_agrees_with_pipeline_state_across_a_matrix` still proves that the
+guard and `pipeline_state` reach the same verdict on legacy states, and the
+"lonely guard" tests prove a guard copied without its core fails closed.
 """
 
 from __future__ import annotations
@@ -158,3 +156,49 @@ def test_guard_agrees_with_pipeline_state_across_a_matrix(tmp_path, tier, no_fix
     from_guard = guard.evaluate(state)
     from_module = ps.verify_commit_allowed(ps.PipelineState.from_json(state)).reasons
     assert from_guard == from_module
+
+
+def _lonely_guard(tmp_path_factory, name):
+    import shutil
+    hooks = tmp_path_factory.mktemp("hooks")
+    shutil.copy(_GUARD_PATH, hooks / "cca_pipeline_guard.py")
+    spec = importlib.util.spec_from_file_location(name, hooks / "cca_pipeline_guard.py")
+    lonely = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lonely)
+    return lonely
+
+
+def test_guard_refuses_when_the_core_is_missing_and_a_run_is_open(
+    monkeypatch, git_repo, tmp_path_factory
+):
+    """A guard copied without its core must not fail open.
+
+    Invariant: with a run open and cca_gate_core.py absent, main() exits 2.
+    Mutation: in main(), the `except (ImportError, OSError, SyntaxError)` branch returns 0
+    instead of refusing.
+
+    Red 2026-10-10: that mutation of main() in cca_pipeline_guard.py; failed at
+        assert lonely.main() == 2   (assert 0 == 2)
+    """
+    lonely = _lonely_guard(tmp_path_factory, "lonely_guard")
+    ps.start("FAST", root=git_repo)
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr("sys.stdin", io.StringIO("git commit -m x"))
+    assert lonely.main() == 2
+
+
+def test_guard_without_its_core_is_silent_when_no_run_is_open(
+    monkeypatch, git_repo, tmp_path_factory
+):
+    """No run, no core: nothing to guard, so the commit proceeds (exit 0).
+
+    Mutation: in main(), `if root is None: return 0` becomes `root = Path(os.getcwd())`, so
+    the core is loaded (and refused) even with no run open.
+
+    Red 2026-10-10: that mutation of main() in cca_pipeline_guard.py; failed at
+        assert lonely.main() == 0   (assert 2 == 0)
+    """
+    lonely = _lonely_guard(tmp_path_factory, "lonely_guard2")
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr("sys.stdin", io.StringIO("git commit -m x"))
+    assert lonely.main() == 0
