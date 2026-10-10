@@ -42,7 +42,7 @@ on:
         required: true
         type: string
 
-# Least privilege by default; the publish job opts into `id-token` alone.
+# Least privilege by default; each job opts into exactly what it needs.
 permissions: {}
 
 jobs:
@@ -57,7 +57,7 @@ jobs:
     outputs:
       version: ${{ steps.verify.outputs.version }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           # Nothing here pushes, and a checkout that keeps a credential around
@@ -65,7 +65,7 @@ jobs:
           # backend running code from the tree.
           persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -104,7 +104,7 @@ jobs:
       - name: twine check
         run: python -m twine check dist/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
           path: dist/
@@ -124,12 +124,14 @@ jobs:
     # and requesting a credential this job cannot use is the kind of leftover
     # that reads as intentional to the next person.
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
           path: dist/
 
       - name: Publish
-        uses: pypa/gh-action-pypi-publish@release/v1
+        # This step receives PYPI_API_TOKEN, so it runs a commit SHA, never a
+        # tag or branch its owner could move. tests/test_ci_contract.py holds that.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
