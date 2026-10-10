@@ -51,6 +51,17 @@ HEADINGS = {
     "L5.5": "Step 5.5", "L5.6": "Step 5.6", "L6": "Step 6",
 }
 STOP_REFUSAL_CAP = 3
+#: Layers whose work is written to disk at record time, and what the file holds. A run
+#: paused after one of them resumes from these files instead of from a lost context.
+OUTPUT_LAYERS = {
+    "L1": "the auditors' findings arrays, as returned (one JSON array per auditor, "
+          "or one combined array)",
+    "L2": "the consolidated unique findings",
+    "L2.5": "the verdict for every consolidated finding",
+    "L3": "the fix plan (finding ids to fix, deferred ids)",
+    "L4": "the fixes applied (fix id, finding id, files)",
+}
+PAUSED_REASON = "the run is paused; resume it, finish it, or abort it"
 EXCLUDED = ".claude/audits"
 #: Bound on the whole fingerprint. The hook timeouts in the settings snippet sit
 #: above it: a hook that times out is a non-blocking error, which fails OPEN.
@@ -280,24 +291,29 @@ def predecessors(layer: str, state: dict, owed: bool) -> tuple[str, ...]:
     return table[layer]
 
 
-def outstanding(state: dict, tree: str | None) -> list[str]:
-    """Why this schema 2 run is not complete. Empty means complete."""
-    layers = state.get("layers") if isinstance(state.get("layers"), dict) else {}
-    owed = fixes_owed(state, tree)
+def _layers(state: dict) -> dict:
+    return state.get("layers") if isinstance(state.get("layers"), dict) else {}
+
+
+def _layer_reasons(layer: str, state: dict, owed: bool, tree: str | None) -> list[str]:
+    """Why one required layer is not satisfied. Empty means satisfied.
+
+    The one per layer check: `outstanding` and `next_owed` both read it, so "complete"
+    and "what to do next" cannot disagree about a layer.
+    """
+    layers = _layers(state)
+    entry = layers.get(layer)
+    where = HEADINGS[layer]
+    if not isinstance(entry, dict):
+        return [f"{layer} has no recorded verdict (re-read {where})"]
     reasons: list[str] = []
-    for layer in required_layers(state, owed):
-        entry = layers.get(layer)
-        where = HEADINGS[layer]
-        if not isinstance(entry, dict):
-            reasons.append(f"{layer} has no recorded verdict (re-read {where})")
-            continue
-        status = str(entry.get("status", "")).lower()
-        if status != "done":
-            reasons.append(
-                f"{layer} is recorded as {status or 'empty'}; a required layer must be "
-                f"done (re-read {where})"
-            )
-            continue
+    status = str(entry.get("status", "")).lower()
+    if status != "done":
+        reasons.append(
+            f"{layer} is recorded as {status or 'empty'}; a required layer must be "
+            f"done (re-read {where})"
+        )
+    else:
         if layer in TOOL_LAYERS and entry.get("source") != "tool":
             reasons.append(f"{layer} must be recorded by its tool: {TOOL_LAYERS[layer]}")
         if layer in FIX_VERDICT_LAYERS and owed and entry.get("tree") != tree:
@@ -312,12 +328,30 @@ def outstanding(state: dict, tree: str | None) -> list[str]:
                     f"{layer} is older than {prior}, which was recorded again after it; "
                     f"run {layer} again (re-read {where})"
                 )
-    gate04 = layers.get("L0.4")
-    if _hunt(state) and isinstance(gate04, dict) and \
-            str(gate04.get("detail", "")).strip().upper() != "PASS":
+    if layer == "L0.4" and str(entry.get("detail", "")).strip().upper() != "PASS":
         reasons.append(
             "L0.4 did not read PASS; a hunt that fails viability must be aborted, not continued"
         )
+    if layer == "L6":
+        verdict = str(entry.get("detail", "")).strip().upper()
+        if not verdict:
+            reasons.append(
+                "L6 was recorded without a verdict; record it as "
+                "--detail APPROVED, REVISE or BLOCKED"
+            )
+        elif verdict != APPROVING_VERDICT:
+            reasons.append(
+                f"the L6 architect gate returned {verdict}, not {APPROVING_VERDICT}"
+            )
+    return reasons
+
+
+def outstanding(state: dict, tree: str | None) -> list[str]:
+    """Why this schema 2 run is not complete. Empty means complete."""
+    owed = fixes_owed(state, tree)
+    reasons: list[str] = []
+    for layer in required_layers(state, owed):
+        reasons += _layer_reasons(layer, state, owed, tree)
     if state.get("no_fix"):
         base = state.get("base_tree")
         if base and tree and tree != base:
@@ -325,20 +359,20 @@ def outstanding(state: dict, tree: str | None) -> list[str]:
                 "this run was started with `no-fix`, but the working tree changed "
                 "after it started"
             )
-    else:
-        gate = layers.get("L6")
-        if isinstance(gate, dict):
-            verdict = str(gate.get("detail", "")).strip().upper()
-            if not verdict:
-                reasons.append(
-                    "L6 was recorded without a verdict; record it as "
-                    "--detail APPROVED, REVISE or BLOCKED"
-                )
-            elif verdict != APPROVING_VERDICT:
-                reasons.append(
-                    f"the L6 architect gate returned {verdict}, not {APPROVING_VERDICT}"
-                )
     return reasons
+
+
+def next_owed(state: dict, tree: str | None) -> str | None:
+    """The first required layer, in pipeline order, that is not satisfied; None when none is.
+
+    A run can still be incomplete when this is None: a `no-fix` run whose tree changed owes
+    no layer, only an abort, and `outstanding` says so.
+    """
+    owed = fixes_owed(state, tree)
+    for layer in required_layers(state, owed):
+        if _layer_reasons(layer, state, owed, tree):
+            return layer
+    return None
 
 
 def legacy_commit_reasons(state: dict) -> list[str]:
@@ -383,5 +417,7 @@ def commit_reasons(state: dict, tree: str | None) -> list[str]:
         return [f"run state names an unknown tier {tier!r}"]
     if not isinstance(state.get("layers"), dict):
         return ["run state has no 'layers' object"]
-    reasons = [_NO_FIX_REASON] if state.get("no_fix") else []
+    reasons = [PAUSED_REASON] if state.get("paused") else []
+    if state.get("no_fix"):
+        reasons.append(_NO_FIX_REASON)
     return reasons + outstanding(state, tree)

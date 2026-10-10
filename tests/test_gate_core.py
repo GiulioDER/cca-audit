@@ -453,3 +453,56 @@ def test_the_audits_exclusion_is_passed_to_git_as_a_literal_pathspec(monkeypatch
     monkeypatch.setattr(core.subprocess, "run", spy)
     assert core.fingerprint(git_repo) is not None
     assert rm_calls[0][-1] == ":(literal)" + core.EXCLUDED
+
+
+# --- next_owed and the pause reason ----------------------------------------------
+
+def test_next_owed_is_the_first_unsatisfied_required_layer_in_pipeline_order():
+    """Invariant: next_owed names the earliest required layer `outstanding` would complain about.
+
+    Red 2026-10-11: mutation `for layer in required_layers(...)` iterated `reversed(...)` in
+    next_owed; failed at `assert core.next_owed(_state(), "T0") == "L1"` ('L6' == 'L1').
+    """
+    assert core.next_owed(_state(), "T0") == "L1"
+    layers = {"L1": _done(1)}
+    assert core.next_owed(_state(layers=layers), "T0") == "L2"
+    assert core.next_owed(_state("DEEP", mode="HUNT"), "T0") == "L0.4"
+
+
+def test_next_owed_is_none_for_a_complete_run_and_follows_a_stale_verdict():
+    """A complete run owes nothing; an edit after the verdicts makes L5 next.
+
+    Red 2026-10-11: mutation `_layer_reasons` not consulted in next_owed (returns the first
+    required layer absent from `layers`); failed at
+    `assert core.next_owed(_state(layers=_full_standard("T1")), "T2") == "L5"` (None == 'L5').
+    """
+    assert core.next_owed(_state(layers=_full_standard("T1")), "T1") is None
+    assert core.next_owed(_state(layers=_full_standard("T1")), "T2") == "L5"
+
+
+def test_next_owed_reads_the_same_rules_as_outstanding():
+    """L6 REVISE and a hunt's L0.4 REJECT are unsatisfied layers, not only global reasons.
+
+    Red 2026-10-11: mutation the L6 verdict check in `_layer_reasons` guarded by `if False`
+    (verdict judged nowhere per layer); failed at
+    `assert core.next_owed(_state(layers=layers), "T1") == "L6"`.
+    """
+    layers = _full_standard("T1")
+    layers["L6"]["detail"] = "REVISE"
+    assert core.next_owed(_state(layers=layers), "T1") == "L6"
+    assert any("returned REVISE" in r for r in core.outstanding(_state(layers=layers), "T1"))
+    hunt = {"L0.4": _done(1, "REJECT"), "L1": _done(2)}
+    assert core.next_owed(_state("DEEP", mode="HUNT", layers=hunt), "T0") == "L0.4"
+
+
+def test_a_paused_run_may_not_commit():
+    """commit_reasons names the pause, so the guard and pipeline_state agree on it.
+
+    Red 2026-10-11: mutation `[PAUSED_REASON] if state.get("paused") else []` replaced by
+    `[]` in commit_reasons; failed at `assert core.PAUSED_REASON in reasons`.
+    """
+    state = _state(layers=_full_standard("T1"))
+    assert core.commit_reasons(state, "T1") == []
+    state["paused"] = {"at": "x", "reason": "r", "tree": "T1"}
+    reasons = core.commit_reasons(state, "T1")
+    assert core.PAUSED_REASON in reasons
