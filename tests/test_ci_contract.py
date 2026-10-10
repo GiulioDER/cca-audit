@@ -105,6 +105,52 @@ def test_ci_runs_the_configured_type_checker():
     assert "run: python -m pyright" in _ci_text()
 
 
+WORKFLOWS = REPO / ".github" / "workflows"
+
+# `uses: owner/repo[/path]@<ref>` with whatever follows on the line. Local actions
+# (`./...`) and `docker://` images are not fetched from a git ref, so they are left
+# to their own rules rather than matched here.
+_USES = re.compile(r"^\s*(?:-\s+)?uses:\s*([^\s#]+)(.*)$", re.MULTILINE)
+_SHA_PIN = re.compile(r"^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-/]+@[0-9a-f]{40}$")
+_VERSION_COMMENT = re.compile(r"^\s*#\s*v\d")
+
+
+def _remote_uses() -> list[tuple[str, str, str]]:
+    found = []
+    for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml")):
+        for ref, rest in _USES.findall(path.read_text(encoding="utf-8")):
+            if ref.startswith(("./", "docker://")):
+                continue
+            found.append((path.name, ref, rest))
+    return found
+
+
+def test_some_workflow_uses_a_remote_action():
+    """Otherwise the pin check below passes over nothing."""
+    assert _remote_uses(), "no `uses:` found in .github/workflows; this guard is inert"
+
+
+def test_every_remote_action_is_pinned_to_a_commit_sha():
+    """A tag or branch is a pointer its owner can move, and the publish job hands
+    PYPI_API_TOKEN to whatever `pypa/gh-action-pypi-publish@release/v1` resolves to
+    at run time. A 40-character SHA is the only ref that names fixed content.
+
+    The trailing `# vX.Y.Z` comment is required too: it is what Dependabot reads to
+    propose the next pin, and what a reviewer reads to know which release a SHA is.
+
+    Red proof: against origin/master at d2317de (every action on a tag or branch
+    ref) the first assertion fails on `actions/checkout@v7` in ci.yml. Deleting the
+    `# v4.3.0` comment from download-artifact in release.yml fails the second.
+    """
+    for workflow, ref, rest in _remote_uses():
+        assert _SHA_PIN.match(ref), (
+            f"{workflow}: `{ref}` is not pinned to a full commit SHA; a tag or "
+            f"branch can be moved to different code after review")
+        assert _VERSION_COMMENT.match(rest), (
+            f"{workflow}: `{ref}` has no trailing `# vX.Y.Z` comment naming the "
+            f"release the SHA was taken from")
+
+
 @pytest.mark.parametrize("language", ["python", "rust"])
 def test_the_packaging_job_checks_every_backends_catalog(language):
     """A rule file missing from the wheel is invisible to the test job, which runs
