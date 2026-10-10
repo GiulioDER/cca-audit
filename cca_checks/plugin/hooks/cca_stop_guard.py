@@ -18,6 +18,7 @@ BEHAVIOUR (always exit 0; a block is the JSON decision on stdout)
   run state unreadable             -> block ONCE with the abort command; allow when
                                       stop_hook_active is true, so a corrupt file
                                       can cost one continuation, never a trap
+  run paused (`pipeline pause`)    -> allow, silently and without counting a refusal
   L6 recorded BLOCKED              -> allow: the run is waiting for a human
   incomplete, refusals < 3         -> block with what is owed, count the refusal
   complete but still open          -> block: "run pipeline close" (counted too)
@@ -102,7 +103,11 @@ def _decide(raw: str) -> int:
         )
     if state is None or core.is_legacy(state):
         return 0
-    gate = state.get("layers", {}).get("L6")
+    if state.get("paused"):
+        # Paused on the record so the session can end: allowed before the refusal
+        # counter, so a pause never spends one.
+        return 0
+    gate =state.get("layers", {}).get("L6")
     if isinstance(gate, dict) and str(gate.get("detail", "")).strip().upper() == "BLOCKED":
         return 0
 

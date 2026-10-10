@@ -269,3 +269,24 @@ def test_guard_refuses_when_the_rules_raise(monkeypatch, git_repo):
     monkeypatch.setattr(core, "commit_reasons", boom)
     monkeypatch.setattr(guard, "_load_core", lambda: core)
     assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+
+
+def test_guard_refuses_a_commit_while_the_run_is_paused(monkeypatch, capsys, git_repo):
+    """A complete run that is paused may not commit, and the refusal names the pause.
+
+    Red 2026-10-11: mutation `[PAUSED_REASON] if state.get("paused") else []` became `[]` in
+    cca_gate_core.commit_reasons; failed at
+    `assert _run(monkeypatch, git_repo, "git commit -m x") == 2` (0 == 2).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L6", detail="APPROVED", root=git_repo)
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 0
+    ps.pause("end of day", root=git_repo)
+    capsys.readouterr()
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+    assert "the run is paused" in capsys.readouterr().err

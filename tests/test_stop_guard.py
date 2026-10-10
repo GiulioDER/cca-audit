@@ -161,3 +161,19 @@ def test_an_unreadable_state_blocks_once_then_lets_go(monkeypatch, capsys, git_r
     assert "pipeline abort" in first["reason"]
     second = _stop(monkeypatch, capsys, git_repo, stop_hook_active=True)
     assert second is None
+
+
+def test_a_paused_run_lets_the_turn_end_without_spending_a_refusal(monkeypatch, capsys, git_repo):
+    """A paused run allows the stop silently, before the refusal counter is touched.
+
+    Red 2026-10-11: mutation the `if state.get("paused"): return 0` branch removed from
+    `_decide`; failed at `assert _stop(monkeypatch, capsys, git_repo) is None` (a block was
+    printed and a refusal spent).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.pause("machine restart", root=git_repo)
+    for _ in range(4):
+        assert _stop(monkeypatch, capsys, git_repo) is None
+    state = ps.load(git_repo)
+    assert state.stop_refusals == 0 and not state.stop_logged
