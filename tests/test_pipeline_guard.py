@@ -77,13 +77,16 @@ def test_guard_blocks_every_shape_of_commit(monkeypatch, tmp_path, command):
     assert _run(monkeypatch, repo, command) == 2, command
 
 
-def test_guard_allows_the_commit_once_the_gates_are_satisfied(monkeypatch, tmp_path):
-    repo = _repo(tmp_path)
-    ps.start("FAST", root=repo)
-    for layer in ("L1", "L2", "L2.5"):
-        ps.record(layer, detail="done", root=repo)
-    ps.record("L6", detail="APPROVED", root=repo)
-    assert _run(monkeypatch, repo, "git commit -m x") == 0
+def test_guard_allows_the_commit_once_the_gates_are_satisfied(monkeypatch, git_repo):
+    state = ps.start("FAST", root=git_repo)
+    ps.record("L1", root=git_repo)
+    ps.record("L2", counts={"unique": 0}, root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, root=git_repo)
+    ps.record("L6", detail="APPROVED", root=git_repo)
+    assert state.run_id
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 0
 
 
 def test_guard_refuses_an_unparseable_state(monkeypatch, tmp_path):

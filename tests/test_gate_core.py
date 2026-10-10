@@ -88,6 +88,22 @@ def test_fingerprint_ignores_the_run_state_when_claude_is_not_ignored(git_repo_t
     assert core.fingerprint(repo) == before
 
 
+def test_fingerprint_works_once_an_ignored_claude_dir_exists(git_repo):
+    """Run state written into an ignored .claude/ must not break the fingerprint.
+
+    Red at a281860 2026-10-10 (core restored from that commit): fingerprint returned
+    None; failed at `assert after is not None and after == before == tree_of(git_repo)`
+    (assert None is not None). The exclude pathspec was always passed, and git exits 1
+    when it names an ignored path.
+    """
+    before = core.fingerprint(git_repo)
+    state = git_repo / ".claude" / "audits" / "run-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text("{}", encoding="utf-8")
+    after = core.fingerprint(git_repo)
+    assert after is not None and after == before == tree_of(git_repo)
+
+
 def test_fingerprint_is_none_outside_a_repository(tmp_path):
     """Mutation: return "" on failure. Fails: "" is not None.
 

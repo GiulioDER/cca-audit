@@ -33,7 +33,14 @@ def tree_of(repo) -> str:
         if os.path.exists(index):
             shutil.copy2(index, tmp_index)  # keep mtime: see cca_gate_core.fingerprint
         env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
-        _git(repo, "add", "-A", "--", ".", ":(exclude).claude/audits", env=env)
+        ignored = subprocess.run(
+            ["git", "-C", str(repo), "check-ignore", "-q", ".claude/audits/run-state.json"],
+            capture_output=True,
+        ).returncode
+        add = ["add", "-A", "--", "."]
+        if ignored == 1:  # git exits 1 when an exclude pathspec names an ignored path
+            add.append(":(exclude).claude/audits")
+        _git(repo, *add, env=env)
         return _git(repo, "write-tree", env=env)
 
 

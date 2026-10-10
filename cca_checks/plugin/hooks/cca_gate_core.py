@@ -147,6 +147,12 @@ def fingerprint(root) -> str | None:
 
     try:
         index = run("rev-parse", "--path-format=absolute", "--git-path", "index")
+        ignored = subprocess.run(
+            [git, "-C", root, "check-ignore", "-q", f"{EXCLUDED}/run-state.json"],
+            capture_output=True, timeout=FINGERPRINT_TIMEOUT_S,
+        ).returncode
+        if ignored not in (0, 1):
+            return None
         with tempfile.TemporaryDirectory(prefix="cca-fp-") as tmp:
             tmp_index = os.path.join(tmp, "index")
             if os.path.exists(index):
@@ -156,7 +162,11 @@ def fingerprint(root) -> str | None:
                 # (about 1 in 4 on a loaded Windows machine, measured 2026-10-10).
                 shutil.copy2(index, tmp_index)
             env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
-            run("add", "-A", "--", ".", f":(exclude){EXCLUDED}", env=env)
+            add = ["add", "-A", "--", "."]
+            if ignored == 1:
+                # Conditional: git exits 1 when an exclude pathspec names an ignored path.
+                add.append(f":(exclude){EXCLUDED}")
+            run(*add, env=env)
             return run("write-tree", env=env) or None
     except (OSError, subprocess.SubprocessError):
         return None
