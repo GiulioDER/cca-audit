@@ -87,3 +87,51 @@ def test_no_fix_argument_line_names_l2_6_and_the_close():
     bullet = " ".join(lines[start:start + 2])  # the bullet wraps onto one continuation line
     assert "L2.6" in bullet
     assert "closes the run" in bullet
+
+
+def test_hunt_start_passes_no_fix_because_step_0_6_is_skipped():
+    """A hunt reports, it does not fix, and Step 0.6 (where `--no-fix` is normally passed) is
+    skipped for it, so the Step 0.4 start and the 0.4 Contract row must carry `--no-fix`.
+
+    Red 2026-10-10: baseline a8d7445 text; failed at
+    `assert "pipeline start --tier DEEP --mode HUNT [--no-fix]" in section`.
+    """
+    section = PIPELINE[PIPELINE.find("## Step 0.4"):PIPELINE.find("## Step 0.5")]
+    row = next(ln for ln in PIPELINE.splitlines() if ln.startswith("| 0.4 |"))
+    assert "pipeline start --tier DEEP --mode HUNT [--no-fix]" in section
+    assert "--no-fix" in section
+    assert "--no-fix" in row
+
+
+def test_second_start_is_described_as_refused():
+    """`start` refuses while a run is open, so the Step 0.6 note must say so.
+
+    Red 2026-10-10: baseline a8d7445 text ("would replace the open run"); failed at
+    `assert "refused" in section`.
+    """
+    section = PIPELINE[PIPELINE.find("## Step 0.6"):PIPELINE.find("## Findings Schema")]
+    assert "second `pipeline start`" in section
+    assert "refused" in section
+    assert "would\nreplace" not in section and "would replace" not in section
+
+
+def test_revise_loop_reverifies_l5_5_and_l5_6():
+    """The gate owes L5.6 after any edit, including a REVISE edit.
+
+    Red 2026-10-10: baseline a8d7445 text ("re-verify (L5 + L5.5)"); failed at
+    `assert "L5.6" in revise`.
+    """
+    step6 = PIPELINE[PIPELINE.find("## Step 6"):]
+    revise = next(ln for ln in step6.splitlines() if "REVISE → implement feedback" in ln)
+    assert "L5.6" in revise
+
+
+def test_step_4_says_the_gate_detects_change_from_the_working_tree():
+    """`--fixes` is recorded for the report; the gate detects change from the working tree.
+
+    Red 2026-10-10: baseline a8d7445 text ("`--fixes` is what tells the commit guard"); failed
+    at `assert "is what tells the commit guard" not in step4`.
+    """
+    step4 = PIPELINE[PIPELINE.find("## Step 4:"):PIPELINE.find("## Step 5")]
+    assert "is what tells the commit guard" not in step4
+    assert "working tree" in step4

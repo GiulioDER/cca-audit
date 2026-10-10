@@ -17,7 +17,7 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 
 | # | Layer | Record when done |
 |---|-------|------------------|
-| 0.4 | viability *(HUNT only)* | `pipeline start --tier DEEP --mode HUNT`, then `pipeline record L0.4 --detail PASS\|REJECT` |
+| 0.4 | viability *(HUNT only)* | `pipeline start --tier DEEP --mode HUNT [--no-fix]`, then `pipeline record L0.4 --detail PASS\|REJECT` |
 | 0.6 | tier chosen | `pipeline start --tier <TIER> [--no-fix]` *(DIFF mode; a hunt already started at 0.4)* |
 | 1 | parallel auditors | `pipeline record L1 --detail "<N> auditors"` |
 | 2 | consolidate | `pipeline record L2 --unique <U> --detail "<raw> raw"` |
@@ -132,10 +132,14 @@ table. If any REJECT fires, **STOP** — do not audit.
 **Open the run here, before any check**, so the pre-flight is on the record:
 
 ```bash
-python -m cca_checks pipeline start --tier DEEP --mode HUNT
+python -m cca_checks pipeline start --tier DEEP --mode HUNT [--no-fix]
 # ... the five gates above ...
 python -m cca_checks pipeline record L0.4 --detail PASS     # or REJECT, then: pipeline abort --reason "REJECT: <gate>"
 ```
+
+Pass `--no-fix` here when the invocation is `hunt <paths> no-fix`. Step 0.6 is skipped for a hunt, so
+this start is the only place the run learns that it must not fix; without the flag it is opened as a
+fixing run and owes L3 onward.
 
 ```bash
 gh repo view <owner>/<repo> --json isArchived,pushedAt,description
@@ -289,8 +293,9 @@ python -m cca_checks pipeline start --tier <TIER> [--no-fix]   # a hunt already 
 
 Keep the printed run_id: the disposition ledger rows at Step 2.5b carry it.
 
-A HUNT already opened its run at Step 0.4 and must skip this command: a second `pipeline start` would
-replace the open run.
+A HUNT already opened its run at Step 0.4 and must skip this command: a second `pipeline start` is
+refused while a run is open (exit 2), so it cannot replace the open run. Retire a run you no longer want
+with `pipeline abort --reason "<why>"`, then start again.
 
 This arms the commit guard for the rest of the run. Skipping it does not make the run faster, it makes
 the run unverifiable, and an unverifiable run is the thing this pipeline exists to replace.
@@ -690,8 +695,8 @@ Rules:
 3. Confirm the new test PASSES (green) and the baseline still passes.
 A P1 fix without a red→green test is incomplete (the architect gate will flag it). FAST tier skips this.
 
-**→ Record, with the count.** `--fixes` is what tells the commit guard that code was changed, and
-therefore that L5, L5.5 and L5.6 are now owed:
+**→ Record, with the count.** The gate detects that code changed from the working tree, so L5, L5.5
+and L5.6 are owed whether or not this is recorded; `--fixes` is recorded for the report:
 
 ```bash
 python -m cca_checks pipeline record L4 --fixes <N> --detail "<N> fixes applied"
@@ -811,7 +816,7 @@ Verdict rules:
   - Otherwise judge normally.
 Final verdict: APPROVED | REVISE | BLOCKED.
 ```
-APPROVED → commit. REVISE → implement feedback, re-verify (L5 + L5.5), re-submit. Each REVISE cycle
+APPROVED → commit. REVISE → implement feedback, re-verify (L5, L5.5 and, on STANDARD/DEEP, L5.6), re-submit. Each REVISE cycle
 **increments `attempts[FIX-id]`** for every finding it sends back and appends a FIX_JOURNAL row; the
 architect MUST be handed each such finding's prior FIX_JOURNAL rows so its feedback does not contradict
 an already-rejected attempt. A finding reaching the shared 3-cycle cap is **parked** (`UNCERTAIN → human`)
