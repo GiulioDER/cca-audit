@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -104,6 +105,9 @@ def _run_one(nodeid: str, extra: list[str]) -> tuple[str, str]:
         [sys.executable, "-m", "pytest", nodeid, "-q", "--tb=line",
          "-p", "no:cacheprovider", *extra],
         capture_output=True, text=True,
+        # No bytecode: this runs on the reverted PRE-FIX source, and a .pyc compiled from it
+        # would survive the restore and change the tree fingerprint L5 recorded.
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
     out = (proc.stdout or "") + (proc.stderr or "")
     tail = out.strip().splitlines()[-1] if out.strip() else f"(rc={proc.returncode})"

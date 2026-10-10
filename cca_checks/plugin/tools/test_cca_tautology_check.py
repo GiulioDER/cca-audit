@@ -182,3 +182,43 @@ def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
         "sys.argv", ["cca_tautology_check.py", "verify", "--no-proofs", "--record"])
     assert tc.main() == 0
     assert ps.load(git_repo).layers["L5.6"]["detail"] == "0 proofs claimed (no P1 to prove)"
+
+
+def test_verify_leaves_no_bytecode_behind_so_l5_does_not_go_stale(git_repo, monkeypatch):
+    """The red-state proof must not change the tree fingerprint.
+
+    Invariant: `fingerprint` taken after the fixed tests ran (what L5 records) equals the one
+    taken after `verify` reverted to the pre-fix source, ran pytest there and restored the fix.
+    The pre-fix run used to write `.pyc` files compiled from the pre-fix source, and the
+    restore left them, so L5 went stale forever in a repository that does not ignore
+    `__pycache__`. This workstation exports PYTHONDONTWRITEBYTECODE=1, which hides the bug, so
+    the test removes it from the environment.
+
+    Red 2026-10-10: baseline a8d7445 (`_run_one` passes no env); failed at
+    `assert after == before`.
+    """
+    import importlib.util
+
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    core_path = (Path(__file__).resolve().parents[1] / "hooks" / "cca_gate_core.py")
+    spec = importlib.util.spec_from_file_location("cca_gate_core_for_test", core_path)
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+
+    monkeypatch.chdir(git_repo)
+    (git_repo / "money.py").write_text(BUGGY, encoding="utf-8")
+    (git_repo / "test_money.py").write_text(TESTS, encoding="utf-8")
+    snapshot_then_fix(git_repo)
+    ran = subprocess.run(
+        [sys.executable, "-m", "pytest", "test_money.py::test_genuine_proof", "-q",
+         "-p", "no:cacheprovider"], capture_output=True, text=True,
+    )
+    assert ran.returncode == 0, ran.stdout + ran.stderr          # L5: the fixed tests pass
+    assert list(git_repo.rglob("money*.pyc")), "the scenario needs bytecode written by L5"
+    before = core.fingerprint(git_repo)
+    assert before
+
+    results = tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert [r.verdict for r in results] == [tc.RED]
+    after = core.fingerprint(git_repo)
+    assert after == before
