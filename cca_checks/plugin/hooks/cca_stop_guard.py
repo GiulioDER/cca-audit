@@ -107,7 +107,7 @@ def _decide(raw: str) -> int:
         # Paused on the record so the session can end: allowed before the refusal
         # counter, so a pause never spends one.
         return 0
-    gate =state.get("layers", {}).get("L6")
+    gate = state.get("layers", {}).get("L6")
     if isinstance(gate, dict) and str(gate.get("detail", "")).strip().upper() == "BLOCKED":
         return 0
 
