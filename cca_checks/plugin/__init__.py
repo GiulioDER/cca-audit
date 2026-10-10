@@ -263,10 +263,14 @@ def _warn_on_shadowing_agents(agents_dir: pathlib.Path, result: InstallResult) -
 
 
 _GUARD_NAME = "cca_pipeline_guard.py"
+_STOP_GUARD_NAME = "cca_stop_guard.py"
+#: Above cca_gate_core.FINGERPRINT_TIMEOUT_S (30 s). A hook that times out is a
+#: non-blocking error in Claude Code, which would let a commit through.
+_HOOK_TIMEOUT_S = 60
 
 
 def _guard_is_registered(root: pathlib.Path) -> bool:
-    """Is the commit guard named by any settings file that would run it?
+    """Are the commit guard and the stop guard named by a settings file that would run them?
 
     A substring search over the raw text rather than a parse of the hook tree:
     the same guard can legitimately be wired as a bare command, inside a `case`
@@ -282,7 +286,8 @@ def _guard_is_registered(root: pathlib.Path) -> bool:
     ]
     for path in candidates:
         try:
-            if _GUARD_NAME in path.read_text(encoding="utf-8"):
+            text = path.read_text(encoding="utf-8")
+            if _GUARD_NAME in text and _STOP_GUARD_NAME in text:
                 return True
         except OSError:
             continue
@@ -290,8 +295,10 @@ def _guard_is_registered(root: pathlib.Path) -> bool:
 
 
 def hook_snippet(target: str | pathlib.Path = ".") -> str:
-    """The settings.json fragment that arms the commit guard."""
-    guard = pathlib.Path(target).resolve() / ".claude" / "hooks" / _GUARD_NAME
+    """The settings.json fragment that arms the commit guard and the stop guard."""
+    hooks_dir = pathlib.Path(target).resolve() / ".claude" / "hooks"
+    guard = hooks_dir / _GUARD_NAME
+    stop = hooks_dir / _STOP_GUARD_NAME
     return json.dumps(
         {
             "hooks": {
@@ -302,12 +309,24 @@ def hook_snippet(target: str | pathlib.Path = ".") -> str:
                             {
                                 "type": "command",
                                 "command": f'python "{guard.as_posix()}"',
-                                "timeout": 15,
+                                "timeout": _HOOK_TIMEOUT_S,
                                 "statusMessage": "Checking the CCA pipeline gate",
                             }
                         ],
                     }
-                ]
+                ],
+                "Stop": [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f'python "{stop.as_posix()}"',
+                                "timeout": _HOOK_TIMEOUT_S,
+                                "statusMessage": "Checking the CCA run is finished",
+                            }
+                        ],
+                    }
+                ],
             }
         },
         indent=2,
@@ -389,8 +408,8 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
     # indistinguishable from the install output otherwise.
     if not _guard_is_registered(root):
         result.warnings.append(
-            "the commit guard is installed but not registered; add the PreToolUse "
-            "hook from `cca-audit install --print-hook` to your settings.json, or "
+            "the commit guard and stop guard are installed but not both registered; add "
+            "the hooks from `cca-audit install --print-hook` to your settings.json, or "
             "the pipeline's layers stay advisory"
         )
 

@@ -17,6 +17,7 @@ Two distinct failure classes are covered here, and they fail at different times:
    disagree about whether your customizations survive an upgrade.
 """
 
+import json
 import pathlib
 
 import pytest
@@ -204,6 +205,32 @@ def test_install_warns_when_the_commit_guard_is_not_registered(tmp_path, monkeyp
     settings.write_text(plugin.hook_snippet(tmp_path), encoding="utf-8")
     rearmed = plugin.install(tmp_path)
     assert not any("commit guard" in w for w in rearmed.warnings), rearmed.warnings
+
+    settings.write_text('{"x": "cca_pipeline_guard.py"}', encoding="utf-8")
+    # Red 2026-10-10: `_guard_is_registered` required only _GUARD_NAME; the next line failed.
+    half = plugin.install(tmp_path)
+    assert any("stop guard" in w for w in half.warnings), half.warnings
+
+
+def test_hook_snippet_arms_both_hooks(tmp_path):
+    """Red 2026-10-10: the Stop command pointed at the commit guard; failed at the
+    `cca_stop_guard.py in ...` assert."""
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    assert "cca_pipeline_guard.py" in snippet["PreToolUse"][0]["hooks"][0]["command"]
+    assert "cca_stop_guard.py" in snippet["Stop"][0]["hooks"][0]["command"]
+    assert "matcher" not in snippet["Stop"][0]
+
+
+def test_hook_snippet_timeouts_exceed_the_fingerprint_bound(tmp_path):
+    """Review Focus 5. A hook that times out fails open. Baseline d2317de: 15 s. Red there.
+
+    Red 2026-10-10: PreToolUse timeout set back to 15; failed at the
+    `> ps.core.FINGERPRINT_TIMEOUT_S` assert.
+    """
+    from cca_checks import pipeline_state as ps
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    for event in ("PreToolUse", "Stop"):
+        assert snippet[event][0]["hooks"][0]["timeout"] > ps.core.FINGERPRINT_TIMEOUT_S
 
 
 def test_install_creates_the_target_tree_when_absent(tmp_path):
