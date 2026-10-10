@@ -33,14 +33,9 @@ def tree_of(repo) -> str:
         if os.path.exists(index):
             shutil.copy2(index, tmp_index)  # keep mtime: see cca_gate_core.fingerprint
         env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
-        ignored = subprocess.run(
-            ["git", "-C", str(repo), "check-ignore", "-q", ".claude/audits/run-state.json"],
-            capture_output=True,
-        ).returncode
-        add = ["add", "-A", "--", "."]
-        if ignored == 1:  # git exits 1 when an exclude pathspec names an ignored path
-            add.append(":(exclude).claude/audits")
-        _git(repo, *add, env=env)
+        _git(repo, "add", "-A", "--", ".", env=env)
+        _git(repo, "rm", "--cached", "-r", "-q", "--ignore-unmatch", "--",
+             ".claude/audits", env=env)
         return _git(repo, "write-tree", env=env)
 
 
@@ -50,6 +45,11 @@ def load_hook(name: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def make_repo(root: pathlib.Path, gitignore: str) -> pathlib.Path:
+    """A one commit repository whose .gitignore holds exactly `gitignore`."""
+    return _init(root, gitignore)
 
 
 def _init(root: pathlib.Path, gitignore: str) -> pathlib.Path:

@@ -8,7 +8,7 @@ recorded per test.
 from __future__ import annotations
 
 import pytest
-from conftest import load_hook, tree_of
+from conftest import load_hook, make_repo, tree_of
 
 core = load_hook("cca_gate_core.py")
 
@@ -74,34 +74,32 @@ def test_fingerprint_survives_committing_the_same_content(git_repo):
     assert core.fingerprint(git_repo) == before
 
 
-def test_fingerprint_ignores_the_run_state_when_claude_is_not_ignored(git_repo_tracking_claude):
-    """Review Focus 1. Mutation: drop the `:(exclude)` pathspec. Fails: values differ.
+@pytest.mark.parametrize("gitignore", [".claude/\n", "*.json\n", ".claude/audits/*\n", ""],
+                         ids=["claude-dir", "json-glob", "audits-contents", "nothing-ignored"])
+def test_fingerprint_ignores_the_run_artifacts_whatever_gitignore_says(tmp_path, gitignore):
+    """.claude/audits is excluded from the fingerprint under every ignore rule.
 
-    Red 2026-10-10: `:(exclude)` pathspec removed from git add; failed at assert
-        core.fingerprint(repo) == before
+    Writing the run state, the log and the ledger must leave the fingerprint
+    unchanged, not None, and equal to the helper's.
+
+    Red at 764525c 2026-10-10 (core and conftest restored from that commit): the
+    `*.json` case failed at `assert after is not None and after == before == tree_of(repo)`
+    (the state file reads as ignored, the exclude was dropped, and the ledger and log
+    entered the tree). The other three cases passed there, so they are controls.
+    The `claude-dir` case keeps the receipt of
+    test_fingerprint_works_once_an_ignored_claude_dir_exists (red at a281860:
+    fingerprint returned None) and `nothing-ignored` that of
+    test_fingerprint_ignores_the_run_state_when_claude_is_not_ignored (red: `:(exclude)`
+    pathspec removed; fingerprint != before).
     """
-    repo = git_repo_tracking_claude
+    repo = make_repo(tmp_path, gitignore)
     before = core.fingerprint(repo)
-    state = repo / ".claude" / "audits" / "run-state.json"
-    state.parent.mkdir(parents=True)
-    state.write_text("{}", encoding="utf-8")
-    assert core.fingerprint(repo) == before
-
-
-def test_fingerprint_works_once_an_ignored_claude_dir_exists(git_repo):
-    """Run state written into an ignored .claude/ must not break the fingerprint.
-
-    Red at a281860 2026-10-10 (core restored from that commit): fingerprint returned
-    None; failed at `assert after is not None and after == before == tree_of(git_repo)`
-    (assert None is not None). The exclude pathspec was always passed, and git exits 1
-    when it names an ignored path.
-    """
-    before = core.fingerprint(git_repo)
-    state = git_repo / ".claude" / "audits" / "run-state.json"
-    state.parent.mkdir(parents=True)
-    state.write_text("{}", encoding="utf-8")
-    after = core.fingerprint(git_repo)
-    assert after is not None and after == before == tree_of(git_repo)
+    audits = repo / ".claude" / "audits"
+    audits.mkdir(parents=True)
+    for name in ("run-state.json", "EXECUTION_LOG.md", "AUDITOR_SCORECARD.jsonl"):
+        (audits / name).write_text("{}\n", encoding="utf-8")
+    after = core.fingerprint(repo)
+    assert after is not None and after == before == tree_of(repo)
 
 
 def test_fingerprint_is_none_outside_a_repository(tmp_path):

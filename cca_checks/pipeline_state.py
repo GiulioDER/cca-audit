@@ -60,7 +60,6 @@ def _load_core():
 core = _load_core()
 LAYERS = core.LAYERS
 TIERS = core.TIERS
-_COUNT_KEYS = ("unique", "confirmed", "fp", "uncertain", "duplicate", "to_fix")
 
 
 class RecordRefused(ValueError):
