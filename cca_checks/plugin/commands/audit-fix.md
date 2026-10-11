@@ -45,8 +45,9 @@ not an alternative: it leaves no trail, which is the failure the guard replaces.
 
 L1, L2, L2.5, L3 and L4 store their work: `--output <file>` names a JSON file that `record` copies
 into `.claude/audits/runs/<run_id>/`, and `record` refuses those layers without it. Write the file
-under `.claude/audits/`, which the gate ignores; a file anywhere else in the repository is an edit
-to the tree under audit, and makes the fix layers owed.
+under `.claude/audits/` (for example `.claude/audits/L1.json`), the one place the gate ignores;
+`record` refuses a file anywhere else, because in the working tree it would be an edit to the code
+under audit and would make the fix layers owed.
 
 **Pausing a run.** When the machine has to stop, pause with
 `python -m cca_checks pipeline pause --reason "<why>"`, and only immediately after a `record`

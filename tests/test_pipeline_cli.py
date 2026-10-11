@@ -191,3 +191,18 @@ def test_pause_and_resume_through_the_cli(capsys, git_repo):
     code, _, err = _cli(capsys, "resume", "--root", r)
     assert code == 2 and err["refused"] == "resume"
 
+
+
+def test_record_output_outside_claude_audits_exits_2(capsys, git_repo):
+    """A --output file outside .claude/audits/ is {"refused": "L1"} with exit 2.
+
+    Red 2026-10-11: mutation the containment check in `pipeline_state._read_output` became
+    `if False:`; failed at `assert code == 2 and err["refused"] == "L1"` (0 == 2).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--root", r)
+    outside = git_repo / "findings.json"
+    outside.write_text("[]", encoding="utf-8")
+    code, _, err = _cli(capsys, "record", "L1", "--output", str(outside), "--root", r)
+    assert code == 2 and err["refused"] == "L1"
+    assert "outside .claude/audits/" in err["reason"]

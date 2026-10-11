@@ -250,16 +250,28 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
             )
 
 
-def _read_output(layer: str, output) -> bytes:
-    """The bytes of a layer's output file, refused unless the file exists and is JSON."""
+def _read_output(layer: str, output, root) -> bytes:
+    """The bytes of a layer's output file.
+
+    Refused unless the file lies inside `<root>/.claude/audits/` (the one place the tree
+    fingerprint ignores: a file anywhere else in the working tree is an edit, which makes
+    L4 onward owed), exists, and is JSON.
+    """
     what = OUTPUT_LAYERS[layer]
+    where = f".claude/audits/out/{layer}.json"
     if output is None or not str(output).strip():
         raise RecordRefused(
             f"{layer} needs --output <file>: a JSON file holding {what}. Write it under "
-            ".claude/audits/ (a file elsewhere in the repository counts as an edit), then "
-            "record again"
+            f".claude/audits/ (for example {where}), then record again"
         )
     path = pathlib.Path(output)
+    audits = pathlib.Path(root) / core.EXCLUDED
+    if not core._inside(str(path), str(audits)):
+        raise RecordRefused(
+            f"{layer} --output {output} is outside .claude/audits/; write it there (for "
+            f"example {where}) and record again. A file anywhere else in the working tree "
+            "changes the tree fingerprint, which makes L4 onward owed"
+        )
     if not path.is_file():
         raise RecordRefused(
             f"{layer} --output {output} does not exist; write {what} to it as JSON, then "
@@ -345,7 +357,7 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         counts = {k: v for k, v in (counts or {}).items() if v is not None}
         _check_counts(layer, state, counts, root)
         if layer in OUTPUT_LAYERS:
-            data = _read_output(layer, output)
+            data = _read_output(layer, output, root)
         state.seq += 1
         entry.update({"seq": state.seq, "source": source})
         if counts:
@@ -354,7 +366,7 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             entry["tree"] = tree
     if data is None and output is not None:
         # A 0.10.x run never requires the file, but one it is given is kept, not ignored.
-        data = _read_output(layer, output)
+        data = _read_output(layer, output, root)
     if data is not None:
         entry["output"] = _store_output(state, layer, data, root)
     state.layers[layer] = entry

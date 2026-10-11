@@ -529,3 +529,25 @@ def test_the_pause_survives_a_round_trip_through_the_state_file(git_repo):
     assert ps.load(git_repo).paused == paused
     raw = json.loads(ps.state_path(git_repo).read_text(encoding="utf-8"))
     assert raw["paused"] == paused
+
+
+def test_an_output_outside_claude_audits_is_refused_and_one_inside_is_kept(git_repo):
+    """The --output source must lie inside <root>/.claude/audits/, the one place the fingerprint
+    ignores; a file anywhere else in the working tree is an edit that makes L4 onward owed.
+
+    Red 2026-10-11: mutation the containment check in `_read_output`
+    (`if not core._inside(str(path), str(audits)):`) became `if False:`; failed at
+    `pytest.raises(ps.RecordRefused, match="outside .claude/audits/")` (DID NOT RAISE).
+    """
+    ps.start("FAST", root=git_repo)
+    outside = git_repo / "L1.json"
+    outside.write_text("[]", encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="outside .claude/audits/") as info:
+        ps.record("L1", output=outside, root=git_repo)
+    assert ".claude/audits/out/L1.json" in str(info.value)
+    assert "L1" not in ps.load(git_repo).layers
+    inside = git_repo / ".claude" / "audits" / "out" / "L1.json"
+    inside.parent.mkdir(parents=True, exist_ok=True)
+    inside.write_text("[]", encoding="utf-8")
+    ps.record("L1", output=inside, root=git_repo)
+    assert ps.load(git_repo).layers["L1"]["output"].endswith("/L1.json")
