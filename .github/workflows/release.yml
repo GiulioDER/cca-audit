@@ -1,0 +1,137 @@
+name: Publish
+
+# Publishing used to happen from a maintainer's laptop with a long-lived API
+# token. Two things were wrong with that, and only one of them is about secrets.
+#
+# The token is the obvious half: on a laptop it does not expire, it lives in a
+# shell history and a ~/.pypirc, and nothing about an upload records where it
+# came from.
+#
+# This started out using trusted publishing, which removes the token entirely.
+# PyPI rejected it twice on 2026-08-31 with `invalid-publisher: valid token, but
+# no corresponding publisher`, while the claims GitHub sent were correct
+# (repo GiulioDER/cca-audit, workflow release.yml, environment pypi), so the
+# mismatch is in the record on PyPI's side and could not be diagnosed from here.
+# Rather than leave a release blocked on it, the upload uses an API token held as
+# an ENVIRONMENT secret on `pypi` -- readable only by a job that has already
+# passed the human approval gate below, unlike a repository secret which every
+# workflow in the repo can read.
+#
+# To go back to trusted publishing once the PyPI record is fixed: delete the
+# `with:` block on the publish step, restore `permissions: id-token: write` on
+# that job, and remove the secret. Nothing else changes.
+#
+# The half that actually bit us is provenance. A local `python -m build` builds
+# whatever is in the working tree, which is not necessarily the tag. On
+# 2026-08-31 the tree had moved four dependency floors past v0.10.0 within
+# minutes of tagging it, so a rebuild-then-upload would have published a 0.10.0
+# matching no commit in the repository -- permanently, because PyPI refuses to
+# re-upload a version. Building here, from a checkout of the tag itself, is what
+# makes "0.10.0 on PyPI" and "v0.10.0 in git" the same artifact by construction
+# rather than by the maintainer remembering.
+
+on:
+  release:
+    types: [published]
+  # For a tag that was already released before this workflow existed (v0.10.0),
+  # and as the escape hatch when a publish fails halfway and needs re-running.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish, e.g. v0.10.0"
+        required: true
+        type: string
+
+# Least privilege by default; each job opts into exactly what it needs.
+permissions: {}
+
+jobs:
+  build:
+    name: Build from the tag and prove it matches
+    runs-on: ubuntu-latest
+    # checkout authenticates with GITHUB_TOKEN, and the workflow-level
+    # `permissions: {}` above leaves it with no scopes at all, so without this
+    # the job fails at its first step.
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          # Nothing here pushes, and a checkout that keeps a credential around
+          # is a credential available to every later step, including a build
+          # backend running code from the tree.
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Build the sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+
+      - name: The artifact must be the version the tag claims
+        id: verify
+        env:
+          # Through the environment, never interpolated into the script body: a
+          # ${{ }} expansion is textual substitution into the shell source, so a
+          # tag name would be executable rather than data.
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          EXPECTED="${TAG#v}"
+          BUILT="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          echo "tag=$TAG expected=$EXPECTED built=$BUILT"
+          if [ "$EXPECTED" != "$BUILT" ]; then
+            echo "::error::tag $TAG implies version $EXPECTED but pyproject.toml declares $BUILT."
+            echo "::error::Publishing this would put a version on PyPI that no tag matches, and PyPI does not allow re-uploading a version."
+            exit 1
+          fi
+          # Guard the filenames too, not just pyproject: a stale dist/ committed
+          # by accident, or a build backend that renamed something, would pass the
+          # check above and still upload the wrong files.
+          for f in dist/*; do
+            case "$(basename "$f")" in
+              cca_audit-"$BUILT"*) ;;
+              *) echo "::error::unexpected artifact $f for version $BUILT"; exit 1 ;;
+            esac
+          done
+          echo "version=$BUILT" >> "$GITHUB_OUTPUT"
+
+      - name: twine check
+        run: python -m twine check dist/*
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # The `pypi` environment does two jobs here. It pauses for a human, and it is
+    # what scopes the token: PYPI_API_TOKEN is an environment secret, so it does
+    # not exist for any job that has not passed this gate.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/cca-audit/${{ needs.build.outputs.version }}/
+    # No `id-token: write`: that permission exists only for trusted publishing,
+    # and requesting a credential this job cannot use is the kind of leftover
+    # that reads as intentional to the next person.
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish
+        # This step receives PYPI_API_TOKEN, so it runs a commit SHA, never a
+        # tag or branch its owner could move. tests/test_ci_contract.py holds that.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

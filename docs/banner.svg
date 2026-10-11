@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" width="1200" height="280" role="img" aria-label="CCA-Audit — every finding is verified against your real code before anything is edited. Pipeline: detect, parallel auditors, consolidate, verify, fix, regression diff, architect gate.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" width="1200" height="280" role="img" aria-label="CCA-Audit — no unverified finding enters the fix plan. Pipeline: detect, parallel auditors, consolidate, verify, fix, regression diff, architect gate.">
   <style>
     .bg     { fill: #0d1219; }
     .rule   { stroke: #1f2a36; stroke-width: 1; }
@@ -17,8 +17,8 @@
 
   <!-- wordmark -->
   <text class="wordmk" x="56" y="72">CCA-Audit</text>
-  <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code and Codex. Every finding is verified against your</text>
-  <text class="lede" x="56" y="128">real code — mechanically, where a tool can settle it — before a line is edited.</text>
+  <text class="lede" x="56" y="104">Multi-agent code audit for Claude Code and Codex. No unverified finding enters</text>
+  <text class="lede" x="56" y="128">the fix plan; tool-backed evidence is used wherever a checker can settle it.</text>
 
   <line class="rule" x1="56" y1="156" x2="1144" y2="156"/>
 
@@ -49,7 +49,7 @@
 
     <text class="cap" x="0"   y="58">11 auditors, non-overlapping scopes</text>
     <text class="cap" x="381" y="58" text-anchor="middle">pyright · semgrep · pytest · hypothesis</text>
-    <text class="cap" x="915" y="58" text-anchor="middle">every finding maps to a fix, or REVISE</text>
+    <text class="cap" x="915" y="58" text-anchor="middle">every fix maps to a verified finding, or REVISE</text>
   </g>
 
   <!-- amber = a gate that can stop the run -->

@@ -34,7 +34,7 @@ from ..clippy_check import LINTS_BY_CLAIM, run_clippy
 from ..clippy_check import verdict_for_claim as verdict_for_clippy
 from ..config import CLOCK_STRONG_PARAMS, CLOCK_WEAK_PARAMS
 from ..semgrep_check import verdict_for_taint
-from ..toolpath import resolve_tool
+from ..toolpath import tool_unavailable_reason
 
 LANGUAGE = "rust"
 
@@ -447,11 +447,13 @@ class RustBackend:
             ts._parser(LANGUAGE)
         except ts.GrammarUnavailable as exc:
             out["clock_leak"] = str(exc)
-        if resolve_tool("cargo") is None:
+        cargo_reason = tool_unavailable_reason("cargo")
+        if cargo_reason is not None:
             for claim_type in LINTS_BY_CLAIM:
-                out[claim_type] = "cargo is not on PATH, so clippy cannot run"
-        if resolve_tool("semgrep") is None:
-            out["taint"] = "semgrep is not on PATH"
+                out[claim_type] = f"{cargo_reason}, so clippy cannot run"
+        semgrep_reason = tool_unavailable_reason("semgrep")
+        if semgrep_reason is not None:
+            out["taint"] = semgrep_reason
         return out
 
     def settle(self, claim: Claim) -> Verdict:

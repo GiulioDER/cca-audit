@@ -17,6 +17,7 @@ Two distinct failure classes are covered here, and they fail at different times:
    disagree about whether your customizations survive an upgrade.
 """
 
+import json
 import pathlib
 
 import pytest
@@ -97,11 +98,16 @@ def test_install_writes_agents_commands_and_checkers(tmp_path):
     agents = {p.name for p in (tmp_path / ".claude" / "agents").glob("*.md")}
     commands = {p.name for p in (tmp_path / ".claude" / "commands").glob("*.md")}
     tools = {p.name for p in (tmp_path / ".claude" / "tools").glob("*.py")}
+    hooks = {p.name for p in (tmp_path / ".claude" / "hooks").glob("*.py")}
 
     assert agents == {name for name, _ in plugin.iter_agents()}
     assert commands == {name for name, _ in plugin.iter_commands()}
     assert tools == {name for name, _ in plugin.iter_tools()}
-    assert result.installed == len(agents) + len(commands) + len(tools)
+    # The commit guard ships with the pipeline it enforces. An install that
+    # delivers the layers but not the guard leaves them advisory again, which is
+    # indistinguishable from a correct install until a layer is skipped.
+    assert hooks == {name for name, _ in plugin.iter_hooks()}
+    assert result.installed == len(agents) + len(commands) + len(tools) + len(hooks)
     assert result.backed_up == 0
 
 
@@ -171,7 +177,99 @@ def test_install_does_not_warn_about_our_own_files(tmp_path):
     """cca-*.md files are ours; re-running must not warn about the ones we just wrote."""
     plugin.install(tmp_path)
     result = plugin.install(tmp_path)
-    assert result.warnings == []
+    # The unregistered-guard warning is expected here and is asserted on its own
+    # below: a temp directory has no settings.json, so the guard is genuinely
+    # installed-but-not-armed. Filtering it rather than dropping the assertion
+    # keeps this test's actual subject, agent-name shadowing, still tested.
+    shadowing = [w for w in result.warnings if "commit guard" not in w]
+    assert shadowing == []
+
+
+def test_install_warns_when_the_commit_guard_is_not_registered(tmp_path, monkeypatch):
+    """Copying the guard into place does not arm it; only settings.json does.
+
+    Without this warning an install reports complete success while the pipeline's
+    layers remain exactly as advisory as they were before the guard existed --
+    the failure mode is silence, which is the one this whole mechanism replaces.
+
+    `Path.home` is redirected because the registration check legitimately reads
+    the user's own settings.json: on a machine where the developer has already
+    armed the guard globally, an un-redirected test would pass for a reason that
+    has nothing to do with the code under test.
+    """
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    result = plugin.install(tmp_path)
+    assert any("commit guard" in w for w in result.warnings), result.warnings
+
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.write_text(plugin.hook_snippet(tmp_path), encoding="utf-8")
+    rearmed = plugin.install(tmp_path)
+    assert not any("commit guard" in w for w in rearmed.warnings), rearmed.warnings
+
+    settings.write_text('{"x": "cca_pipeline_guard.py"}', encoding="utf-8")
+    # Red 2026-10-10: `_registered_guards` ignored the stop guard; the next line failed.
+    half = plugin.install(tmp_path)
+    assert any("stop guard" in w for w in half.warnings), half.warnings
+
+
+def test_the_two_guards_may_live_in_different_settings_files(tmp_path, monkeypatch):
+    """Claude Code merges hooks across settings files, so split registration is armed.
+
+    Mutation: require both names in one file (the 2dd581f code). Fails: a false
+    warning about a fully armed pair.
+
+    Red 2026-10-10: that mutation; failed at the
+    `assert not any("guard" in w and "registered" in w ...)` line.
+    """
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        '{"x": "cca_pipeline_guard.py"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: home))
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(
+        '{"x": "cca_stop_guard.py"}', encoding="utf-8"
+    )
+    result = plugin.install(tmp_path)
+    assert not any("guard" in w and "registered" in w for w in result.warnings), result.warnings
+
+
+def test_a_missing_stop_guard_is_named_on_its_own(tmp_path, monkeypatch):
+    """Only the stop guard missing: say so, and say what it costs.
+
+    Red 2026-10-10: the `elif not stop_armed` branch removed; failed at the
+    first `assert any("stop guard is installed but not registered" ...)` line.
+    """
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(
+        '{"x": "cca_pipeline_guard.py"}', encoding="utf-8"
+    )
+    result = plugin.install(tmp_path)
+    assert any("stop guard is installed but not registered" in w for w in result.warnings)
+    assert any("end half done" in w for w in result.warnings), result.warnings
+
+
+def test_hook_snippet_arms_both_hooks(tmp_path):
+    """Red 2026-10-10: the Stop command pointed at the commit guard; failed at the
+    `cca_stop_guard.py in ...` assert."""
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    assert "cca_pipeline_guard.py" in snippet["PreToolUse"][0]["hooks"][0]["command"]
+    assert "cca_stop_guard.py" in snippet["Stop"][0]["hooks"][0]["command"]
+    assert "matcher" not in snippet["Stop"][0]
+
+
+def test_hook_snippet_timeouts_exceed_the_fingerprint_bound(tmp_path):
+    """Review Focus 5. A hook that times out fails open. Baseline d2317de: 15 s. Red there.
+
+    Red 2026-10-10: PreToolUse timeout set back to 15; failed at the
+    `> ps.core.FINGERPRINT_TIMEOUT_S` assert.
+    """
+    from cca_checks import pipeline_state as ps
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    for event in ("PreToolUse", "Stop"):
+        assert snippet[event][0]["hooks"][0]["timeout"] > ps.core.FINGERPRINT_TIMEOUT_S
 
 
 def test_install_creates_the_target_tree_when_absent(tmp_path):

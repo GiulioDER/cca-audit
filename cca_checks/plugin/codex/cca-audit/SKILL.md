@@ -37,8 +37,13 @@ Map Claude specific terms in the canonical pipeline as follows:
 | `/audit-fix <args>` | Invocation of this skill with `<args>` |
 | Agent or `subagent_type` call | Spawn a Codex subagent with the matching role prompt |
 | Agent return value | The subagent final response returned to the primary agent |
+| Launch in a SINGLE message, or in ONE message (parallel) | Dispatch through the six slot queue under "Respect the six subagent limit" |
 | `.claude/tools/cca_*.py` | The matching checker in this skill's `scripts/` directory |
 | Optional `.claude/audits/` trail | Omit unless the user explicitly requests persistent audit files |
+
+`python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
+Codex must still write the `--output` file that every L1, L2, L2.5, L3 and L4 record requires,
+under `.claude/audits/`, even when it omits the rest of the trail.
 
 Resolve the selected skill directory from this `SKILL.md` path. Use absolute paths when invoking
 the bundled checker scripts. Never assume the current repository has a `.claude/` directory.
@@ -74,9 +79,24 @@ For each dispatched role:
 4. Require the JSON result before optional prose exactly as the canonical pipeline specifies.
 5. Tell the subagent not to spawn more agents. The primary agent owns capacity and independence.
 
-Launch independent roles concurrently up to the available subagent capacity. If the tier needs more
-roles than available slots, queue the remaining roles and dispatch them as soon as slots finish.
-Never drop an applicable role because capacity is lower than the canonical eleven role maximum.
+### Respect the six subagent limit
+
+Codex refuses to open a seventh subagent: `agents.max_threads` defaults to 6, and a spawn past it
+fails with `agent thread limit reached`. A subagent that has returned its final response still holds
+its slot until it is closed. The canonical pipeline asks for up to eleven auditors at once, and for
+three skeptics per finding in the DEEP panel; in Codex, every such launch goes through this queue:
+
+1. Keep at most six subagents open at once, counted across every role and layer.
+2. Spawn the first six roles and queue the rest in canonical order.
+3. Wait for any open subagent to finish. Save its final response, then call `close_agent` on it.
+   A slot is free only after the close succeeds.
+4. Spawn the next queued role into the freed slot. Repeat until the queue is empty and every result
+   is saved.
+5. If a spawn still fails on the thread limit, this host caps lower than six. Do not retry blindly:
+   wait for an open subagent to finish, save and close it, then spawn again.
+
+Never drop an applicable role because of the limit. A queued role runs later; it is never skipped,
+merged into another role, or reported as run before its result is saved.
 
 Keep verification independent:
 
@@ -103,6 +123,21 @@ absolute prohibition on edits and commits.
 
 The canonical final commit is authorized only by an `audit+fix` invocation that permits fixes and
 only after the architect returns `APPROVED`. Never include unrelated preexisting changes.
+
+## Gate before reporting
+
+Codex has no hooks, so nothing stops a run from ending half done except this check. Before any final
+summary, run:
+
+```bash
+python -m cca_checks pipeline status --require-complete
+```
+
+Exit 2 means the run still owes the layers listed under `outstanding_to_close`. Run them, or retire
+the run on the record with `python -m cca_checks pipeline abort --reason "<why>"`. When the only item
+is the instruction to close the run, every layer is done: run `python -m cca_checks pipeline close`,
+then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
+same check without relying on the orchestrator to call it.
 
 ## Report completion
 

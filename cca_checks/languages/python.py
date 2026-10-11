@@ -17,7 +17,7 @@ from ..clock_check import verdict_for_clock_leak
 from ..pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
 from ..scope import python_enclosing_span
 from ..semgrep_check import verdict_for_taint
-from ..toolpath import resolve_tool
+from ..toolpath import tool_unavailable_reason
 
 #: Claim types this backend settles with a real tool. `crash_impact` and `numeric`
 #: are absent on purpose: they arrive through the `repro` / `numeric` subcommands,
@@ -46,11 +46,16 @@ class PythonBackend:
         sees it cannot tell that from a claim type nobody supports.
         """
         out = {}
-        if resolve_tool("pyright") is None:
+        # Probed by execution, not by PATH presence: a tool can be found and still
+        # be unable to run, and reporting that as available is how a coverage
+        # report comes to overstate coverage. See tool_unavailable_reason.
+        pyright_reason = tool_unavailable_reason("pyright")
+        if pyright_reason is not None:
             for claim_type in RULES_BY_CLAIM:
-                out[claim_type] = "pyright is not on PATH"
-        if resolve_tool("semgrep") is None:
-            out["taint"] = "semgrep is not on PATH"
+                out[claim_type] = pyright_reason
+        semgrep_reason = tool_unavailable_reason("semgrep")
+        if semgrep_reason is not None:
+            out["taint"] = semgrep_reason
         return out
 
     def settle(self, claim: Claim) -> Verdict:

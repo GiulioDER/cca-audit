@@ -58,12 +58,20 @@ expect those findings to escalate. Adding a language is documented in [extending
 
 | extra | pulls in | enables |
 |---|---|---|
-| `pip install cca_checks[verify]` | everything below | the whole deterministic layer |
-| `pip install cca_checks[numeric]` | `hypothesis`, `pytest`, `mpmath` | `numeric` claims |
-| `pip install cca_checks[rust]` | `tree-sitter`, `tree-sitter-rust` | Rust `clock_leak` + span resolution |
+| `pip install "cca-audit[verify]"` | `hypothesis`, `pytest`, `pyright`, `mpmath`, `tree-sitter*` | the deterministic layer, except `taint` |
+| `pipx install semgrep` | semgrep, isolated | `taint` claims (recommended) |
+| `pip install "cca-audit[taint]"` | semgrep, in your environment | `taint` claims, accepting its pins |
+| `pip install "cca-audit[numeric]"` | `hypothesis`, `pytest`, `mpmath` | `numeric` claims |
+| `pip install "cca-audit[rust]"` | `tree-sitter`, `tree-sitter-rust` | Rust `clock_leak` + span resolution |
 
-`pyright`, `semgrep` and `cargo`/`clippy` are **not** pip extras — the first two are installed
-separately, and the Rust toolchain belongs to the target project. Missing any of them escalates the
+**semgrep is not in `verify` on purpose.** `cca_checks` never imports it: it is resolved on PATH and
+spawned, like `cargo`. But semgrep hard-pins `mcp==1.29.0`, `ruamel.yaml.clib` and `pywin32`, so
+shipping it inside `verify` let an audit install rewrite packages unrelated to auditing. `pipx`
+isolates it and still puts the binary on PATH, which is all `resolve_tool` needs. The `taint` extra
+remains for anyone who wants it in-environment with those pins accepted knowingly.
+
+`pyright` stays in `verify`; it carries no such pins. The Rust toolchain is different again: `cargo`
+and `clippy` belong to the target project and are not pip extras. Missing any of them escalates the
 affected claim types; it never silently passes them.
 
 ### Environment knobs

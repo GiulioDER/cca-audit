@@ -8,6 +8,73 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## Unreleased
 
+### Changed
+- Every step of `/audit-fix` is now gated, not only L1, L2, L2.5 and L6. A HUNT owes L0.4 PASS; STANDARD and DEEP owe L2.6; every fixing run owes L3; L4 onward is owed whenever the working tree changed, whether or not L4 was recorded. In 0.10.x an unrecorded L4 switched off L5, L5.5 and L5.6.
+- `pipeline record` checks order and refuses a layer whose predecessors are missing (exit 2, with the section to re-read). L2, L2.5 and L3 take counts (`--unique`, `--confirmed`, `--fp`, `--uncertain`, `--duplicate`, `--to-fix`) that must agree with each other and with the disposition ledger.
+- Verdicts from L5 onward store the tree they judged; an edit after a verdict makes it stale.
+- `--status n/a` no longer satisfies a required layer.
+- `pipeline close` refuses an incomplete run; `no-fix` runs now close after verification instead of blocking the next commit.
+- L2.6 and L5.6 are recorded by their tools (`--record`), never by hand.
+- A second `pipeline start` is refused (exit 2, `{"refused": "start"}`) while a run is open, instead of replacing it. Replacing re-baselined the tree over the run's edits, dropped L0.4, and left no trail. Retire a run with `pipeline close` or `pipeline abort --reason`.
+- `pipeline record` of L1, L2, L2.5, L3 and L4 requires `--output <file>` on a schema 2 run: a JSON file under `.claude/audits/` (a file elsewhere would change the tree fingerprint, so it is refused) holding that layer's work, copied to `.claude/audits/runs/<run_id>/<layer>.json` and named in the layer entry. Any other layer given `--output` is refused rather than ignored.
+- The red-state proof (`cca_tautology_check.py verify`) runs pytest with `PYTHONDONTWRITEBYTECODE=1`. It used to leave `.pyc` files compiled from the pre-fix source, which changed the tree fingerprint after verify and left L5 stale in repositories that do not ignore `__pycache__`.
+
+### Added
+- `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
+- `pipeline status --require-complete` for Codex, which has no hooks.
+- `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
+
+### Compatibility
+- A run started by 0.10.x finishes under 0.10.x rules.
+
+### Fixed
+- The Codex skill keeps at most six subagents open, Codex's default `agents.max_threads`. A finished subagent holds its slot until `close_agent`, so the skill now records and closes each one before spawning the next queued role. A DEEP run used to launch every auditor at once and die on `agent thread limit reached`.
+
+## [0.10.1] - 2026-08-31
+
+- **`pip install 'cca-audit[verify]'` no longer rewrites unrelated packages.** semgrep hard-pins
+  `mcp==1.29.0`, `ruamel.yaml.clib` and `pywin32`, so installing the verification layer silently
+  downgraded a user's `mcp` from 2.1.0 and broke unrelated MCP tooling. `cca_checks` never imports
+  semgrep: it resolves it on PATH and spawns it, exactly like `cargo`, so it was never a library
+  dependency in the first place. It moves to its own `taint` extra, with `pipx install semgrep` as
+  the recommended install. `verify` now resolves to 15 packages instead of 68.
+- **`capabilities` probes tools by running them, not by finding them.** Availability was
+  `resolve_tool(name) is not None`, which answers whether a file is on PATH. On a machine where
+  semgrep resolved fine and then died with `OSError: [WinError 4551] An Application Control policy
+  has blocked this file`, `capabilities` reported `taint` fully available while every taint claim
+  escalated. A coverage report that overstates coverage is worse than none, because its specificity
+  is what makes it trusted. Each tool is now probed with `--version`, and a non-zero exit counts as
+  unavailable too: in that failure the `OSError` was raised inside the tool's own process, so an
+  exception check alone would have reproduced the bug.
+
+## [0.10.0] - 2026-08-31
+
+- **The audit pipeline's layers are now enforced rather than requested.** Every layer of
+  `/audit-fix` was gated by prose alone: the command file said "This is a DETERMINISTIC workflow"
+  and nothing checked that it had been followed, so a run that skipped L2.5 (findings verification)
+  or L6 (the architect gate) produced a commit indistinguishable from a fully verified one, with
+  the same message shape, file list and claimed provenance. `python -m cca_checks pipeline` records
+  which layers a run reached, and a new `PreToolUse` guard refuses `git commit` until they carry
+  verdicts and L6 reads `APPROVED`. It fails closed only while a run is open, so it is invisible to
+  every commit that is not part of an audit, and the escape hatch (`pipeline abort --reason`)
+  appends to `EXECUTION_LOG.md`, so a skip that used to be silent now leaves a dated trail. FAST is
+  not asked for the layers its own tier table does not run.
+- **The installer ships the guard, and says so when it is not armed.** `cca-audit install` now
+  writes `.claude/hooks/` alongside the agents, commands and checkers, and warns when the guard is
+  installed but named by no settings.json, because copying it into place does not arm it.
+  `cca-audit install --print-hook` emits the settings fragment instead of editing anyone's
+  configuration. An install that reported success while the layers stayed advisory would fail in
+  exactly the silent way the guard exists to end.
+- **The pipeline re-anchors itself mid-run.** `audit-fix.md` gains a resident checklist, a record
+  call at the end of every step, and an explicit instruction to re-read the next sections at the
+  two points where a long run drifts: after the auditor fan-out, and after Layer 4's tests go
+  green. It also states that general-purpose "no further review passes" guidance does not apply
+  inside an audit, which is by construction a sequence of review passes over already-passing code.
+- **Tightened the package description and recorded the differential oracle's origin.** The PyPI
+  project page is frozen at upload time, so the description change reaches it with this release
+  rather than when it merged. `cca_checks/substrate.py` now credits the two-arithmetic approach to
+  Erik Hill, who suggested it in public review.
+
 ## [0.9.0] - 2026-08-04
 
 - **CCA now runs natively inside Codex tasks.** `cca-audit install-codex` installs an `audit+fix`

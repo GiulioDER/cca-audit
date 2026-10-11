@@ -45,9 +45,10 @@ orchestrator consumes. Use the canonical Findings Schema from `audit-fix.md`:
 Optionally also write a human-readable trail to `.claude/audits/AUDIT_MY.md`. The pipeline does
 **not** depend on that file.
 
-## Status Block (Required)
+## Status Block (Optional Trail Metadata)
 
-Every output MUST start with:
+If you also write a human-readable trail, put status metadata there. Do **not** put it before the
+JSON return value in your response:
 \```yaml
 ---
 agent: my-auditor
@@ -80,7 +81,7 @@ Issue, Fix. This mirrors the JSON return value; it never replaces it.
 
 ## Execution Logging
 
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
+If you keep an optional human-readable trail, you may append to `.claude/audits/EXECUTION_LOG.md`:
 \```
 | [timestamp] | my-auditor | [status] | [duration] | [findings] | [errors] |
 \```
@@ -204,7 +205,7 @@ Then add the honest limits to `README.md` — and, per this repo's convention, a
 ## Design Principles
 
 1. **Non-overlapping scopes**: Every check belongs to exactly one auditor
-2. **Status blocks**: Every auditor output starts with a structured status block
+2. **JSON first**: Every auditor response starts with the canonical JSON array
 3. **Finding IDs**: Unique prefix per auditor (CODE-, BUG-, SEC-, etc.)
 4. **Severity levels**: Critical, High, Medium, Low
 5. **Structured return**: Every auditor returns its findings as the canonical JSON array — that

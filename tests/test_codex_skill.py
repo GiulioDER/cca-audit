@@ -50,6 +50,27 @@ def test_codex_skill_trigger_and_subagent_contract_are_explicit():
     assert "$cca-audit" in metadata
 
 
+def test_codex_skill_queues_subagents_behind_the_six_thread_limit():
+    """Codex refuses a seventh open subagent, and a finished one keeps its slot until closed.
+
+    Invariant: the skill caps open subagents at six, frees a slot only through `close_agent`
+    after the result is recorded, and overrides the canonical "launch ALL in a SINGLE message".
+    Failure caught: a DEEP run spawns up to eleven auditors at once and dies on
+    `agent thread limit reached` (`agents.max_threads` defaults to 6 in codex-rs).
+
+    Red proof: run against SKILL.md at 800fc1c, which said only "up to the available subagent
+    capacity"; it failed on the first assertion below.
+    """
+    skill = (_SOURCE_SKILL / "SKILL.md").read_text(encoding="utf-8")
+    adapter = skill.split("## Apply the Codex adapter", 1)[1].split("\n## ", 1)[0]
+
+    assert "at most six subagents open at once" in skill
+    assert "`close_agent`" in skill
+    assert "A slot is free only after the close succeeds" in skill
+    assert "SINGLE message" in adapter
+    assert "Never drop an applicable role" in skill
+
+
 def test_banner_states_one_auditor_count():
     banner = (_REPO_ROOT / "docs" / "banner.svg").read_text(encoding="utf-8")
     assert "auditors ×11" in banner

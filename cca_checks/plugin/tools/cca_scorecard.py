@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -209,6 +210,7 @@ def main() -> int:
     ap.add_argument("--routing", choices=("on", "off"), default="off",
                     help="ON lets low-precision cells RAISE verification. Never drops.")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--record", action="store_true", help="record L2.6 in the open CCA run")
     a = ap.parse_args()
     rep = build(a.ledger, routing=(a.routing == "on"))
     if a.json:
@@ -223,6 +225,21 @@ def main() -> int:
         }, indent=2))
     else:
         print(render(rep))
+    if a.record:
+        try:
+            from cca_checks import pipeline_state
+        except ImportError:
+            print("cannot record L2.6: cca_checks is not importable here "
+                  "(pip install cca-audit)", file=sys.stderr)
+            return 3
+        try:
+            pipeline_state.record(
+                "L2.6", detail=f"{len(rep.cells)} cells scored, {rep.rows_scored} rows",
+                source="tool",
+            )
+        except ValueError as exc:
+            print(f"cannot record L2.6: {exc}", file=sys.stderr)
+            return 2
     return 0
 
 
