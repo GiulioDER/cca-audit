@@ -61,6 +61,59 @@ def write_output(root, value=None) -> str:
     return str(path)
 
 
+#: The order verdicts_output hands ids out in. CONFIRMED come first, so a plan_output over
+#: the first `to_fix + deferred` ids names only findings L2.5 confirmed.
+_VERDICT_ORDER = (("confirmed", "CONFIRMED"), ("fp", "FALSE_POSITIVE"),
+                  ("uncertain", "UNCERTAIN"), ("duplicate", "DUPLICATE"),
+                  ("deferred", "DEFERRED"), ("stale", "STALE"))
+
+
+def finding_id(i: int) -> str:
+    return f"F-{i}"
+
+
+def findings_output(root, n=0, *, priorities=None) -> str:
+    """An L2 file of `n` consolidated findings, F-1 to F-n, each P2 unless `priorities`
+    (a dict of id to P1, P2 or P3) says otherwise."""
+    priorities = priorities or {}
+    rows = [{"id": finding_id(i), "auditor": "cca-bug-auditor", "category": "x",
+             "priority": priorities.get(finding_id(i), "P2"), "file": "app.py", "line": i,
+             "claim": f"claim {i}", "high_stakes": False} for i in range(1, n + 1)]
+    return write_output(root, rows)
+
+
+def verdicts_output(root, **counts) -> str:
+    """An L2.5 file whose verdicts match `counts`, keyed like the record flags
+    (confirmed, fp, uncertain, duplicate, deferred, stale)."""
+    rows, i = [], 1
+    for key, verdict in _VERDICT_ORDER:
+        for _ in range(counts.get(key, 0)):
+            rows.append({"id": finding_id(i), "verdict": verdict})
+            i += 1
+    return write_output(root, rows)
+
+
+def plan_output(root, *, to_fix=0, deferred=0) -> str:
+    """An L3 file planning the first `to_fix` CONFIRMED ids and deferring the next `deferred`."""
+    ids = [finding_id(i) for i in range(1, to_fix + deferred + 1)]
+    return write_output(root, {"to_fix": ids[:to_fix], "deferred": ids[to_fix:]})
+
+
+def append_ledger(repo, run_id, n, *, outcome_rows=0, outcome_result="fixed") -> None:
+    """`n` verdict rows and `outcome_rows` outcome rows for `run_id` in the disposition ledger."""
+    path = pathlib.Path(repo) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for i in range(n):
+            fh.write(json.dumps({"run_id": run_id, "auditor": "cca-bug-auditor",
+                                 "category": "x", "verdict": "CONFIRMED",
+                                 "fix_id": f"FIX-{i}"}) + "\n")
+        for i in range(outcome_rows):
+            fh.write(json.dumps({"run_id": run_id, "fix_id": f"FIX-{i}",
+                                 "result": outcome_result,
+                                 "architect_verdict": "APPROVED"}) + "\n")
+
+
 def load_hook(name: str):
     path = _HOOKS / name
     spec = importlib.util.spec_from_file_location(path.stem, path)

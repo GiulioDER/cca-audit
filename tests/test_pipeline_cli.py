@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from conftest import write_output
+from conftest import findings_output, verdicts_output, write_output
 
 from cca_checks.__main__ import main
 
@@ -52,8 +52,8 @@ def test_count_flags_reach_the_state(capsys, git_repo):
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--root", r)
     _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
-    code, out, _ = _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r),
-                        "--root", r)
+    code, out, _ = _cli(capsys, "record", "L2", "--unique", "0", "--output",
+                        findings_output(r), "--root", r)
     assert code == 0 and out["recorded"] == "L2"
     raw = json.loads((git_repo / ".claude/audits/run-state.json").read_text(encoding="utf-8"))
     assert raw["layers"]["L2"]["counts"] == {"unique": 0}
@@ -93,10 +93,11 @@ def test_n_a_is_still_accepted_for_a_layer_this_run_does_not_require(capsys, git
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--root", r)
     _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
-    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", findings_output(r),
+         "--root", r)
     code, _, _ = _cli(capsys, "record", "L2.5", "--status", "n/a", "--confirmed", "0",
                       "--fp", "0", "--uncertain", "0", "--duplicate", "0",
-                      "--output", write_output(r), "--root", r)
+                      "--output", verdicts_output(r), "--root", r)
     assert code == 0
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert any("L2.5 is recorded as n/a" in x for x in out["outstanding_to_close"])
@@ -115,9 +116,10 @@ def test_status_require_complete_exits_2_for_a_complete_run_that_is_not_closed(
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--no-fix", "--root", r)
     _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
-    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", findings_output(r),
+         "--root", r)
     _cli(capsys, "record", "L2.5", "--confirmed", "0", "--fp", "0", "--uncertain", "0",
-         "--duplicate", "0", "--output", write_output(r), "--root", r)
+         "--duplicate", "0", "--output", verdicts_output(r), "--root", r)
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert code == 2
     assert len(out["outstanding_to_close"]) == 1
@@ -155,9 +157,10 @@ def test_status_shows_the_pause_and_require_complete_exits_2(capsys, git_repo):
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--no-fix", "--root", r)
     _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
-    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", findings_output(r),
+         "--root", r)
     _cli(capsys, "record", "L2.5", "--confirmed", "0", "--fp", "0", "--uncertain", "0",
-         "--duplicate", "0", "--output", write_output(r), "--root", r)
+         "--duplicate", "0", "--output", verdicts_output(r), "--root", r)
     assert _cli(capsys, "pause", "--reason", "end of day", "--root", r)[0] == 0
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert code == 2
@@ -179,8 +182,8 @@ def test_pause_and_resume_through_the_cli(capsys, git_repo):
     assert code == 0 and out["paused"] == "r9" and out["reason"] == "machine restart"
     code, _, err = _cli(capsys, "pause", "--reason", "again", "--root", r)
     assert code == 2 and err["refused"] == "pause" and "run is paused" in err["reason"]
-    code, _, err = _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r),
-                        "--root", r)
+    code, _, err = _cli(capsys, "record", "L2", "--unique", "0", "--output",
+                        findings_output(r), "--root", r)
     assert code == 2 and err["refused"] == "L2" and "pipeline resume" in err["reason"]
     code, out, _ = _cli(capsys, "resume", "--root", r)
     assert code == 0

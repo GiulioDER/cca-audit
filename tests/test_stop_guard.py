@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import json
 
-from conftest import load_hook, write_output
+from conftest import findings_output, load_hook, plan_output, verdicts_output, write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -72,10 +72,10 @@ def test_an_architect_block_lets_the_turn_end(monkeypatch, capsys, git_repo):
     """
     ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=plan_output(git_repo), root=git_repo)
     ps.record("L6", detail="BLOCKED", root=git_repo)
     assert _stop(monkeypatch, capsys, git_repo) is None
 
@@ -88,10 +88,10 @@ def test_a_complete_run_that_is_still_open_asks_for_close(monkeypatch, capsys, g
     """
     ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=plan_output(git_repo), root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     out = _stop(monkeypatch, capsys, git_repo)
     assert out is not None and "pipeline close" in out["reason"]

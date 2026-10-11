@@ -15,36 +15,33 @@ import pathlib
 import subprocess
 
 import pytest
-from conftest import tree_of, write_output
+from conftest import (
+    append_ledger,
+    findings_output,
+    plan_output,
+    tree_of,
+    verdicts_output,
+    write_output,
+)
 
 from cca_checks import pipeline_state as ps
-
-
-def _ledger(repo, run_id, n, *, outcome_rows=0):
-    path = repo / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        for i in range(n):
-            fh.write(json.dumps({"run_id": run_id, "auditor": "cca-bug-auditor",
-                                 "category": "x", "verdict": "CONFIRMED",
-                                 "fix_id": f"FIX-{i}"}) + "\n")
-        for i in range(outcome_rows):
-            fh.write(json.dumps({"run_id": run_id, "fix_id": f"FIX-{i}",
-                                 "result": "fixed", "architect_verdict": "APPROVED"}) + "\n")
 
 
 def _through_l3(repo, tier, *, confirmed=1, no_fix=False):
     state = ps.start(tier, no_fix=no_fix, root=repo)
     ps.record("L1", detail="6 auditors", output=write_output(repo), root=repo)
-    ps.record("L2", counts={"unique": confirmed}, output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": confirmed}, output=findings_output(repo, confirmed),
+              root=repo)
     if tier != "FAST":
-        _ledger(repo, state.run_id, confirmed)
+        append_ledger(repo, state.run_id, confirmed)
     ps.record("L2.5", counts={"confirmed": confirmed, "fp": 0, "uncertain": 0,
-                              "duplicate": 0}, output=write_output(repo), root=repo)
+                              "duplicate": 0},
+              output=verdicts_output(repo, confirmed=confirmed), root=repo)
     if tier != "FAST":
         ps.record("L2.6", detail="0 cells", source="tool", root=repo)
     if not no_fix:
-        ps.record("L3", counts={"to_fix": confirmed}, output=write_output(repo), root=repo)
+        ps.record("L3", counts={"to_fix": confirmed},
+                  output=plan_output(repo, to_fix=confirmed), root=repo)
     return state
 
 
@@ -140,10 +137,10 @@ def test_l2_5_counts_must_account_for_every_unique_finding(git_repo):
     """
     ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 3}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 3}, output=findings_output(git_repo, 3), root=git_repo)
     with pytest.raises(ps.RecordRefused, match="3 unique"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 1, "uncertain": 0, "duplicate": 0},
-                  output=write_output(git_repo), root=git_repo)
+                  output=verdicts_output(git_repo, confirmed=1, fp=1), root=git_repo)
 
 
 def test_ledger_must_hold_one_row_per_verdict(git_repo):
@@ -154,11 +151,11 @@ def test_ledger_must_hold_one_row_per_verdict(git_repo):
     """
     state = ps.start("STANDARD", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 2}, output=write_output(git_repo), root=git_repo)
-    _ledger(git_repo, state.run_id, 1)
+    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    append_ledger(git_repo, state.run_id, 1)
     with pytest.raises(ps.RecordRefused, match="ledger holds 1"):
         ps.record("L2.5", counts={"confirmed": 2, "fp": 0, "uncertain": 0, "duplicate": 0},
-                  output=write_output(git_repo), root=git_repo)
+                  output=verdicts_output(git_repo, confirmed=2), root=git_repo)
 
 
 def test_ledger_count_ignores_outcome_rows(git_repo):
@@ -169,27 +166,28 @@ def test_ledger_count_ignores_outcome_rows(git_repo):
     """
     state = ps.start("STANDARD", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 2}, output=write_output(git_repo), root=git_repo)
-    _ledger(git_repo, state.run_id, 2, outcome_rows=2)
+    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    append_ledger(git_repo, state.run_id, 2, outcome_rows=2)
     ps.record("L2.5", counts={"confirmed": 2, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo, confirmed=2), root=git_repo)
 
 
 def test_missing_count_flags_are_refused(git_repo):
     ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
     with pytest.raises(ps.RecordRefused, match="--unique"):
-        ps.record("L2", output=write_output(git_repo), root=git_repo)
+        ps.record("L2", output=findings_output(git_repo), root=git_repo)
 
 
 def test_l3_cannot_plan_more_fixes_than_were_confirmed(git_repo):
     ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 1}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 1}, output=findings_output(git_repo, 1), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo, confirmed=1), root=git_repo)
     with pytest.raises(ps.RecordRefused, match="--to-fix"):
-        ps.record("L3", counts={"to_fix": 2}, output=write_output(git_repo), root=git_repo)
+        ps.record("L3", counts={"to_fix": 2}, output=plan_output(git_repo, to_fix=2),
+                  root=git_repo)
 
 
 def test_a_hunt_that_failed_viability_cannot_start_auditing(git_repo):
@@ -338,7 +336,7 @@ def test_record_l2_copies_a_valid_output_into_the_run_and_names_it(git_repo):
     state = ps.start("FAST", run_id="r42", root=git_repo)
     run = state.run_id
     ps.record("L1", output=write_output(git_repo, [[{"id": "BUG-1"}]]), root=git_repo)
-    findings = [{"id": "BUG-1", "file": "app.py", "line": 1}]
+    findings = [{"id": "BUG-1", "priority": "P2", "file": "app.py", "line": 1}]
     ps.record("L2", counts={"unique": 1}, output=write_output(git_repo, findings),
               root=git_repo)
     entry = ps.load(git_repo).layers["L2"]
@@ -440,7 +438,7 @@ def test_resume_without_an_edit_names_the_next_layer_and_the_outputs(git_repo):
     """
     state = ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(git_repo), root=git_repo)
     ps.pause("machine restart", root=git_repo)
     result = ps.resume(root=git_repo)
     assert result["resumed"] == state.run_id
@@ -453,7 +451,7 @@ def test_resume_without_an_edit_names_the_next_layer_and_the_outputs(git_repo):
     log = (git_repo / ".claude" / "audits" / "EXECUTION_LOG.md").read_text(encoding="utf-8")
     assert f"run {state.run_id} | RESUMED | next L2.5 |" in log
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo), root=git_repo)
 
 
 def test_resume_after_an_edit_made_while_paused_lists_the_stale_verdicts(git_repo):
@@ -558,10 +556,11 @@ def test_an_output_outside_claude_audits_is_refused_and_one_inside_is_kept(git_r
 def _through_l3_fast(repo, to_fix):
     ps.start("FAST", root=repo)
     ps.record("L1", output=write_output(repo), root=repo)
-    ps.record("L2", counts={"unique": 1}, output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": 1}, output=findings_output(repo, 1), root=repo)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(repo), root=repo)
-    ps.record("L3", counts={"to_fix": to_fix}, output=write_output(repo), root=repo)
+              output=verdicts_output(repo, confirmed=1), root=repo)
+    ps.record("L3", counts={"to_fix": to_fix, "deferred": 1 - to_fix},
+              output=plan_output(repo, to_fix=to_fix, deferred=1 - to_fix), root=repo)
 
 
 def test_resume_after_l3_planned_fixes_names_l4_not_l6(git_repo):
