@@ -142,6 +142,12 @@ is the instruction to close the run, every layer is done: run `python -m cca_che
 then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
 same check without relying on the orchestrator to call it.
 
+The commit guard does not run in Codex either, so the Step 7 refusals in `references/pipeline.md`
+are yours to apply: stage by path in one command and run `git commit` alone in the next, with no
+other command, substitution or index override in it, and before committing confirm that
+`git diff --cached --name-only` and `git diff --name-only` share no path and that no staged deletion
+still has its file on disk. `pipeline status` does not make those checks.
+
 ## Report completion
 
 Return the canonical summary with tier, scope, domains, deterministic coverage and blindness,

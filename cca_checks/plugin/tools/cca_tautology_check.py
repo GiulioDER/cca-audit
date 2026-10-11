@@ -194,13 +194,19 @@ def _l5_6_entry(results: list[ProofResult]) -> tuple[str, str]:
 
 
 def _planned_p1() -> int:
-    """CONFIRMED P1 ledger rows of the open run, when its L3 planned fixes; else 0.
+    """CONFIRMED P1 ledger rows of the open run that need a proof, when it fixed anything.
 
     `--no-proofs` claims no P1 needs a proof. The ledger (Step 2.5b) records each
-    verdict's priority, so the claim is checked rather than taken on trust. The rows
-    are written before any fix id exists, so they cannot say which P1 is still being
-    fixed; a P1 parked at the attempt cap is declared with `--parked`.
-    Raises ValueError for an unreadable run state, as `pipeline_state.load` does.
+    verdict's canonical priority, so the claim is checked rather than taken on trust,
+    whenever the run fixed anything: L3 planned fixes, L4 recorded some, or the tree
+    moved off its base. The rows are written before any fix id exists, so they cannot
+    say which P1 is still being fixed; a P1 parked at the attempt cap is declared with
+    `--parked`, bounded by this count and written into L5.6 for the architect, who
+    checks it against FIX_JOURNAL. Nothing stored names which fixes a gate parked after
+    L4, so a tighter bound waits on pinned L3/L4 output shapes (U16).
+    Raises ValueError for an unreadable run state, for a ledger (on STANDARD or DEEP)
+    holding fewer CONFIRMED rows for the run than L2.5 confirmed (missing, emptied or
+    rewritten), and for a package too old to read the ledger.
     """
     try:
         from cca_checks import pipeline_state
@@ -210,24 +216,30 @@ def _planned_p1() -> int:
     if state is None:
         return 0
     plan = state.layers.get("L3") or {}
-    if int((plan.get("counts") or {}).get("to_fix") or 0) <= 0:
+    to_fix = int((plan.get("counts") or {}).get("to_fix") or 0)
+    current_tree = getattr(pipeline_state, "current_tree", None)  # absent before 0.11
+    edited = state.fixes_applied > 0 or (
+        current_tree is not None and current_tree(state, ".") != state.base_tree
+    )
+    if to_fix <= 0 and not edited:
         return 0
-    ledger = Path(".claude/audits/AUDITOR_SCORECARD.jsonl")
-    try:
-        lines = ledger.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return 0
-    count = 0
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if (isinstance(row, dict) and str(row.get("run_id")) == state.run_id
-                and row.get("verdict") == "CONFIRMED"
-                and str(row.get("priority", "")).upper() == "P1"):
-            count += 1
-    return count
+    reader = getattr(pipeline_state, "ledger_rows", None)
+    if reader is None:
+        raise ValueError("the installed cca_checks cannot read the ledger; reinstall it")
+    verified = state.layers.get("L2.5") or {}
+    confirmed = int((verified.get("counts") or {}).get("confirmed") or 0)
+    rows, _ = reader(".")
+    mine = [row for row in rows if str(row.get("run_id")) == state.run_id
+            and "verdict" in row and str(row.get("verdict")) == "CONFIRMED"]
+    if state.tier != "FAST" and len(mine) < confirmed:
+        # L2.5 checked these rows against its counts, so fewer now means the ledger was
+        # lost, emptied or rewritten; an absence of rows is not an absence of P1s.
+        raise ValueError(
+            f"the disposition ledger {pipeline_state.LEDGER} holds {len(mine)} CONFIRMED "
+            f"row(s) for run {state.run_id} but L2.5 confirmed {confirmed}; the zero-proof "
+            "claim cannot be checked"
+        )
+    return sum(1 for row in mine if str(row.get("priority", "")).upper() == "P1")
 
 
 def _record(status: str, detail: str) -> int:
@@ -280,11 +292,16 @@ def main() -> int:
         except ValueError as exc:
             print(f"cannot record L5.6: {exc}", file=sys.stderr)
             return 2
-        if a.parked < 0 or planned > a.parked:
+        if a.parked < 0 or a.parked > planned:
+            print(f"cannot record L5.6: --parked {a.parked} is not a count of parked P1s; "
+                  f"the ledger holds {planned} CONFIRMED P1 finding(s) for this run",
+                  file=sys.stderr)
+            return 2
+        if planned > a.parked:
             print(f"cannot record L5.6 with zero proofs: the disposition ledger holds "
-                  f"{planned} CONFIRMED P1 finding(s) for this run, L3 planned fixes, and "
-                  f"{max(a.parked, 0)} were declared parked; each fixed P1 needs a RED "
-                  "proof (verify --proof FIX-ID=NODEID --record)", file=sys.stderr)
+                  f"{planned} CONFIRMED P1 finding(s) for this run and fixes landed, and "
+                  f"{a.parked} were declared parked; each fixed P1 needs a RED proof "
+                  "(verify --proof FIX-ID=NODEID --record)", file=sys.stderr)
             return 2
         if a.parked:
             return _record("done", f"0 proofs claimed; {a.parked} CONFIRMED P1 parked")

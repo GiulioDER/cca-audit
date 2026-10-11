@@ -200,14 +200,19 @@ def _fingerprint(root, *, staged: bool) -> tuple[str | None, bool | None]:
         return None, None
     deadline = time.monotonic() + FINGERPRINT_TIMEOUT_S
 
-    def run(*args, top=None, env=None) -> str:
+    def run(*args, top=None, env=None, raw=False) -> str:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise subprocess.TimeoutExpired([git, *args], FINGERPRINT_TIMEOUT_S)
-        return subprocess.run(
+        out = subprocess.run(
             [git, "-C", top or root, *args], capture_output=True, check=True,
             timeout=max(0.1, remaining), env=env,
-        ).stdout.decode("utf-8", "replace").strip()
+        ).stdout.decode("utf-8", "replace")
+        # raw: a `-z` path list, where stripping would eat a leading space of a path.
+        return out if raw else out.strip()
+
+    def paths(*args, top, env) -> set[str]:
+        return {p for p in run(*args, top=top, env=env, raw=True).split("\0") if p}
 
     try:
         top = os.path.realpath(run("rev-parse", "--show-toplevel"))
@@ -232,12 +237,20 @@ def _fingerprint(root, *, staged: bool) -> tuple[str | None, bool | None]:
             staged_ok = None
             if staged:
                 # Read from the copy BEFORE `add -A` rewrites it. A diff pathspec may
-                # exclude an ignored path (only `git add` refuses that).
+                # exclude an ignored path (only `git add` refuses that). --no-renames:
+                # rename pairing is never used here and is quadratic inside the deadline,
+                # and without it a rename lists its source as a deletion.
                 scope = ("--", ".", f":(exclude,literal){audits}")
-                cached = run("diff", "--cached", "--name-only", "-z", *scope, top=top, env=env)
-                dirty = run("diff", "--name-only", "-z", *scope, top=top, env=env)
-                staged_ok = not ({p for p in cached.split("\0") if p}
-                                 & {p for p in dirty.split("\0") if p})
+                names = ("--no-renames", "--name-only", "-z")
+                cached = paths("diff", "--cached", *names, *scope, top=top, env=env)
+                dirty = paths("diff", *names, *scope, top=top, env=env)
+                # A staged deletion of a file still on disk is untracked to the index, so
+                # it is in no `dirty` list; yet the commit drops a file the verdicts saw.
+                gone = paths("diff", "--cached", "--diff-filter=D", *names, *scope,
+                             top=top, env=env)
+                staged_ok = not (cached & dirty) and not any(
+                    os.path.lexists(os.path.join(top, p)) for p in gone
+                )
             run("add", "-A", "--", ".", top=top, env=env)
             # Dropped from the index afterwards rather than excluded by pathspec: an
             # exclude pathspec naming an ignored path makes `git add` exit 1, and
@@ -417,15 +430,17 @@ def next_owed(state: dict, tree: str | None) -> str | None:
 
 
 def _fixes_planned(state: dict) -> bool:
-    """L3 planned at least one fix and no L4 was recorded after it."""
-    layers = _layers(state)
-    plan, done = layers.get("L3"), layers.get("L4")
+    """L3 planned at least one fix.
+
+    Whatever L4 later reports: an `L4 --fixes 0` used to cancel the plan, so L5 to L5.6
+    dropped out and L6 followed L4 directly. A plan whose fixes were all parked still
+    passes through L5.6, where `--no-proofs --parked` accounts for them.
+    """
+    plan = _layers(state).get("L3")
     if not isinstance(plan, dict):
         return False
     counts = plan.get("counts")
-    if _int(counts.get("to_fix") if isinstance(counts, dict) else 0) <= 0:
-        return False
-    return not isinstance(done, dict) or _int(done.get("seq")) < _int(plan.get("seq"))
+    return _int(counts.get("to_fix") if isinstance(counts, dict) else 0) > 0
 
 
 def legacy_commit_reasons(state: dict) -> list[str]:

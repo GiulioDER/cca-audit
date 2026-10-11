@@ -210,9 +210,21 @@ _VERDICT_COUNTS = {"CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp",
                    "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate"}
 
 
+LEDGER = ".claude/audits/AUDITOR_SCORECARD.jsonl"
+
+
+def ledger_path(root: str | pathlib.Path = ".") -> pathlib.Path:
+    return pathlib.Path(root) / LEDGER
+
+
+def ledger_rows(root: str | pathlib.Path = ".") -> tuple[list[dict], int]:
+    """(rows of the disposition ledger, malformed lines); the one reader every gate uses."""
+    return _ledger(root)
+
+
 def _ledger(root) -> tuple[list[dict], int]:
     """(rows of the disposition ledger, malformed lines)."""
-    path = pathlib.Path(root) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
+    path = ledger_path(root)
     rows: list[dict] = []
     malformed = 0
     try:

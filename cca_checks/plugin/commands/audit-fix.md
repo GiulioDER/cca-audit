@@ -600,6 +600,9 @@ append one row per verified finding to `.claude/audits/AUDITOR_SCORECARD.jsonl`:
      "high_stakes": <bool>, "priority": "P1|P2|P3", "verify_source": "llm|tool",
      "verdict": "CONFIRMED|FALSE_POSITIVE|DUPLICATE|UNCERTAIN", "fix_id": <FIX-id or null>}
 
+`priority` is the canonical priority after the Step 2 re-map, not the auditor's proposal: Step 5.6
+counts the CONFIRMED P1 rows to decide whether `verify --no-proofs` may record L5.6.
+
 This is the raw material for the Step 2.6 scorecard. It records only the L2.5 **verdict**; the
 fixed/parked **outcome** is appended as a separate row after Step 6 (kept append-only, joined by
 `run_id`+`fix_id`). `run_id` is the `run_id` printed by `pipeline start`. `pipeline record L2.5`
@@ -820,8 +823,11 @@ failures mean the test never reached the code under test.
 
 No CONFIRMED P1 in this run? Record that instead: `python "$TC" verify --no-proofs --record`. The
 tool checks the claim against the disposition ledger and refuses while the run has CONFIRMED P1s
-and L3 planned fixes. If every CONFIRMED P1 was parked (edit reverted, `UNCERTAIN → human`), say
-so: `verify --no-proofs --parked <N> --record`; the count is written into L5.6 for the architect.
+and fixed anything (L3 planned fixes, L4 recorded some, or the tree changed), and refuses when the
+ledger is missing or short of L2.5's confirmed rows on a STANDARD or DEEP run. If every CONFIRMED P1 was
+parked (edit reverted, `UNCERTAIN → human`), say so: `verify --no-proofs --parked <N> --record`. N
+cannot exceed the ledger's CONFIRMED P1 count; it is written into L5.6, and the architect checks it
+against FIX_JOURNAL.
 
 Every CONFIRMED P1 must carry at least one `RED` proof. A P1 whose only proof is `TAUTOLOGICAL` or
 `INCONCLUSIVE` is an orphan P1 at the architect gate.
@@ -893,9 +899,14 @@ python -m cca_checks pipeline close
 
 Stage and commit as separate commands (`git add <files>`, then `git commit`). While the run is open
 the guard refuses a commit chained with other commands, because it judges the tree before the
-command runs, and a commit that stages a file whose content differs from its working tree copy,
-because the commit ships the index while the verdicts judged the working tree. Staging only some of
-the judged files is allowed.
+command runs; a commit that stages a file whose content differs from its working tree copy, or
+deletes a file still on disk, because the commit ships the index while the verdicts judged the
+working tree; and a commit that names another index or repository (`GIT_INDEX_FILE`,
+`--git-dir`). Staging only some of the judged files is allowed. Never put a command substitution
+in the commit command other than a quoted heredoc message: the guard does not inspect substitution,
+so an edit inside one would be committed unjudged. Pass a multi-line message as
+`-m "$(cat <<'EOF' ... EOF)"` or `-F <file>` with the file outside the repository: a message file
+inside the repository is an edit to the tree.
 
 If `git commit` is refused here, the guard is doing its job: read the layers it names, run them, and
 record them. Do not work around the refusal by deleting `.claude/audits/run-state.json`. If the run
