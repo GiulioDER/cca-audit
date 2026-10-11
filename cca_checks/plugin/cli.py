@@ -17,8 +17,8 @@ import argparse
 import sys
 from importlib import metadata
 
-from . import default_codex_skills_root, hook_snippet, install_codex
-from . import install as install_plugin
+from .installer import default_codex_skills_root, hook_snippet, install_codex
+from .installer import install as install_plugin
 
 
 def _version() -> str:
