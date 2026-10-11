@@ -84,3 +84,10 @@ commit as readable when it had a P1/P2 heading with bullets or a known ID under 
 it could not see that some of those collapse into earlier commits, and it counted commits whose
 only bullets sit under headings the skip list now excludes. The 29 prose-only commits stay
 unparsed by design. The sample judgement is mine, as the confounds section said.
+
+## Post hoc, after fixing both defects (2026-10-11, `1255ba1`; not pre-registered)
+
+Same inputs and script. Rows 643; 0 rows of the first run lost (was 3); the `DECLINED:` section
+no longer counts (topic rows 51 to 47); parsed share unchanged at 69 of 107. 0 proved unbound,
+1 bound. These numbers were measured after seeing the defects they test, so they confirm the two
+fixes and nothing more; the sample of prediction 3 was not redrawn.
