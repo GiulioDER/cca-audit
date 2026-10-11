@@ -353,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
     base = pathlib.Path(read_cwd(raw) or os.getcwd())
     try:
         directories = commit_directories(command, base)
-    except Exception:  # noqa: BLE001 - an unforeseen parse failure keeps the base directory
+    except Exception:  # noqa: BLE001 (an unforeseen parse failure keeps the base directory)
         directories = [base]
     roots: list[pathlib.Path] = []
     for directory in directories:

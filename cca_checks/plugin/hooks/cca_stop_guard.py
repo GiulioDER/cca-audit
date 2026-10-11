@@ -107,7 +107,7 @@ def _decide(raw: str) -> int:
         return 0
     try:
         candidates += [r for r in core.registered_roots() if core._inside(str(r), str(cwd))]
-    except Exception as exc:  # noqa: BLE001 - the registry is a lookup aid, never a gate
+    except Exception as exc:  # noqa: BLE001 (the registry is a lookup aid, never a gate)
         print(
             f"CCA stop guard: the run registry could not be read ({exc.__class__.__name__}: "
             f"{exc}); runs below {cwd} were not checked",

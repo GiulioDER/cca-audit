@@ -111,7 +111,7 @@ def _stale_copy_warnings(root) -> list[str]:
     try:
         from .plugin import stale_copies
         return stale_copies(root)
-    except Exception as exc:  # noqa: BLE001 - a warning about warnings must not stop a run
+    except Exception as exc:  # noqa: BLE001 (a warning about warnings must not stop a run)
         return [f"could not compare the installed pipeline files with the package ({exc})"]
 
 

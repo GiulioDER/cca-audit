@@ -293,7 +293,7 @@ def _registry(action: str, *args) -> None:
     """
     try:
         getattr(core, action)(*args)
-    except Exception as exc:  # noqa: BLE001 - see the docstring
+    except Exception as exc:  # noqa: BLE001 (see the docstring)
         # Not `core.registry_path()` here: it is what may have failed (no home directory).
         print(
             f"warning: could not update the CCA run registry ({exc.__class__.__name__}: "
