@@ -43,7 +43,10 @@ Map Claude specific terms in the canonical pipeline as follows:
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
 Codex must still write the `--output` file that every L1, L2, L2.5, L3 and L4 record requires,
-under `.claude/audits/`, even when it omits the rest of the trail.
+under `.claude/audits/`, even when it omits the rest of the trail. On STANDARD and DEEP it must
+also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_SCORECARD.jsonl`,
+carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
+Step 2.6 scorecard reads them. Neither is optional trail.
 
 Resolve the selected skill directory from this `SKILL.md` path. Use absolute paths when invoking
 the bundled checker scripts. Never assume the current repository has a `.claude/` directory.
@@ -138,6 +141,12 @@ the run on the record with `python -m cca_checks pipeline abort --reason "<why>"
 is the instruction to close the run, every layer is done: run `python -m cca_checks pipeline close`,
 then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
 same check without relying on the orchestrator to call it.
+
+The commit guard does not run in Codex either, so the Step 7 refusals in `references/pipeline.md`
+are yours to apply: stage by path in one command and run `git commit` alone in the next, with no
+other command, substitution or index override in it, and before committing confirm that
+`git diff --cached --name-only` and `git diff --name-only` share no path and that no staged deletion
+still has its file on disk. `pipeline status` does not make those checks.
 
 ## Report completion
 

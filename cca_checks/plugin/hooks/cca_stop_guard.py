@@ -111,8 +111,12 @@ def _decide(raw: str) -> int:
     if isinstance(gate, dict) and str(gate.get("detail", "")).strip().upper() == "BLOCKED":
         return 0
 
-    reasons = core.outstanding(state, core.fingerprint(root))
     refusals = int(state.get("stop_refusals", 0) or 0)
+    if refusals >= core.STOP_REFUSAL_CAP and state.get("stop_logged"):
+        # Cap reached and already logged: the answer is "allow" whatever is owed, so
+        # skip the fingerprint (up to FINGERPRINT_TIMEOUT_S on every turn end).
+        return 0
+    reasons = core.outstanding(state, core.fingerprint(root))
     if refusals >= core.STOP_REFUSAL_CAP:
         if not state.get("stop_logged"):
             summary = "; ".join(reasons) or "complete but not closed"

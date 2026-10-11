@@ -36,6 +36,22 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.
+- Upgrading from 0.10.x: run `cca-audit install` first, so `.claude/hooks/` holds `cca_gate_core.py` and `cca_stop_guard.py`, and only then replace BOTH hook entries in settings.json with the output of `cca-audit install --print-hook`. A Stop hook registered before its script is installed exits 2, which refuses every turn end. The commit guard's timeout rose from 15 s to 60 s: it now fingerprints the tree for up to 30 s, and a hook that times out lets the commit through. `install` warns about a guard entry still registered below 60 s, and `--print-hook` warns when the hook files are missing.
+
+### Fixed in the pre-release audit
+- `record L2.5` takes `--unverified <N>` for findings Step 2.5 passes on without a verdict (P3, and P2 on FAST); verdicts plus unverified must equal L2's `--unique`. Before, any run with a P3 was refused at L2.5. On STANDARD and DEEP the ledger is tallied per verdict, and a row with an unknown verdict is refused.
+- An L3 that planned fixes owes L4 onward before the tree changes; L6 could follow L3 directly and the run close COMPLETE with its fixes never applied.
+- A fix verdict cannot be shown current when the tree cannot be fingerprinted: `record` refuses L5 to L6 then, and a stored or current unknown fingerprint is stale. An unknown compared equal to an unknown, so every verdict read fresh after any edit.
+- The commit guard refuses a commit chained with other commands (`; && || | &` or a newline outside quotes), since it judges the tree before the command runs, and a commit that stages a file whose content differs from its working tree copy, since the commit ships the index. Both checks share the fingerprint's single 30 s deadline.
+- `cca_tautology_check.py verify --no-proofs --record` refuses when the ledger holds a CONFIRMED P1 for the run and L3 planned fixes, unless `--parked <N>` declares that many CONFIRMED P1s parked; the count is written into L5.6.
+- `pipeline start` refuses a run id already used by an earlier run's outputs or ledger rows.
+- `pipeline record` and `pipeline status` fingerprint the tree once per command; the Stop hook skips the fingerprint once its refusals are spent and logged.
+- Follow-up audit of those fixes: the commit guard's command scan models `#` comments (literal inside `${...}` and `((...))`; a comment holding a separator or a substitution is refused), and refuses an unterminated quote; it refuses a commit that names another index or repository; the staged check also refuses a staged deletion of a file still on disk, does not strip `-z` path lists, and skips rename detection. An L3 that planned fixes keeps L4 onward owed after `L4 --fixes 0`. `--no-proofs` is checked whenever fixes landed, refuses when the ledger is missing or short of L2.5's confirmed rows on a STANDARD or DEEP run, and bounds `--parked` by the ledger's CONFIRMED P1 count.
+
+### Known gaps (parked to a human by the follow-up audit)
+- The commit guard does not inspect command substitution: `git commit -am "$(<edit>)msg"` runs the edit before git and commits it unjudged. Refusing substitution while allowing the heredoc message form took three repair cycles and was parked; the last attempt was defeated on Git Bash, which drops carriage returns before parsing. Suggested start: refuse any command holding `\r`, then refuse substitution except an exact quoted-heredoc message.
+- The commit guard reads `$'...'` as a plain single quote, so `: $'\''; <edit>; git commit -am x #'` runs the edit unjudged (the trailing `'` balances the quote count); a spelling with an odd number of quotes is refused as an unterminated quote. Modelling the escapes was parked after three repair cycles, because bash lexes `$$'` as `$$` followed by a plain quote and the attempt hid edits HEAD refused. Suggested start: refuse `\'` inside `$'...'`.
+- `--parked N` can over-claim up to the ledger's CONFIRMED P1 count; the count is written into L5.6 for the architect. A tighter bound needs pinned L3/L4 output shapes.
 
 ### Fixed
 - The Codex skill keeps at most six subagents open, Codex's default `agents.max_threads`. A finished subagent holds its slot until `close_agent`, so the skill now records and closes each one before spawning the next queued role. A DEEP run used to launch every auditor at once and die on `agent thread limit reached`.
