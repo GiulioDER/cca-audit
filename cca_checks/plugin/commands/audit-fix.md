@@ -1049,8 +1049,11 @@ python -m cca_checks pipeline record L1 --detail "loaded <N> from <run_id>" \
 ```
 
 **D.3 Step 2 (L2).** Re-anchor each finding to its current file and line: the parent's own fixes,
-and anything committed since, may have moved it. Keep the parent's `priority`. Merge duplicates by
-the usual key. Record as Step 2 says.
+and anything committed since, may have moved it. Keep every finding under its own id with the
+parent's `priority`, and merge nothing: when two findings now share Step 2's dedup key, both stay,
+and D.4 gives the later one the verdict `DUPLICATE`. Record as Step 2 says. After a run id parent,
+`record` refuses an L2 whose ids are not exactly the parent's pool, or that changes a priority; a
+`commit:<sha>` parent left no stored pool, so nothing is compared.
 
 **D.4 Step 2.5 (L2.5).** One `fp-check` over every finding, P2 and P3 alike, in MODE=DEFERRED,
 given the parent's `base_commit` and `commit` (`pipeline deferred` printed the run id; both are in
@@ -1074,10 +1077,15 @@ On the commit-message fallback there is no `summary.json`. The parent's commit f
 is the `<sha>` named in `--from commit:<sha>`, and the scope check (b″) is not run: give `fp-check`
 no `base_commit`, so it reports that the check could not run.
 
+A finding D.3 kept beside an earlier one with the same dedup key is not sent to `fp-check`: it
+gets the verdict `DUPLICATE`, with the id it duplicates as its evidence. So in a deferred run the
+L2.5 file gives every finding one of CONFIRMED, FALSE_POSITIVE, DUPLICATE, STALE or UNCERTAIN.
+
 Append one ledger row per finding (Step 2.5b), carrying this run's `run_id` and the ORIGINAL
 finding's `auditor` and `category`, so a deferred finding confirmed now credits the auditor that
-raised it. A STALE finding's row carries `"verdict": "STALE"`, never FALSE_POSITIVE. Record with
-`--stale <S>` and no `--unverified`: a deferred run cannot defer, and `record` refuses it.
+raised it. A STALE finding's row carries `"verdict": "STALE"`, never FALSE_POSITIVE, and a
+DUPLICATE finding's row carries `"verdict": "DUPLICATE"`. Record with `--duplicate <D>` and
+`--stale <S>`, and no `--unverified`: a deferred run cannot defer, and `record` refuses it.
 
 **D.5 Steps 2.6 to 5.5** run as written above. At Step 3 every CONFIRMED finding is planned;
 UNCERTAIN goes to a human.
@@ -1095,8 +1103,8 @@ fix(<scope>): N deferred fixes from CCA (<TIER> tier, parent <run_id>)
 Fixed:
 - <id>: <file:line>, <one line what changed>
 
-Not fixed (stale, false positive, uncertain):
-- <id>: STALE | FALSE_POSITIVE | UNCERTAIN, <one line why>
+Not fixed (stale, false positive, duplicate, uncertain):
+- <id>: STALE | FALSE_POSITIVE | DUPLICATE | UNCERTAIN, <one line why>
 
 Audit: deferred pass over <P> findings of run <run_id> → V confirmed → Z fixed. Regression diff:
 clean. Architect: APPROVED.
@@ -1108,7 +1116,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 The `Source:` line is used only on the commit-message fallback path of D.1; leave it out otherwise.
 Keep the two headings as written: the bug ledger (`python -m cca_checks bugs`) reads every bullet
 naming a finding id under `Fixed:` as a fix, and skips the section whose heading says `not fixed`.
-A STALE or FALSE_POSITIVE bullet under any other heading would be read as a fixed bug.
+A STALE, FALSE_POSITIVE or DUPLICATE bullet under any other heading would be read as a fixed bug.
 
 `pipeline close` records the parent, which takes its pool: it is never offered again. A deferred
 run offers no further pass.

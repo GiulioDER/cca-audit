@@ -614,17 +614,63 @@ def _stored_l25(state: PipelineState, root, l2_ids: list) -> dict[str, str]:
         ) from exc
 
 
+def _held_to_pool(state: PipelineState, findings: list, root) -> None:
+    """Refuse a DEFERRED run's L2 unless it holds exactly its parent's pool, at its priorities.
+
+    The parent's pool is consumed when this run closes, so an L2 that dropped a pool finding
+    would lose it for good, and one that added a finding, or lowered a priority, would carry
+    into the run what the parent never deferred. The pool and the priorities are read from the
+    parent's summary and its stored L2 file, not from this run's L1. Duplicates are therefore
+    not merged here: each keeps its id and gets the DUPLICATE verdict at L2.5.
+    """
+    summaries, _ = deferred.load_summaries(root)
+    summary = next((s for s in summaries if s["run_id"] == state.parent), None)
+    if summary is None:
+        raise layer_outputs.ShapeError(
+            f"the parent run {state.parent!r} has no readable summary under "
+            ".claude/audits/runs/, so this deferred run's L2 cannot be checked against its pool; "
+            "restore that summary, or abort this run"
+        )
+    try:
+        pool = {f["id"]: f.get("priority") for f in deferred.findings_for(root, summary)}
+    except LookupError as exc:
+        raise layer_outputs.ShapeError(
+            f"the pool of parent run {state.parent} cannot be loaded ({exc})"
+        ) from exc
+    ids = [f["id"] for f in findings]
+    missing = [i for i in pool if i not in ids]
+    extra = [i for i in ids if i not in pool]
+    if missing or extra:
+        wrong = ([f"lacks {', '.join(missing)}"] if missing else []) + \
+                ([f"adds {', '.join(extra)}"] if extra else [])
+        raise layer_outputs.ShapeError(
+            f"a deferred run's L2 holds exactly the pool of run {state.parent}, but it "
+            f"{' and '.join(wrong)}; re-anchor every pool finding under its own id, merging "
+            "none (a duplicate gets the DUPLICATE verdict at L2.5) and adding none"
+        )
+    changed = [f"{f['id']} ({f['priority']}, the parent's {pool.get(f['id'])})"
+               for f in findings if f["priority"] != pool.get(f["id"])]
+    if changed:
+        raise layer_outputs.ShapeError(
+            "a deferred run's L2 keeps the parent's priorities, but it changes "
+            f"{', '.join(changed)}"
+        )
+
+
 def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, root) -> None:
     """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files.
 
     Also the one place a deferral is held to its priority: a P1 is never passed on
     unverified (L2.5) or left unfixed (L3), and a P2 may only be DEFERRED on FAST, the tier
-    that does not verify its P2s.
+    that does not verify its P2s. A DEFERRED run's L2 is held to its parent's pool (see
+    `_held_to_pool`), unless the parent is a `commit:<sha>`, which left no stored pool.
     """
     value = json.loads(data)
     try:
         if layer == "L2":
-            layer_outputs.l2_findings(value, counts["unique"])
+            findings = layer_outputs.l2_findings(value, counts["unique"])
+            if state.mode == "DEFERRED" and not (state.parent or "").startswith("commit:"):
+                _held_to_pool(state, findings, root)
         elif layer == "L2.5":
             l2 = _stored_l2(state, root)
             verdicts = layer_outputs.l25_verdicts(value, counts, [r["id"] for r in l2])

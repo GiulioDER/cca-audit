@@ -421,7 +421,7 @@ def test_step_0_matches_deferred_only_as_a_whole_argument():
     assert "a whole argument, never part of a path" in step0
 
 
-_NOT_FIXED = ("STALE", "FALSE_POSITIVE", "UNCERTAIN")
+_NOT_FIXED = ("STALE", "FALSE_POSITIVE", "DUPLICATE", "UNCERTAIN")
 
 
 def _deferred_commit_example() -> tuple[str, str, set[str]]:
@@ -465,7 +465,9 @@ def test_the_deferred_commit_reads_as_its_fixes_only():
     Red 2026-10-11: the old D.8 template wording (bullets `- <id> FIXED <file:line>` and
     `- <id> STALE | FALSE_POSITIVE | UNCERTAIN <one line why>` with no heading) restored in
     audit-fix.md; failed at `assert found == fixed` ({'CODE-1', 'CODE-2', 'CODE-3'} against
-    {'CODE-1'}: the STALE and FALSE_POSITIVE bullets were read as fixes).
+    {'CODE-1'}: the STALE and FALSE_POSITIVE bullets were read as fixes). Re-run 2026-10-11 after
+    DUPLICATE joined the not-fixed bullet (I1): the same old wording, DUPLICATE included; failed
+    at the same assert ({'CODE-1', 'CODE-2', 'CODE-3', 'CODE-4'} against {'CODE-1'}).
     """
     from cca_checks.bugs import parse
 
@@ -474,3 +476,22 @@ def test_the_deferred_commit_reads_as_its_fixes_only():
     assert fixed
     found = {bullet.finding_id for bullet in parse.parse_message(body)}
     assert found == fixed
+
+
+def test_a_deferred_run_keeps_duplicates_for_l2_5_instead_of_merging_them():
+    """`record` holds a deferred run's L2 to the parent's pool, id for id, so D.3 must not merge
+    duplicates (that drops an id and is refused); D.4 gives the later one DUPLICATE instead, and
+    records it with `--duplicate`.
+
+    Red 2026-10-11: the D.3 and D.4 text before the fix (D.3 "Merge duplicates by the usual key",
+    D.4 records with `--stale <S>` only); failed at `assert "Merge duplicates" not in d3`. Every
+    later assertion, D.3's and D.4's, was also seen False on that same text.
+    """
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    d3 = " ".join(second[second.find("**D.3 Step 2"):second.find("**D.4 Step 2.5")].split())
+    assert "Merge duplicates" not in d3
+    assert "merge nothing" in d3 and "`DUPLICATE`" in d3
+    assert "ids are not exactly the parent's pool" in d3
+    d4 = " ".join(second[second.find("**D.4 Step 2.5"):second.find("**D.5 Steps")].split())
+    assert "CONFIRMED, FALSE_POSITIVE, DUPLICATE, STALE or UNCERTAIN" in d4
+    assert '`"verdict": "DUPLICATE"`' in d4 and "`--duplicate <D>`" in d4

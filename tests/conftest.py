@@ -82,21 +82,34 @@ def findings_output(root, n=0, *, priorities=None) -> str:
     return write_output(root, rows)
 
 
-def verdicts_output(root, **counts) -> str:
+def verdicts_output(root, *, ids=None, **counts) -> str:
     """An L2.5 file whose verdicts match `counts`, keyed like the record flags
-    (confirmed, fp, uncertain, duplicate, unverified, stale); `unverified` ids get DEFERRED."""
-    rows, i = [], 1
+    (confirmed, fp, uncertain, duplicate, unverified, stale); `unverified` ids get DEFERRED.
+    The ids are F-1, F-2, ... in that order, or taken in order from `ids` when given."""
+    rows, i = [], 0
     for key, verdict in _VERDICT_ORDER:
         for _ in range(counts.get(key, 0)):
-            rows.append({"id": finding_id(i), "verdict": verdict})
+            rows.append({"id": ids[i] if ids is not None else finding_id(i + 1),
+                         "verdict": verdict})
             i += 1
     return write_output(root, rows)
 
 
-def plan_output(root, *, to_fix=0, deferred=0) -> str:
-    """An L3 file planning the first `to_fix` CONFIRMED ids and deferring the next `deferred`."""
-    ids = [finding_id(i) for i in range(1, to_fix + deferred + 1)]
-    return write_output(root, {"to_fix": ids[:to_fix], "deferred": ids[to_fix:]})
+def plan_output(root, *, to_fix=0, deferred=0, ids=None) -> str:
+    """An L3 file planning the first `to_fix` CONFIRMED ids and deferring the next `deferred`;
+    the ids are F-1, F-2, ... or, when given, the first ones of `ids`."""
+    count = to_fix + deferred
+    chosen = list(ids)[:count] if ids is not None else [finding_id(i) for i in range(1, count + 1)]
+    return write_output(root, {"to_fix": chosen[:to_fix], "deferred": chosen[to_fix:]})
+
+
+def pool_output(repo, parent="parent") -> tuple[str, list[str]]:
+    """An L2 file holding exactly the pool of the closed run `parent`, its stored L2 objects in
+    pool order, as a DEFERRED run's L2 must; returns (path, pool ids)."""
+    run = pathlib.Path(repo) / ".claude" / "audits" / "runs" / parent
+    pool = json.loads((run / "summary.json").read_text(encoding="utf-8"))["pool"]
+    stored = {f["id"]: f for f in json.loads((run / "L2.json").read_bytes())}
+    return write_output(repo, [stored[i] for i in pool]), list(pool)
 
 
 def append_ledger(repo, run_id, n, *, outcome_rows=0, outcome_result="fixed",

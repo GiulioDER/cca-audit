@@ -21,6 +21,7 @@ from conftest import (
     finding_id,
     findings_output,
     plan_output,
+    pool_output,
     tree_of,
     verdicts_output,
     write_output,
@@ -1154,16 +1155,23 @@ def _write_summary_file(repo, run_id, **over):
 
 
 def _child_to_l5(repo, parent, *, run_id="child", n=3):
+    """A DEFERRED run through L5 that confirms and plans every finding. Its L2 is the parent's
+    pool (a run id parent holds it to that), or `n` P3 findings after a `commit:<sha>` parent."""
     ps.start("STANDARD", mode="DEFERRED", parent=parent, run_id=run_id, root=repo)
     ps.record("L1", output=write_output(repo), root=repo)
-    p3 = {finding_id(i): "P3" for i in range(1, n + 1)}
-    ps.record("L2", counts={"unique": n}, output=findings_output(repo, n, priorities=p3),
-              root=repo)
+    if parent.startswith("commit:"):
+        ids = [finding_id(i) for i in range(1, n + 1)]
+        l2 = findings_output(repo, n, priorities=dict.fromkeys(ids, "P3"))
+    else:
+        l2, ids = pool_output(repo, parent)
+    n = len(ids)
+    ps.record("L2", counts={"unique": n}, output=l2, root=repo)
     append_ledger(repo, run_id, n)
     ps.record("L2.5", counts={"confirmed": n, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=verdicts_output(repo, confirmed=n), root=repo)
+              output=verdicts_output(repo, confirmed=n, ids=ids), root=repo)
     ps.record("L2.6", detail="0 cells", source="tool", root=repo)
-    ps.record("L3", counts={"to_fix": n}, output=plan_output(repo, to_fix=n), root=repo)
+    ps.record("L3", counts={"to_fix": n}, output=plan_output(repo, to_fix=n, ids=ids),
+              root=repo)
     app = repo / "app.py"
     app.write_text(app.read_text(encoding="utf-8") + f"# {run_id}\n", encoding="utf-8")
     ps.record("L4", fixes=n, output=write_output(repo), root=repo)
@@ -1321,7 +1329,8 @@ def test_a_commit_is_taken_by_one_deferred_run_only(git_repo):
 
     Red 2026-10-11: mutation `if child:` became `if False:` after the consumed_by call in the
     commit branch of _deferred_parent; failed at the second start's pytest.raises (DID NOT
-    RAISE RecordRefused).
+    RAISE RecordRefused). Re-run 2026-10-11 after `_child_to_l5` was split by parent kind
+    (I1): the same mutation, the same failure.
     """
     head = _head(git_repo)
     _child_to_l5(git_repo, f"commit:{head}")
@@ -1335,6 +1344,9 @@ def test_a_commit_is_taken_by_one_deferred_run_only(git_repo):
 def test_a_deferred_run_cannot_defer(git_repo):
     """A DEFERRED run may not defer, at L2.5 or at L3; STALE is still allowed at L2.5.
 
+    The parent deferred F-3 (P3) at L2.5 and F-2 (a confirmed P2) at L3, so the child's L2 is
+    that pool, and the finding it tries to pass on unverified is the P2.
+
     Red 2026-10-11: mutation `if n_deferred and state.mode == "DEFERRED":` became `if False:`
     in the L2.5 branch of _check_counts; failed at the first pytest.raises (the regex did not
     match: the reason was "L2.5 defers F-2 (P2)", the shape rule). Also: the same mutation in
@@ -1342,24 +1354,29 @@ def test_a_deferred_run_cannot_defer(git_repo):
     (key renamed to unverified at the master merge)
     The second ledger row is a STALE row since the master merge, which tallies the ledger per
     verdict: a second CONFIRMED row against `--stale 1` would now be refused.
+    Re-run 2026-10-11 after the child's L2 became the parent's pool (I1): both mutations, the
+    same two failures, the first again naming "L2.5 defers F-2 (P2)".
     """
-    closed_parent(git_repo)
+    closed_parent(git_repo, p2_deferred=1, p3=1)
     ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    l2, ids = pool_output(git_repo)
+    assert ids == ["F-3", "F-2"]
+    ps.record("L2", counts={"unique": 2}, output=l2, root=git_repo)
     append_ledger(git_repo, "c", 1)
     with pytest.raises(ps.RecordRefused, match="cannot defer"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                                   "unverified": 1},
-                  output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
+                  output=verdicts_output(git_repo, confirmed=1, unverified=1, ids=ids),
+                  root=git_repo)
     append_ledger(git_repo, "c", 1, verdict="STALE")
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                               "stale": 1},
-              output=verdicts_output(git_repo, confirmed=1, stale=1), root=git_repo)
+              output=verdicts_output(git_repo, confirmed=1, stale=1, ids=ids), root=git_repo)
     ps.record("L2.6", detail="0 cells", source="tool", root=git_repo)
     with pytest.raises(ps.RecordRefused, match="cannot defer"):
         ps.record("L3", counts={"to_fix": 0, "deferred": 1},
-                  output=plan_output(git_repo, to_fix=0, deferred=1), root=git_repo)
+                  output=plan_output(git_repo, to_fix=0, deferred=1, ids=ids), root=git_repo)
 
 
 def test_a_deferred_runs_stale_rows_tally_against_stale(git_repo):
@@ -1368,17 +1385,19 @@ def test_a_deferred_runs_stale_rows_tally_against_stale(git_repo):
 
     Red 2026-10-11: mutation `"STALE": "stale"` dropped from _VERDICT_COUNTS; failed at the
     L2.5 record (uncaught RecordRefused: the disposition ledger for run c disagrees with the
-    L2.5 counts (unknown verdict 'STALE')).
+    L2.5 counts (unknown verdict 'STALE')). Re-run 2026-10-11 after the child's L2 became the
+    parent's pool (I1): the same mutation, the same failure.
     """
-    closed_parent(git_repo)
+    closed_parent(git_repo, p3=2)
     ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    l2, ids = pool_output(git_repo)
+    ps.record("L2", counts={"unique": 2}, output=l2, root=git_repo)
     append_ledger(git_repo, "c", 1)
     append_ledger(git_repo, "c", 1, verdict="STALE")
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                               "stale": 1},
-              output=verdicts_output(git_repo, confirmed=1, stale=1), root=git_repo)
+              output=verdicts_output(git_repo, confirmed=1, stale=1, ids=ids), root=git_repo)
     assert ps.load(git_repo).layers["L2.5"]["counts"]["stale"] == 1
 
 
@@ -1387,7 +1406,9 @@ def test_a_deferred_run_owes_every_fix_layer_until_l6_approves(git_repo):
 
     Red 2026-10-11: mutation `if state.get("mode") == "DEFERRED": return ("L1", "L2", "L2.5",
     "L3", "L5")` added as the first lines of cca_gate_core.required_layers; failed at
-    `assert {"L5.5", "L5.6", "L6"} <= owed` (owed was the empty set).
+    `assert {"L5.5", "L5.6", "L6"} <= owed` (owed was the empty set). Re-run 2026-10-11 after
+    `_child_to_l5` began recording the parent's pool as L2 (I1): the same mutation, the same
+    failure.
     """
     closed_parent(git_repo)
     state = _child_to_l5(git_repo, "parent")
@@ -1408,6 +1429,12 @@ def test_a_closed_deferred_run_takes_its_parents_pool(git_repo):
     the final pytest.raises (DID NOT RAISE RecordRefused). Also: mutation
     `parent=stored_parent` dropped from the PipelineState(...) call in start(); failed at
     `assert _summary_of(git_repo, "child")["parent"] == "parent"` (None == 'parent').
+    Re-run 2026-10-11 after `_child_to_l5` began recording the parent's pool as L2 (I1): the
+    consumed_by mutation fails as before. The dropped `parent=stored_parent` now fails earlier,
+    at the child's L2 record (uncaught RecordRefused: the parent run None has no readable
+    summary), because L2 is held to the pool of `state.parent`; the stored parent is pinned in
+    its own assertion by test_a_deferred_run_takes_its_parents_base_and_names_its_parent, which
+    that mutation still turns red there (None == 'parent').
     """
     closed_parent(git_repo)
     _child_to_l5(git_repo, "parent")
@@ -1454,7 +1481,9 @@ def test_a_taken_pool_cannot_be_taken_again_by_spelling_its_commit(git_repo):
 
     Red 2026-10-11: mutation `if owners:` became `if False:` in the commit branch of
     _deferred_parent; failed at the second pytest.raises (DID NOT RAISE RecordRefused); the
-    first, by run id, is the existing consumed_by rule and still raised.
+    first, by run id, is the existing consumed_by rule and still raised. Re-run 2026-10-11
+    after `_child_to_l5` began recording the parent's pool as L2 (I1): the same mutation, the
+    same failure.
     """
     closed_parent(git_repo)
     parent_commit = _summary_of(git_repo, "parent")["commit"]
@@ -1557,16 +1586,112 @@ def test_a_deferred_run_cannot_defer_a_p3_finding_either(git_repo):
 
     Red 2026-10-11: mutation `if n_deferred and state.mode == "DEFERRED":` became `if False:`
     in the L2.5 branch of _check_counts; failed at pytest.raises (DID NOT RAISE RecordRefused).
-    (key renamed to unverified at the master merge)
+    (key renamed to unverified at the master merge) Re-run 2026-10-11 after the child's L2
+    became the parent's pool, F-2 and F-3, both P3 (I1): the same mutation, the same failure.
     """
-    closed_parent(git_repo)
+    closed_parent(git_repo, p3=2)
     ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 2},
-              output=findings_output(git_repo, 2, priorities={"F-2": "P3"}), root=git_repo)
+    l2, ids = pool_output(git_repo)
+    ps.record("L2", counts={"unique": 2}, output=l2, root=git_repo)
     append_ledger(git_repo, "c", 1)
     with pytest.raises(ps.RecordRefused, match="cannot defer"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                                   "unverified": 1},
-                  output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
+                  output=verdicts_output(git_repo, confirmed=1, unverified=1, ids=ids),
+                  root=git_repo)
     assert "L2.5" not in ps.load(git_repo).layers
+
+
+# --- the final review: a deferred run is held to its parent's pool (I1) ---------------------
+
+def _pool_rows(repo, parent="parent") -> list[dict]:
+    """Copies of the parent's stored L2 objects for its pool, in pool order."""
+    run = repo / ".claude/audits/runs" / parent
+    pool = json.loads((run / "summary.json").read_text(encoding="utf-8"))["pool"]
+    stored = {f["id"]: f for f in json.loads((run / "L2.json").read_bytes())}
+    return [dict(stored[i]) for i in pool]
+
+
+@pytest.mark.parametrize("change, match", [
+    ("drop", r"lacks F-4; .*merging none \(a duplicate gets the DUPLICATE verdict"),
+    ("add", "adds F-9"),
+    ("lower", r"changes F-2 \(P3, the parent's P2\)"),
+])
+def test_a_deferred_runs_l2_is_held_to_its_parents_pool(git_repo, change, match):
+    """A DEFERRED run's L2 holds exactly the parent's pool ids, each at the parent's priority:
+    dropping one (as merging a duplicate would), adding one, or lowering a P2 to P3 is refused,
+    and the same pool in another order is accepted.
+
+    The parent fixed F-1, deferred the confirmed P2 F-2 at L3 and the P3s F-3 and F-4 at L2.5.
+
+    Red 2026-10-11, four mutations in pipeline_state. The `_held_to_pool(state, findings, root)`
+    call removed from _check_shape: all three cases failed at pytest.raises (DID NOT RAISE
+    RecordRefused). `if missing or extra:` became `if False:` in _held_to_pool: "drop" failed
+    with DID NOT RAISE; "add" failed at pytest.raises' regex (the reason was the priority rule,
+    "changes F-9 (P3, the parent's None)"). `if changed:` became `if False:` there: "lower"
+    failed with DID NOT RAISE.
+    """
+    closed_parent(git_repo, p2_deferred=1, p3=2)
+    ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    rows = _pool_rows(git_repo)
+    assert [(r["id"], r["priority"]) for r in rows] == [("F-3", "P3"), ("F-4", "P3"),
+                                                        ("F-2", "P2")]
+    if change == "drop":
+        rows = [r for r in rows if r["id"] != "F-4"]
+    elif change == "add":
+        rows.append({**rows[0], "id": "F-9"})
+    else:
+        rows[2]["priority"] = "P3"
+    with pytest.raises(ps.RecordRefused, match=match):
+        ps.record("L2", counts={"unique": len(rows)}, output=write_output(git_repo, rows),
+                  root=git_repo)
+    assert "L2" not in ps.load(git_repo).layers
+    ps.record("L2", counts={"unique": 3},
+              output=write_output(git_repo, list(reversed(_pool_rows(git_repo)))), root=git_repo)
+    assert "L2" in ps.load(git_repo).layers
+
+
+def test_a_commit_parents_l2_is_not_held_to_a_pool(git_repo):
+    """A `commit:<sha>` parent left no summary and no stored L2, so there is no pool to hold the
+    run to: its L2 is whatever D.1 parsed from the commit message.
+
+    Red 2026-10-11: mutation `and not (state.parent or "").startswith("commit:")` removed from
+    the L2 branch of _check_shape; failed at the L2 record (uncaught RecordRefused: the parent
+    run 'commit:<sha>' has no readable summary under .claude/audits/runs/).
+    """
+    head = _head(git_repo)
+    ps.start("STANDARD", mode="DEFERRED", parent=f"commit:{head}", run_id="c", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    assert "L2" in ps.load(git_repo).layers
+
+
+@pytest.mark.parametrize("damage, match", [
+    ("summary", "has no readable summary"),
+    ("l2", "cannot be loaded"),
+])
+def test_a_deferred_runs_l2_is_refused_when_the_parents_pool_cannot_be_read(git_repo, damage,
+                                                                            match):
+    """The pool is read from the parent's summary and stored L2 when L2 is recorded; when either
+    has become unreadable since the start, L2 is refused (fail closed), not checked against
+    nothing.
+
+    Red 2026-10-11, two mutations in _held_to_pool: the `raise` under `if summary is None:`
+    replaced by `return`; the "summary" case failed at pytest.raises (DID NOT RAISE
+    RecordRefused). The `raise` in `except LookupError` replaced by `return`; the "l2" case
+    failed the same way.
+    """
+    closed_parent(git_repo)
+    ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    l2, ids = pool_output(git_repo)
+    run = git_repo / ".claude/audits/runs/parent"
+    if damage == "summary":
+        (run / "summary.json").write_text("{torn", encoding="utf-8")
+    else:
+        (run / "L2.json").unlink()
+    with pytest.raises(ps.RecordRefused, match=match):
+        ps.record("L2", counts={"unique": len(ids)}, output=l2, root=git_repo)
+    assert "L2" not in ps.load(git_repo).layers
