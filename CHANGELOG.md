@@ -31,6 +31,8 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline close` writes `.claude/audits/runs/<run_id>/summary.json`: tier, mode, base and final commit, and the deferred pool.
 - `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input.
 - `pipeline start --mode DEFERRED --from <run_id>` (or `--from commit:<sha>`): a deferred pass that owes every layer, refuses FAST, and cannot defer again. `/audit-fix` offers it after a run closes.
+- The `STALE` verdict, for deferred runs only: the issue was present at the parent run's commit and is gone now, because later work moved, rewrote or fixed it. `pipeline record L2.5` takes it as `--stale <S>` (a deferred run cannot use `--deferred`), the L2.5 file of any other run refuses it, and its ledger row says `STALE`, never `FALSE_POSITIVE`.
+- `fp-check` has a `MODE=DEFERRED`: it verifies every deferred finding, P2 and P3 alike, checks that the cited code lies inside the diff of the run that deferred it, and returns `STALE` for an issue that later work removed. Its status block gained `mode: DEFERRED` and a `stale:` count.
 
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.

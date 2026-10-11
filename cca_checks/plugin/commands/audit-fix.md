@@ -953,10 +953,9 @@ python -m cca_checks pipeline deferred
 It prints the pool of the run just closed (`pool`, `counts`), whether a second pass is `offered`,
 the `recommendation` (`RUN` or `SKIP`) and its `reasons`, the older runs whose pool is still
 untaken (`other_pools`) and any summary files it could not read (`unreadable`). When `other_pools`
-is non-empty, the report names those older runs: the user can take one with `/audit-fix deferred`,
-which then runs D.1 with that run's id on both the `pipeline deferred --write` command (`--run <id>`)
-and the `pipeline start` command (`--from <id>`). When `unreadable` is non-empty, the report names
-those summary files. When `offered` is false, report the first reason in one line, then those
+is non-empty, the report names those older runs. They become reachable with `/audit-fix deferred`
+once the newest pool has been taken or is not offered; D.1 then names them and asks which to take.
+When `unreadable` is non-empty, the report names those summary files. When `offered` is false, report the first reason in one line, then those
 names, and stop. When it is true, put those names before the question, and end with one question
 and nothing after it:
 
@@ -991,7 +990,8 @@ python -m cca_checks pipeline deferred --write .claude/audits/out/L1.json   # --
 python -m cca_checks pipeline start --mode DEFERRED --from <run_id> --tier <TIER>
 ```
 
-`<run_id>` is the `run_id` the first command printed. `<TIER>` is DEEP when that run was DEEP (its
+`<run_id>` is the `run_id` the first command printed. `<TIER>` is DEEP when the `deep` argument was
+given (`/audit-fix-v2 deferred` maps to `/audit-fix deep deferred`), when that run was DEEP (its
 `tier` in `.claude/audits/runs/<run_id>/summary.json`), or when any pool finding has
 `high_stakes: true` or sits on a high-stakes path by Step 0.5; otherwise STANDARD. FAST is
 refused, because it verifies P1 only and every deferred finding must be verified. The run takes its

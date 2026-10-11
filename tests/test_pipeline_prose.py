@@ -319,6 +319,91 @@ def test_fp_check_knows_mode_deferred():
     assert "P3 findings are not verified — they are\ndeferred regardless." not in FP_CHECK
 
 
+def test_fp_check_status_block_can_report_deferred_mode_and_stale():
+    """An fp-check run in MODE=DEFERRED must be able to write a legal status block: its `mode:`
+    line allows DEFERRED, and a `stale:` count keeps the counts summing to findings_checked.
+
+    Red 2026-10-11: baseline 59305b5 text (`mode: DIFF | HUNT`, no `stale:` line); failed at
+    `assert "mode: DIFF | HUNT | DEFERRED" in status`. The other two assertions were each seen
+    False on that same text.
+    """
+    status = FP_CHECK[FP_CHECK.find("## Status Block"):FP_CHECK.find("## Input")]
+    assert "mode: DIFF | HUNT | DEFERRED" in status
+    assert re.search(r"^stale: \[count\]\s+# MODE=DEFERRED only; 0 otherwise$", status, re.M)
+    description = next(ln for ln in FP_CHECK.splitlines() if ln.startswith("description:"))
+    assert "STALE" in description
+
+
+def test_fp_check_contract_lists_stale_as_a_verdict_with_evidence():
+    """The verdict list, the output format and the evidence rule all have to know STALE, or the
+    agent either cannot emit it or emits it without the `git show` proof the deferred run needs.
+
+    Red 2026-10-11: baseline 59305b5 text (STALE appears only in the MODE=DEFERRED bullet); failed
+    at `assert "**STALE** *(MODE=DEFERRED only)*" in verdicts`. The other assertions were each
+    seen False on that same text.
+    """
+    verdicts = FP_CHECK[FP_CHECK.find("Emit exactly one verdict"):FP_CHECK.find("## Deterministic-first")]
+    assert "**STALE** *(MODE=DEFERRED only)*" in verdicts
+    assert "`git show <commit>:<file>`" in verdicts
+    output_format = FP_CHECK[FP_CHECK.find("## Output Format"):FP_CHECK.find("## Execution Logging")]
+    assert re.search(r"^\| \S+ \| STALE \| ", output_format, re.M)
+    assert "## Stale (MODE=DEFERRED only)" in output_format
+    rule = FP_CHECK[FP_CHECK.find("**Artifact-or-UNCERTAIN rule:**"):].split("\n\n")[0]
+    assert "`STALE`" in rule
+
+
+def test_fp_check_existence_and_input_cover_the_deferred_mode():
+    """Existence must route an issue that was once there to STALE rather than FALSE_POSITIVE, and
+    the Input section must say MODE=DEFERRED is handed the earlier run's commits.
+
+    Red 2026-10-11: baseline 59305b5 text (Existence says nothing of STALE; Input names no
+    `base_commit`); failed at `assert "STALE" in existence`. The other assertions were each seen
+    False on that same text.
+    """
+    existence = " ".join(
+        FP_CHECK[FP_CHECK.find("1. **Existence**"):FP_CHECK.find("2. **In scope**")].split()
+    )
+    assert "STALE" in existence and "not FALSE_POSITIVE" in existence
+    given = " ".join(FP_CHECK[FP_CHECK.find("## Input"):FP_CHECK.find("## Verdict per Finding")].split())
+    assert "given `base_commit` and `commit`" in given
+    phases = " ".join(FP_CHECK[FP_CHECK.find("## Deterministic-first"):].split())
+    assert "For each finding you are sent (P1/P2, or every deferred finding in MODE=DEFERRED)" in phases
+
+
+FIX_PLANNER = (ROOT / "cca_checks/plugin/agents/cca-fix-planner.md").read_text(encoding="utf-8")
+
+
+def test_second_pass_tier_honours_deep_and_names_how_older_pools_are_reached():
+    """The v2 alias maps `deferred` to `deep deferred`, so D.1's tier rule must honour the `deep`
+    argument; and the offer must not imply `/audit-fix deferred` can take an older pool directly.
+
+    Red 2026-10-11: baseline 59305b5 text (D.1 lists only the parent's tier and high stakes; the
+    offer says "the user can take one with `/audit-fix deferred`"); failed at
+    `assert "DEEP when the `deep` argument was given" in tier_rule`. The other assertions were
+    each seen False on that same text.
+    """
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    tier_rule = " ".join(second[second.find("`<run_id>` is the"):second.find("An aborted deferred run")].split())
+    assert "DEEP when the `deep` argument was given" in tier_rule
+    assert "`/audit-fix-v2 deferred` maps to `/audit-fix deep deferred`" in tier_rule
+    offer = " ".join(PIPELINE[PIPELINE.find("### Offer the deferred pass"):PIPELINE.find("## Second Pass")].split())
+    assert "once the newest pool has been taken or is not offered" in offer
+    assert "the user can take one with" not in offer
+
+
+def test_fix_planner_p3_list_is_for_the_reader_not_the_pool():
+    """The pool of `/audit-fix deferred` is built by `pipeline close` from the L2.5 and L3 files;
+    the planner's P3 list is not read by anything, so it must not claim to become the pool.
+
+    Red 2026-10-11: baseline 59305b5 text (`these become the pool of `/audit-fix deferred``); failed
+    at `assert "these become the pool" not in planner`. The second assertion was seen False on that
+    same text.
+    """
+    planner = " ".join(FIX_PLANNER[FIX_PLANNER.find("## P3 "):].split())
+    assert "these become the pool" not in planner
+    assert "built by `pipeline close` from the L2.5 and L3 files" in planner
+
+
 def test_step_0_matches_deferred_only_as_a_whole_argument():
     """`/audit-fix files cca_checks/deferred.py` names a path, not the pass. A substring test on
     $ARGUMENTS would send it to the deferred pass, so Step 0 must match the word as a whole

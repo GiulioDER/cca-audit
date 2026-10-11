@@ -170,7 +170,8 @@ From each audit file, extract:
 ---
 
 ## P3 — Deferred
-List each with its id, file:line and claim; these become the pool of `/audit-fix deferred`.
+List each with its id, file:line and claim. This list is for the reader: the pool of
+`/audit-fix deferred` is built by `pipeline close` from the L2.5 and L3 files, not from this one.
 
 ---
 
