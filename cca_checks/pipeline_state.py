@@ -46,8 +46,9 @@ from cca_checks import deferred, layer_outputs
 
 __all__ = [
     "CommitDecision", "LAYERS", "MODES", "OUTPUT_LAYERS", "PipelineState", "RecordRefused",
-    "TIERS", "abort", "close", "load", "outstanding", "pause", "record", "required_layers",
-    "resume", "start", "state_path", "verify_commit_allowed",
+    "TIERS", "abort", "close", "deferred_report", "load", "outstanding", "pause", "record",
+    "required_layers", "resume", "start", "state_path", "verify_commit_allowed",
+    "write_deferred",
 ]
 
 
@@ -831,3 +832,90 @@ def resume(root: str | pathlib.Path = ".") -> dict:
         root, f"| {core.now()} | run {state.run_id} | RESUMED | next {nxt or 'none'}{changed} |"
     )
     return result
+
+
+def _deferred_context(run_id: str, root) -> tuple[dict, list[dict], deferred.Offer]:
+    """(summary, findings, Offer) for the named run, or for the newest completed one."""
+    summaries, unreadable = deferred.load_summaries(root)
+    if run_id:
+        summary = next((s for s in summaries if s["run_id"] == run_id), None)
+        if summary is None:
+            raise RecordRefused(
+                f"no completed run {run_id!r} has a summary under .claude/audits/runs/"
+            )
+    elif summaries:
+        summary = summaries[-1]
+    else:
+        note = f" ({len(unreadable)} unreadable: {', '.join(unreadable)})" if unreadable else ""
+        raise RecordRefused(
+            "no completed run has a summary under .claude/audits/runs/" + note + "; for a "
+            "run that predates summaries, parse the Deferred section of its CCA commit into "
+            "the L1 file and start with --from commit:<sha> (audit-fix.md § Second Pass)"
+        )
+    try:
+        findings = deferred.findings_for(root, summary)
+    except LookupError as exc:
+        raise RecordRefused(str(exc)) from exc
+    commit = summary.get("commit")
+    reachable = bool(commit) and _is_ancestor(root, str(commit))
+    offer = deferred.assess(summary, summaries, findings, commit_reachable=reachable,
+                            unreadable=unreadable)
+    return summary, findings, offer
+
+
+def _unreadable_block(unreadable: list[str]) -> str:
+    return (
+        f"{len(unreadable)} run summary file(s) under .claude/audits/runs/ cannot be read "
+        f"({', '.join(unreadable)}); they block a deferred start until they are fixed or "
+        "moved aside"
+    )
+
+
+def deferred_report(run_id: str = "", root: str | pathlib.Path = ".") -> deferred.Offer:
+    """What a completed run deferred, and whether a second pass is offered and advised.
+
+    Read-only, so unreadable summaries do not stop the report; a reason line says that they
+    block `start --mode DEFERRED`, which refuses while any exists.
+    """
+    offer = _deferred_context(run_id, root)[2]
+    if offer.unreadable:
+        offer.reasons.append(_unreadable_block(offer.unreadable))
+    return offer
+
+
+def write_deferred(output, run_id: str = "",
+                   root: str | pathlib.Path = ".") -> tuple[deferred.Offer, str]:
+    """Write the offered pool's full finding objects to `output`: a deferred run's L1 input.
+
+    Refused when unreadable summaries exist (`start --mode DEFERRED` would refuse the run this
+    file is for), when the pass is not offered (naming any older pools that still are, so an
+    empty newest run does not dead-end), and when `output` lies outside `.claude/audits/`.
+    """
+    _, findings, offer = _deferred_context(run_id, root)
+    if offer.unreadable:
+        raise RecordRefused(_unreadable_block(offer.unreadable))
+    if not offer.offered:
+        older = ""
+        if offer.other_pools:
+            older = (f"; older pools still on offer: {', '.join(offer.other_pools)}; "
+                     f"pass --run {offer.other_pools[-1]}")
+        raise RecordRefused(
+            f"run {offer.run_id}'s deferred findings are not offered: {offer.reasons[0]}" + older
+        )
+    path = pathlib.Path(output)
+    if not path.is_absolute():
+        path = pathlib.Path(root) / path
+    if not core._inside(str(path), str(pathlib.Path(root) / core.EXCLUDED)):
+        raise RecordRefused(
+            f"--write {output} is outside .claude/audits/; write it there (for example "
+            ".claude/audits/out/L1.json), where the tree fingerprint ignores it"
+        )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(findings, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise RecordRefused(
+            f"--write {output} could not be written ({exc.__class__.__name__}: {exc}); "
+            "name a file under .claude/audits/"
+        ) from exc
+    return offer, str(path)

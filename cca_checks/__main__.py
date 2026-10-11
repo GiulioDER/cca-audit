@@ -269,6 +269,19 @@ def _pipeline(a) -> int:
             print(json.dumps(result))
             return 0
 
+        if a.pipeline_cmd == "deferred":
+            try:
+                if a.write:
+                    offer, path = pipeline_state.write_deferred(a.write, a.run, root=a.root)
+                    print(json.dumps({**offer.to_json(), "written": path}))
+                    return 0
+                offer = pipeline_state.deferred_report(a.run, root=a.root)
+            except pipeline_state.RecordRefused as exc:
+                print(json.dumps({"refused": "deferred", "reason": str(exc)}), file=sys.stderr)
+                return 2
+            print(json.dumps(offer.to_json()))
+            return 0
+
         if a.pipeline_cmd == "abort":
             log = pipeline_state.abort(a.reason, root=a.root)
             print(json.dumps({"aborted": log is not None, "logged_to": str(log) if log else None}))
@@ -396,6 +409,17 @@ def main(argv=None) -> int:
 
     pl_close = plsub.add_parser("close", help="retire a run that passed its gates")
     pl_close.add_argument("--root", default=".")
+
+    pl_deferred = plsub.add_parser(
+        "deferred", help="after a run closes: what it deferred, and whether a second pass "
+                         "over it is offered (RUN or SKIP, with reasons)"
+    )
+    pl_deferred.add_argument("--run", default="",
+                             help="a completed run id; default the newest completed run")
+    pl_deferred.add_argument("--write", default=None,
+                             help="write the pool's findings to this file under "
+                                  ".claude/audits/, as a deferred run's L1 input")
+    pl_deferred.add_argument("--root", default=".")
 
     a = p.parse_args(argv)
     if a.cmd == "pipeline":

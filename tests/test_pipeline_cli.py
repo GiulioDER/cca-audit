@@ -288,3 +288,199 @@ def test_from_reaches_start(capsys, git_repo):
     code, out, _ = _cli(capsys, "start", "--tier", "STANDARD", "--mode", "DEFERRED",
                         "--from", "parent", "--root", str(git_repo))
     assert code == 0 and out["started"]["parent"] == "parent"
+
+
+# --- pipeline deferred ---------------------------------------------------------------
+
+def _corrupt_summary(repo, run_id="broken") -> str:
+    """A summary file that cannot be parsed; returns its path as `load_summaries` names it."""
+    path = repo / ".claude" / "audits" / "runs" / run_id / "summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    return path.as_posix()
+
+
+def test_deferred_reports_the_newest_run_and_recommends(capsys, git_repo):
+    """Red 2026-10-11: mutation `summary = summaries[-1]` became `summaries[0]` in
+    _deferred_context, with two parents; failed at `assert code == 0 and out["run_id"] ==
+    "second"` ('first' == 'second')."""
+    closed_parent(git_repo, run_id="first", p3=1)
+    closed_parent(git_repo, run_id="second", p3=3)
+    code, out, _ = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 0 and out["run_id"] == "second"
+    assert out["offered"] is True and out["recommendation"] == "RUN"
+    assert out["counts"]["P3"] == 3 and out["other_pools"] == ["first"]
+
+
+def test_deferred_run_selects_a_named_run_and_refuses_an_unknown_one(capsys, git_repo):
+    """Red 2026-10-11: mutation `if run_id:` became `if False:` in _deferred_context; failed at
+    `assert code == 0 and out["run_id"] == "first" ...` ('second' == 'first': the newest run was
+    reported).
+    Red 2026-10-11: mutation the `raise RecordRefused` under `if summary is None:` in
+    _deferred_context became `summary = summaries[-1]`; failed at `assert code == 2 and
+    err["refused"] == "deferred" ...` (0 == 2: the newest run was reported for the unknown id)."""
+    closed_parent(git_repo, run_id="first", p3=1)
+    closed_parent(git_repo, run_id="second", p3=3)
+    code, out, _ = _cli(capsys, "deferred", "--run", "first", "--root", str(git_repo))
+    assert code == 0 and out["run_id"] == "first" and out["counts"]["P3"] == 1
+    code, _, err = _cli(capsys, "deferred", "--run", "ghost", "--root", str(git_repo))
+    assert code == 2 and err["refused"] == "deferred" and "'ghost'" in err["reason"]
+
+
+def test_deferred_write_copies_exactly_the_pool(capsys, git_repo):
+    """Red 2026-10-11: mutation `json.dumps(findings, ...)` became a dump of the parent's whole
+    stored L2.json in write_deferred; failed at `assert code == 0 and [f["id"] for f in written]
+    == ["F-2", "F-3"]` (got F-1, F-2, F-3)."""
+    closed_parent(git_repo, p3=2)
+    target = git_repo / ".claude/audits/out/L1.json"
+    code, out, _ = _cli(capsys, "deferred", "--write", str(target), "--root", str(git_repo))
+    written = json.loads(target.read_text(encoding="utf-8"))
+    assert code == 0 and [f["id"] for f in written] == ["F-2", "F-3"]
+    assert all(f["priority"] == "P3" and "claim" in f for f in written)
+    assert out["written"] == str(target) and out["run_id"] == "parent"
+
+
+def test_deferred_write_replaces_a_stale_l1_file(capsys, git_repo):
+    """Red 2026-10-11: mutation `path.write_text(...)` guarded by `if not path.exists():` in
+    write_deferred (an existing file is kept); failed at `assert "OLD-1" not in
+    target.read_text(encoding="utf-8")`."""
+    closed_parent(git_repo, p3=3)
+    target = git_repo / ".claude/audits/out/L1.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('[{"id": "OLD-1"}]', encoding="utf-8")
+    _cli(capsys, "deferred", "--write", str(target), "--root", str(git_repo))
+    assert "OLD-1" not in target.read_text(encoding="utf-8")
+
+
+def test_deferred_write_is_refused_outside_claude_audits(capsys, git_repo):
+    """Red 2026-10-11: mutation the `_inside` check in write_deferred became `if False:`; failed
+    at `assert code == 2 and "outside .claude/audits/" in err["reason"]` (0 == 2)."""
+    closed_parent(git_repo, p3=3)
+    code, _, err = _cli(capsys, "deferred", "--write", str(git_repo / "L1.json"),
+                        "--root", str(git_repo))
+    assert code == 2 and "outside .claude/audits/" in err["reason"]
+    assert not (git_repo / "L1.json").exists()
+
+
+def test_deferred_write_to_a_directory_is_refused_not_a_traceback(capsys, git_repo):
+    """Red 2026-10-11: mutation `except OSError` became `except KeyError` around the write in
+    write_deferred; failed at `assert code == 2 and "could not be written" in err["reason"]`
+    ('escaped' == 2: the OSError got out of the CLI)."""
+    closed_parent(git_repo, p3=3)
+    target = git_repo / ".claude/audits/out"
+    target.mkdir(parents=True)
+    try:
+        code, _, err = _cli(capsys, "deferred", "--write", str(target), "--root", str(git_repo))
+    except OSError as exc:
+        code, err = "escaped", {"reason": repr(exc)}
+    assert code == 2 and "could not be written" in err["reason"]
+
+
+def test_deferred_write_is_refused_when_the_pass_is_not_offered(capsys, git_repo):
+    """Red 2026-10-11: mutation the `if not offer.offered:` check in write_deferred became
+    `if False:`; failed at `assert code == 2 and "nothing was deferred" in err["reason"]`
+    (0 == 2)."""
+    closed_parent(git_repo, p3=0)
+    code, _, err = _cli(capsys, "deferred", "--write",
+                        str(git_repo / ".claude/audits/out/L1.json"), "--root", str(git_repo))
+    assert code == 2 and "nothing was deferred" in err["reason"]
+
+
+def test_deferred_write_on_an_empty_newest_run_points_at_the_older_pool(capsys, git_repo):
+    """R10: an empty newest run must not dead-end `/audit-fix deferred` while an older pool is
+    on offer. Red 2026-10-11: mutation the `+ older` suffix of the not-offered refusal in
+    write_deferred deleted; failed at `assert "older pools still on offer: first" in
+    err["reason"]` (the reason ended at "nothing was deferred")."""
+    closed_parent(git_repo, run_id="first", p3=3)
+    closed_parent(git_repo, run_id="second", p3=0)
+    target = str(git_repo / ".claude/audits/out/L1.json")
+    code, _, err = _cli(capsys, "deferred", "--write", target, "--root", str(git_repo))
+    assert code == 2 and "nothing was deferred" in err["reason"]
+    assert "older pools still on offer: first" in err["reason"]
+    assert "pass --run first" in err["reason"]
+    code, out, _ = _cli(capsys, "deferred", "--run", "first", "--write", target,
+                        "--root", str(git_repo))
+    assert code == 0 and out["run_id"] == "first" and out["written"] == target
+
+
+def test_deferred_write_is_refused_while_a_summary_is_unreadable(capsys, git_repo):
+    """R21(a): `start --mode DEFERRED` refuses while a summary cannot be read, so the writer
+    refuses too, rather than hand over an L1 file the start will not accept. Red 2026-10-11:
+    mutation the `if offer.unreadable:` refusal in write_deferred became `if False:`; failed at
+    `assert code == 2 and err["refused"] == "deferred"` (0 == 2: the L1 file was written)."""
+    closed_parent(git_repo, p3=3)
+    broken = _corrupt_summary(git_repo)
+    target = git_repo / ".claude/audits/out/L1.json"
+    code, _, err = _cli(capsys, "deferred", "--write", str(target), "--root", str(git_repo))
+    assert code == 2 and err["refused"] == "deferred"
+    assert broken in err["reason"] and "block a deferred start" in err["reason"]
+    assert not target.exists()
+
+
+def test_deferred_report_still_prints_but_warns_of_an_unreadable_summary(capsys, git_repo):
+    """R21(b): the plain report is read-only and still prints, and says that the unreadable
+    summary blocks a deferred start. Red 2026-10-11: mutation the `if offer.unreadable:` that
+    appends the reason in deferred_report became `if False:`; failed at `assert
+    any("block a deferred start" in r and broken in r for r in out["reasons"])` (False)."""
+    closed_parent(git_repo, p3=3)
+    broken = _corrupt_summary(git_repo)
+    code, out, _ = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 0 and out["run_id"] == "parent" and out["unreadable"] == [broken]
+    assert any("block a deferred start" in r and broken in r for r in out["reasons"])
+    assert out["recommendation"] == "RUN" and out["offered"] is True
+
+
+def test_deferred_without_a_summary_exits_2(capsys, git_repo):
+    """Red 2026-10-11: mutation `--from commit:<sha>` became `--from a sha` in the no-summary
+    refusal in _deferred_context (audit-fix.md's D.1 routes on the phrase); failed at `assert
+    code == 2 and "commit:<sha>" in err["reason"]` (2 == 2 and the phrase absent)."""
+    code, _, err = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 2 and "commit:<sha>" in err["reason"]
+
+
+def test_deferred_without_a_readable_summary_names_the_unreadable_files(capsys, git_repo):
+    """Red 2026-10-11: mutation `+ note` dropped from the no-summary refusal in
+    _deferred_context; failed at `assert code == 2 and broken in err["reason"] and
+    "commit:<sha>" in err["reason"]` (the path of the corrupt file was absent)."""
+    broken = _corrupt_summary(git_repo)
+    code, _, err = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 2 and broken in err["reason"] and "commit:<sha>" in err["reason"]
+
+
+def test_deferred_names_a_run_directory_without_its_l2_file(capsys, git_repo):
+    """Review Focus 1. Red 2026-10-11: mutation the `except (OSError, ValueError)` in
+    deferred.findings_for returns [] instead of raising; failed at `assert code == 2 and
+    "L2.json" in err["reason"]` (0 == 2: the report printed an empty pool)."""
+    closed_parent(git_repo)
+    (git_repo / ".claude/audits/runs/parent/L2.json").unlink()
+    code, _, err = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 2 and "L2.json" in err["reason"]
+
+
+def test_deferred_reports_a_parent_commit_that_left_history(capsys, git_repo):
+    """Review Focus 5. Red 2026-10-11: mutation `reachable = True` in _deferred_context; failed
+    at `assert code == 0 and out["commit_reachable"] is False` (True is False)."""
+    import subprocess
+    closed_parent(git_repo)
+    subprocess.run(["git", "-C", str(git_repo), "reset", "-q", "--hard", "HEAD~1"], check=True)
+    code, out, _ = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 0 and out["commit_reachable"] is False
+    assert any("not an ancestor of HEAD" in r for r in out["reasons"])
+
+
+def test_round_trip_from_closed_parent_to_a_started_deferred_run(capsys, git_repo):
+    """Red 2026-10-11: mutation `parent=a.parent` dropped from the start call in _pipeline;
+    failed at `assert code == 0 and started["started"]["parent"] == "parent"` on the start
+    (2 == 0: needs --from). The write, start and record legs are chained so that the file
+    `deferred --write` produces is the one `record L1` accepts."""
+    r = str(git_repo)
+    closed_parent(git_repo, p3=3)
+    out_file = str(git_repo / ".claude/audits/out/L1.json")
+    code, offer, _ = _cli(capsys, "deferred", "--write", out_file, "--root", r)
+    assert code == 0 and offer["offered"]
+    code, started, _ = _cli(capsys, "start", "--tier", "STANDARD", "--mode", "DEFERRED",
+                            "--from", offer["run_id"], "--run-id", "child", "--root", r)
+    assert code == 0 and started["started"]["parent"] == "parent"
+    code, rec, _ = _cli(capsys, "record", "L1", "--detail", "loaded 3 from parent",
+                        "--output", out_file, "--root", r)
+    assert code == 0 and rec["output"] == ".claude/audits/runs/child/L1.json"
