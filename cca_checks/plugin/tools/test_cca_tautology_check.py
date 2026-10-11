@@ -129,8 +129,14 @@ def _git(root, *args):
 
 
 @pytest.fixture
-def git_repo(tmp_path):
-    """A one commit repository that ignores .claude/ (local: tools/ has no conftest)."""
+def git_repo(tmp_path, tmp_path_factory, monkeypatch):
+    """A one commit repository that ignores .claude/ (local: tools/ has no conftest).
+
+    It also gives the test its own open run registry, so `start` never writes to the
+    real `~/.claude` (tests/conftest.py does the same for every other test).
+    """
+    registry = tmp_path_factory.mktemp("cca-registry") / "open-runs.json"
+    monkeypatch.setenv("CCA_RUN_REGISTRY", str(registry))
     if shutil.which("git") is None:
         pytest.skip("git is required for tree fingerprints")
     _git(tmp_path, "init", "-q")

@@ -40,6 +40,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 from cca_checks import deferred, layer_outputs
@@ -283,6 +284,24 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
     return parent, base_commit
 
 
+def _registry(action: str, *args) -> None:
+    """Update the open run registry; a failure is a warning, never a refusal.
+
+    The registry only helps the hooks find a run opened below the session's directory.
+    A run it does not list is still found from its own directory, so losing an update
+    costs reach, not safety, and must not stop the pipeline.
+    """
+    try:
+        getattr(core, action)(*args)
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        print(
+            f"warning: could not update the CCA run registry at {core.registry_path()} "
+            f"({exc.__class__.__name__}: {exc}); the hooks will find this run only from "
+            "its own directory",
+            file=sys.stderr,
+        )
+
+
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
           base: str = "HEAD", parent: str = "",
           root: str | pathlib.Path = ".") -> PipelineState:
@@ -361,6 +380,7 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
         parent=stored_parent,
     )
     _write(state, root)
+    _registry("register", root, state.run_id)
     return state
 
 
@@ -855,6 +875,7 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
         run_id = "unparseable"
     log = core.append_log(root, f"| {core.now()} | run {run_id} | ABORTED | {reason} |")
     path.unlink()
+    _registry("unregister", root)
     return log
 
 
@@ -920,6 +941,7 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
         f"layers: {recorded} |",
     )
     path.unlink()
+    _registry("unregister", root)
     return log
 
 
