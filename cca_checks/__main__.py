@@ -258,7 +258,7 @@ def _pipeline(a) -> int:
             try:
                 if a.pipeline_cmd == "pause":
                     state = pipeline_state.pause(a.reason, root=a.root)
-                    result = {"paused": state.run_id, **state.paused}
+                    result = {"paused": state.run_id, **(state.paused or {})}
                 else:
                     result = pipeline_state.resume(root=a.root)
             except pipeline_state.RecordRefused as exc:

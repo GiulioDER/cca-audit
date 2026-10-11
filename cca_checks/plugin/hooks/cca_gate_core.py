@@ -292,7 +292,8 @@ def predecessors(layer: str, state: dict, owed: bool) -> tuple[str, ...]:
 
 
 def _layers(state: dict) -> dict:
-    return state.get("layers") if isinstance(state.get("layers"), dict) else {}
+    layers = state.get("layers")
+    return layers if isinstance(layers, dict) else {}
 
 
 def _layer_reasons(layer: str, state: dict, owed: bool, tree: str | None) -> list[str]:

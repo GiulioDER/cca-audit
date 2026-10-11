@@ -412,7 +412,7 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
     if not path.exists():
         return None
     state = load(root)
-    if state.paused:
+    if state is not None and state.paused:
         raise RecordRefused(_PAUSED)
     missing = outstanding(state, root)
     if missing:
