@@ -246,3 +246,19 @@ def test_an_id_less_star_line_is_a_subject_not_a_bullet():
     """Red proof: count ID-less '*' lines under a severity heading -> the subject is P1-2."""
     body = "P1:\n- a fix.\n\n* Second commit subject\n- another line\n"
     assert _ids(parse_message(body)) == [("P1-1", "P1")]
+
+
+def test_a_bullet_about_stale_comments_is_a_fix():
+    """Measured regression, 2026-10-11. Red proof: put 'stale' back in _SKIP_TEXT -> CODE-003 dropped.
+
+    "Stale" is a heading word ("Stale (already fixed in round 1):"). At the start of a
+    bullet it describes what was fixed, as in a real RE-call commit the first dry run read.
+    """
+    body = "P2:\n- CODE-003: Stale comments: the transport note named the old default.\n"
+    assert _ids(parse_message(body)) == [("CODE-003", "P2")]
+
+
+def test_a_declined_heading_opens_nothing():
+    """Measured, 2026-10-11. Red proof: remove 'declined' from _SKIP_HEADING -> CODE-007 counted."""
+    body = "DECLINED:\n- CODE-007: closure refactor (verified correct; risk without benefit).\n"
+    assert parse_message(body) == []

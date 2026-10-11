@@ -45,10 +45,13 @@ _ONE_ID = re.compile(r"([A-Z][A-Z0-9]*)-(\d+)")
 _SEVERITY = re.compile(r"(P[123])\b")
 _P3 = re.compile(r"\bP3\b")
 _SKIP_HEADING = ("deferred", "not fixed", "owner decision", "won't fix", "wontfix", "stale",
-                 "skipped", "false positive", "rejected", "dropped", "parked", "uncertain")
+                 "skipped", "false positive", "rejected", "dropped", "parked", "uncertain",
+                 "declined")
+# Not "stale": at the start of a bullet it names what was fixed ("Stale comments: ..."),
+# which a measured real commit does; only as a heading does it mean "nothing to do".
 _SKIP_TEXT = ("deferred", "(deferred", "not fixed", "owner decision", "won't fix", "wontfix",
-              "stale", "skipped", "false positive", "rejected", "dropped", "parked",
-              "uncertain")
+              "skipped", "false positive", "rejected", "dropped", "parked", "uncertain",
+              "declined")
 # The finding prefixes the pipeline's auditors emit, plus FIX. Anything else that looks
 # like an ID (UTF-8, SHA-256, F-01) never becomes a finding ID.
 KNOWN_PREFIXES = frozenset({
