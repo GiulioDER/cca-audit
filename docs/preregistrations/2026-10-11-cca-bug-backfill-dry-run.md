@@ -112,5 +112,6 @@ The known-answer premise was wrong for an informative reason: I chose `6aa7ff5bd
 `git log --all` listing, and "fixed means landed" excludes exactly that kind of commit.
 
 **Apparatus checks that passed:** no row is `proved` without an explicit binding; the one binding
-produces one `proved` row traced to its artifacts; summaries are verbatim. The sentiment-agent
-clone's remote refs end on 2026-09-10, so that repository is undercounted after that date.
+produces one `proved` row traced to its artifacts; summaries are verbatim. The freshest local
+clone of the private repository has remote refs ending 2026-09-10, so that repository is
+undercounted after that date.
