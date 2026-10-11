@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from conftest import write_output
+
 from cca_checks.__main__ import main
 
 
@@ -49,8 +51,9 @@ def test_count_flags_reach_the_state(capsys, git_repo):
     """
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--root", r)
-    _cli(capsys, "record", "L1", "--root", r)
-    code, out, _ = _cli(capsys, "record", "L2", "--unique", "0", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    code, out, _ = _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r),
+                        "--root", r)
     assert code == 0 and out["recorded"] == "L2"
     raw = json.loads((git_repo / ".claude/audits/run-state.json").read_text(encoding="utf-8"))
     assert raw["layers"]["L2"]["counts"] == {"unique": 0}
@@ -89,10 +92,11 @@ def test_n_a_is_still_accepted_for_a_layer_this_run_does_not_require(capsys, git
     """
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--root", r)
-    _cli(capsys, "record", "L1", "--root", r)
-    _cli(capsys, "record", "L2", "--unique", "0", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
     code, _, _ = _cli(capsys, "record", "L2.5", "--status", "n/a", "--confirmed", "0",
-                      "--fp", "0", "--uncertain", "0", "--duplicate", "0", "--root", r)
+                      "--fp", "0", "--uncertain", "0", "--duplicate", "0",
+                      "--output", write_output(r), "--root", r)
     assert code == 0
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert any("L2.5 is recorded as n/a" in x for x in out["outstanding_to_close"])
@@ -110,10 +114,10 @@ def test_status_require_complete_exits_2_for_a_complete_run_that_is_not_closed(
     """
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--no-fix", "--root", r)
-    _cli(capsys, "record", "L1", "--root", r)
-    _cli(capsys, "record", "L2", "--unique", "0", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
     _cli(capsys, "record", "L2.5", "--confirmed", "0", "--fp", "0", "--uncertain", "0",
-         "--duplicate", "0", "--root", r)
+         "--duplicate", "0", "--output", write_output(r), "--root", r)
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert code == 2
     assert len(out["outstanding_to_close"]) == 1
@@ -125,3 +129,111 @@ def test_status_require_complete_exits_2_for_a_complete_run_that_is_not_closed(
     assert _cli(capsys, "close", "--root", r)[0] == 0
     code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
     assert code == 0 and out["open"] is False
+
+
+def test_record_output_reaches_the_state_and_is_echoed(capsys, git_repo):
+    """`--output` is passed through, copied into the run, and printed back.
+
+    Red 2026-10-11: mutation `output=a.output` became `output=None` in `_pipeline` (record);
+    failed at `assert code == 0 and out["output"] == ...` (exit 2: L1 needs --output).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--run-id", "r7", "--root", r)
+    code, out, _ = _cli(capsys, "record", "L1", "--output", write_output(r, [[]]), "--root", r)
+    assert code == 0 and out["output"] == ".claude/audits/runs/r7/L1.json"
+    assert (git_repo / ".claude/audits/runs/r7/L1.json").is_file()
+
+
+def test_status_shows_the_pause_and_require_complete_exits_2(capsys, git_repo):
+    """A paused run is reported at the top level and is never complete.
+
+    Red 2026-10-11: mutation the `if state is not None and state.paused:` block in `_pipeline`
+    (status) became `if False:`, on a complete FAST no-fix run whose only other item would be
+    `pipeline close`; failed at `assert any("run is paused" in x for x in
+    out["outstanding_to_close"])`.
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--no-fix", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2.5", "--confirmed", "0", "--fp", "0", "--uncertain", "0",
+         "--duplicate", "0", "--output", write_output(r), "--root", r)
+    assert _cli(capsys, "pause", "--reason", "end of day", "--root", r)[0] == 0
+    code, out, _ = _cli(capsys, "status", "--require-complete", "--root", r)
+    assert code == 2
+    assert out["paused"]["reason"] == "end of day"
+    assert any("run is paused" in x for x in out["outstanding_to_close"])
+
+
+def test_pause_and_resume_through_the_cli(capsys, git_repo):
+    """pause prints the pause, a second pause and a paused record exit 2, resume prints JSON.
+
+    Red 2026-10-11: mutation `return 2` became `return 0` in the RecordRefused handler of the
+    pause/resume branch of `_pipeline`; failed at `assert code == 2 and err["refused"] ==
+    "pause" and "run is paused" in err["reason"]` (0 == 2).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--run-id", "r9", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    code, out, _ = _cli(capsys, "pause", "--reason", "machine restart", "--root", r)
+    assert code == 0 and out["paused"] == "r9" and out["reason"] == "machine restart"
+    code, _, err = _cli(capsys, "pause", "--reason", "again", "--root", r)
+    assert code == 2 and err["refused"] == "pause" and "run is paused" in err["reason"]
+    code, _, err = _cli(capsys, "record", "L2", "--unique", "0", "--output", write_output(r),
+                        "--root", r)
+    assert code == 2 and err["refused"] == "L2" and "pipeline resume" in err["reason"]
+    code, out, _ = _cli(capsys, "resume", "--root", r)
+    assert code == 0
+    assert out == {"resumed": "r9", "tree_changed": False, "next": "L2", "heading": "Step 2",
+                   "outputs": {"L1": ".claude/audits/runs/r9/L1.json"},
+                   "outstanding": out["outstanding"]}
+    assert out["outstanding"]
+    code, _, err = _cli(capsys, "resume", "--root", r)
+    assert code == 2 and err["refused"] == "resume"
+
+
+
+def test_record_output_outside_claude_audits_exits_2(capsys, git_repo):
+    """A --output file outside .claude/audits/ is {"refused": "L1"} with exit 2.
+
+    Red 2026-10-11: mutation the containment check in `pipeline_state._read_output` became
+    `if False:`; failed at `assert code == 2 and err["refused"] == "L1"` (0 == 2).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--root", r)
+    outside = git_repo / "findings.json"
+    outside.write_text("[]", encoding="utf-8")
+    code, _, err = _cli(capsys, "record", "L1", "--output", str(outside), "--root", r)
+    assert code == 2 and err["refused"] == "L1"
+    assert "outside .claude/audits/" in err["reason"]
+
+
+def test_a_relative_output_is_read_from_the_root_not_the_cwd(capsys, git_repo, monkeypatch,
+                                                              tmp_path_factory):
+    """`--output .claude/audits/out/l1.json` means the one under `--root`, whatever the cwd.
+
+    Red 2026-10-11: baseline bacf6f0 (resolved against the cwd, so refused as outside);
+    failed at `assert code == 0 and out["recorded"] == "L1"` (2 == 0).
+    """
+    r = str(git_repo)
+    target = git_repo / ".claude" / "audits" / "out" / "l1.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('[["finding"]]', encoding="utf-8")
+    monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
+    _cli(capsys, "start", "--tier", "FAST", "--run-id", "rel", "--root", r)
+    code, out, _ = _cli(capsys, "record", "L1", "--output", ".claude/audits/out/l1.json",
+                        "--root", r)
+    assert code == 0 and out["recorded"] == "L1"
+    copied = git_repo / ".claude" / "audits" / "runs" / "rel" / "L1.json"
+    assert copied.read_text(encoding="utf-8") == '[["finding"]]'
+
+
+def test_start_with_a_bad_run_id_exits_2(capsys, git_repo):
+    """`pipeline start --run-id` with a forbidden character is {"refused": "start"}, exit 2.
+
+    Red 2026-10-11: baseline bacf6f0 (start accepts it, exit 0); failed at
+    `assert code == 2 and err["refused"] == "start"` (0 == 2).
+    """
+    code, _, err = _cli(capsys, "start", "--tier", "FAST", "--run-id", "run:1",
+                        "--root", str(git_repo))
+    assert code == 2 and err["refused"] == "start"

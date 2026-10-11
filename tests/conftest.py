@@ -8,11 +8,13 @@ against baseline d2317de, where the core module does not exist.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pathlib
 import shutil
 import subprocess
 import tempfile
+import uuid
 
 import pytest
 
@@ -43,6 +45,20 @@ def tree_of(repo) -> str:
         _git(top, "add", "-A", "--", ".", env=env)
         _git(top, "rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", excluded, env=env)
         return _git(top, "write-tree", env=env)
+
+
+def write_output(root, value=None) -> str:
+    """A JSON layer output file for `record(..., output=...)`; returns its path.
+
+    Written under `root`'s `.claude/audits/`, which the fingerprint excludes, so creating
+    it never reads as an edit to the tree under audit (a file anywhere else would make
+    the fix layers owed). Each call writes a new file.
+    """
+    folder = pathlib.Path(root) / ".claude" / "audits" / "outputs-in"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{uuid.uuid4().hex}.json"
+    path.write_text(json.dumps([] if value is None else value), encoding="utf-8")
+    return str(path)
 
 
 def load_hook(name: str):

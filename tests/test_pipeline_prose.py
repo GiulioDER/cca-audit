@@ -146,3 +146,21 @@ def test_codex_closes_the_run_when_close_is_the_only_item_left():
     """
     section = CODEX[CODEX.find("## Gate before reporting"):CODEX.find("## Report completion")]
     assert "pipeline close" in section
+
+
+def test_contract_has_the_pause_row_and_step_2_records_its_output():
+    """The Contract table offers pause and resume, and the Step 2 record line passes --output.
+
+    `record` refuses L2 without `--output`, so prose without it would send every run into a
+    refusal at Step 2; and a pause the Contract never mentions is a pause nobody takes.
+    Red 2026-10-11: baseline 6c64329 text of audit-fix.md (no pause row, no --output); failed at
+    `assert row and "pipeline pause --reason" in row[0] and "pipeline resume" in row[0]`.
+    Second assertion, red 2026-10-11: mutation `--output` removed from the Step 2 record line
+    only; failed at `assert "--output" in record[:record.find("```")]`.
+    """
+    row = [ln for ln in PIPELINE.splitlines()
+           if ln.startswith("| ") and "pause / resume" in ln]
+    assert row and "pipeline pause --reason" in row[0] and "pipeline resume" in row[0]
+    step2 = PIPELINE[PIPELINE.find("## Step 2:"):PIPELINE.find("## Step 2.5:")]
+    record = step2[step2.find("pipeline record L2 "):]
+    assert "--output" in record[:record.find("```")]

@@ -16,6 +16,7 @@ import json
 import pathlib
 
 import pytest
+from conftest import write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -77,11 +78,11 @@ def test_guard_blocks_every_shape_of_commit(monkeypatch, tmp_path, command):
 
 def test_guard_allows_the_commit_once_the_gates_are_satisfied(monkeypatch, git_repo):
     state = ps.start("FAST", root=git_repo)
-    ps.record("L1", root=git_repo)
-    ps.record("L2", counts={"unique": 0}, root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, root=git_repo)
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     assert state.run_id
     assert _run(monkeypatch, git_repo, "git commit -m x") == 0
@@ -119,7 +120,7 @@ def test_guard_reads_a_bare_command_from_stdin(monkeypatch, tmp_path):
 def test_guard_names_the_missing_layers_on_stderr(monkeypatch, capsys, tmp_path):
     repo = _repo(tmp_path)
     ps.start("DEEP", root=repo)
-    ps.record("L1", detail="8 auditors", root=repo)
+    ps.record("L1", detail="8 auditors", output=write_output(repo), root=repo)
     assert _run(monkeypatch, repo, "git commit -m x") == 2
     err = capsys.readouterr().err
     assert "L2.5" in err and "L6" in err
@@ -268,3 +269,24 @@ def test_guard_refuses_when_the_rules_raise(monkeypatch, git_repo):
     monkeypatch.setattr(core, "commit_reasons", boom)
     monkeypatch.setattr(guard, "_load_core", lambda: core)
     assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+
+
+def test_guard_refuses_a_commit_while_the_run_is_paused(monkeypatch, capsys, git_repo):
+    """A complete run that is paused may not commit, and the refusal names the pause.
+
+    Red 2026-10-11: mutation `[PAUSED_REASON] if state.get("paused") else []` became `[]` in
+    cca_gate_core.commit_reasons; failed at
+    `assert _run(monkeypatch, git_repo, "git commit -m x") == 2` (0 == 2).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L6", detail="APPROVED", root=git_repo)
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 0
+    ps.pause("end of day", root=git_repo)
+    capsys.readouterr()
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+    assert "the run is paused" in capsys.readouterr().err

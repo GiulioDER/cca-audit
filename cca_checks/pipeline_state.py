@@ -36,13 +36,15 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
+import re
 from dataclasses import dataclass, field
 
 __all__ = [
-    "CommitDecision", "LAYERS", "PipelineState", "RecordRefused", "TIERS", "abort",
-    "close", "load", "outstanding", "record", "required_layers", "start", "state_path",
-    "verify_commit_allowed",
+    "CommitDecision", "LAYERS", "OUTPUT_LAYERS", "PipelineState", "RecordRefused", "TIERS",
+    "abort", "close", "load", "outstanding", "pause", "record", "required_layers", "resume",
+    "start", "state_path", "verify_commit_allowed",
 ]
 
 
@@ -62,6 +64,14 @@ def _load_core():
 core = _load_core()
 LAYERS = core.LAYERS
 TIERS = core.TIERS
+OUTPUT_LAYERS = core.OUTPUT_LAYERS
+#: A run id names a directory, so only characters every filesystem accepts.
+_RUN_ID = re.compile(r"[A-Za-z0-9._-]+")
+
+_PAUSED = (
+    "the run is paused; run `pipeline resume` (`python -m cca_checks pipeline resume`) "
+    "to continue it, or retire it with `pipeline abort --reason`"
+)
 
 
 class RecordRefused(ValueError):
@@ -86,6 +96,7 @@ class PipelineState:
     seq: int = 0
     stop_refusals: int = 0
     stop_logged: bool = False
+    paused: dict | None = None
 
     def to_json(self) -> dict:
         return {
@@ -93,7 +104,7 @@ class PipelineState:
             "mode": self.mode, "no_fix": self.no_fix, "started_utc": self.started_utc,
             "fixes_applied": self.fixes_applied, "base_tree": self.base_tree,
             "seq": self.seq, "stop_refusals": self.stop_refusals,
-            "stop_logged": self.stop_logged, "layers": self.layers,
+            "stop_logged": self.stop_logged, "paused": self.paused, "layers": self.layers,
         }
 
     @classmethod
@@ -118,6 +129,7 @@ class PipelineState:
             seq=int(raw.get("seq", 0) or 0),
             stop_refusals=int(raw.get("stop_refusals", 0) or 0),
             stop_logged=bool(raw.get("stop_logged", False)),
+            paused=raw.get("paused") if isinstance(raw.get("paused"), dict) else None,
         )
 
     @property
@@ -153,6 +165,11 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError(f"unknown tier {tier!r} (expected one of {', '.join(TIERS)})")
+    if run_id and (not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")):
+        raise RecordRefused(
+            f"run id {run_id!r} is refused: it names the directory "
+            ".claude/audits/runs/<run_id>/, so use only letters, digits, `.`, `_` and `-`"
+        )
     if state_path(root).exists():
         raise RecordRefused(
             "a CCA run is already open in this checkout; starting another would replace it "
@@ -241,13 +258,80 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
             )
 
 
+def _read_output(layer: str, output, root) -> bytes:
+    """The bytes of a layer's output file.
+
+    Refused unless the file lies inside `<root>/.claude/audits/` (the one place the tree
+    fingerprint ignores: a file anywhere else in the working tree is an edit, which makes
+    L4 onward owed), exists, and is JSON.
+    """
+    what = OUTPUT_LAYERS[layer]
+    where = f".claude/audits/out/{layer}.json"
+    if output is None or not str(output).strip():
+        raise RecordRefused(
+            f"{layer} needs --output <file>: a JSON file holding {what}. Write it under "
+            f".claude/audits/ (for example {where}), then record again"
+        )
+    path = pathlib.Path(output)
+    if not path.is_absolute():
+        # Relative to the run root, like every other path the run names, not to the cwd.
+        path = pathlib.Path(root) / path
+    audits = pathlib.Path(root) / core.EXCLUDED
+    if not core._inside(str(path), str(audits)):
+        raise RecordRefused(
+            f"{layer} --output {output} is outside .claude/audits/; write it there (for "
+            f"example {where}) and record again. A file anywhere else in the working tree "
+            "changes the tree fingerprint, which makes L4 onward owed"
+        )
+    if not path.is_file():
+        raise RecordRefused(
+            f"{layer} --output {output} does not exist; write {what} to it as JSON, then "
+            "record again"
+        )
+    try:
+        data = path.read_bytes()
+        json.loads(data)
+    except (OSError, ValueError) as exc:
+        raise RecordRefused(
+            f"{layer} --output {output} is not readable JSON ({exc.__class__.__name__}: "
+            f"{exc}); it must hold {what}"
+        ) from exc
+    return data
+
+
+def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
+    """Copy a layer's output into the run's directory; return its posix path under root."""
+    run_dir = state.run_id
+    if not run_dir or run_dir in (".", "..") or pathlib.PurePath(run_dir).name != run_dir:
+        raise RecordRefused(
+            f"run id {state.run_id!r} cannot name a directory under .claude/audits/runs/; "
+            "abort this run and start one with a plain --run-id"
+        )
+    rel = f".claude/audits/runs/{run_dir}/{layer}.json"
+    dest = pathlib.Path(root) / rel
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+    except OSError as exc:
+        raise RecordRefused(
+            f"{layer} output could not be stored at {rel} ({exc.__class__.__name__}: {exc}); "
+            "abort this run and start one with a plain --run-id"
+        ) from exc
+    return rel
+
+
 def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | None = None,
-           counts: dict | None = None, source: str = "cli",
+           counts: dict | None = None, source: str = "cli", output=None,
            root: str | pathlib.Path = ".") -> PipelineState:
     """Record that `layer` was reached and given a verdict.
 
-    Raises RecordRefused when the layer is out of order, is a tool layer recorded
-    by hand, or carries counts that do not agree with the run.
+    Raises RecordRefused when the run is paused, the layer is out of order, is a tool
+    layer recorded by hand, carries counts that do not agree with the run, or (schema 2)
+    is one of OUTPUT_LAYERS without a readable JSON `output` file. A layer outside
+    OUTPUT_LAYERS given an `output` is refused too, so the prose cannot drift from the
+    code by passing a flag that would be silently ignored.
     """
     if layer not in LAYERS:
         raise ValueError(f"unknown layer {layer!r} (expected one of {', '.join(LAYERS)})")
@@ -257,7 +341,15 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             "no CCA run is open; run `python -m cca_checks pipeline start --tier <TIER>` "
             "at Step 0.6 (Step 0.4 for a hunt) before recording a layer"
         )
+    if state.paused:
+        raise RecordRefused(_PAUSED)
+    if output is not None and layer not in OUTPUT_LAYERS:
+        raise RecordRefused(
+            f"{layer} does not take --output; only {', '.join(OUTPUT_LAYERS)} store their "
+            "work on disk"
+        )
     entry = {"status": status, "detail": detail, "at": core.now()}
+    data = None
     if not state.legacy:
         if layer in core.TOOL_LAYERS and source != "tool":
             raise RecordRefused(
@@ -281,12 +373,19 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             )
         counts = {k: v for k, v in (counts or {}).items() if v is not None}
         _check_counts(layer, state, counts, root)
+        if layer in OUTPUT_LAYERS:
+            data = _read_output(layer, output, root)
         state.seq += 1
         entry.update({"seq": state.seq, "source": source})
         if counts:
             entry["counts"] = counts
         if layer in core.FIX_VERDICT_LAYERS:
             entry["tree"] = tree
+    if data is None and output is not None:
+        # A 0.10.x run never requires the file, but one it is given is kept, not ignored.
+        data = _read_output(layer, output, root)
+    if data is not None:
+        entry["output"] = _store_output(state, layer, data, root)
     state.layers[layer] = entry
     if fixes is not None:
         state.fixes_applied = int(fixes)
@@ -339,13 +438,15 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 
 
 def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
-    """Retire a run that is complete. An incomplete run is refused, not logged."""
+    """Retire a run that is complete. An incomplete or paused run is refused, not logged."""
     path = state_path(root)
     if not path.exists():
         return None
     state = load(root)
     if state is None:
         return None
+    if state.paused:
+        raise RecordRefused(_PAUSED)
     missing = outstanding(state, root)
     if missing:
         raise RecordRefused(
@@ -360,3 +461,67 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
     )
     path.unlink()
     return log
+
+
+def pause(reason: str, root: str | pathlib.Path = ".") -> PipelineState:
+    """Pause the open run between two records, so a later session can resume it.
+
+    The state learns about a layer only when it is recorded, so it cannot see auditors
+    or edits still in flight. A pause is therefore allowed between any two records, and
+    the prose says to pause only right after a `record` returned; by then every recorded
+    layer that owns work (OUTPUT_LAYERS) has that work on disk.
+    """
+    state = load(root)
+    if state is None:
+        raise RecordRefused("no CCA run is open; there is nothing to pause")
+    if state.legacy:
+        raise RecordRefused(
+            "this run was started by cca_checks 0.10.x, which cannot pause; finish it, or "
+            "retire it with `pipeline abort --reason`"
+        )
+    if state.paused:
+        raise RecordRefused(_PAUSED)
+    state.paused = {"at": core.now(), "reason": reason, "tree": core.fingerprint(root)}
+    _write(state, root)
+    core.append_log(root, f"| {state.paused['at']} | run {state.run_id} | PAUSED | {reason} |")
+    return state
+
+
+def resume(root: str | pathlib.Path = ".") -> dict:
+    """Resume a paused run and say where it stands.
+
+    Returns the run id; whether the tree changed while paused (an unknown fingerprint
+    counts as changed); the first required layer still owed and its heading; every
+    recorded layer's output file in pipeline order; and what the run still owes by the
+    usual rules, so a verdict made stale by an edit made while paused is listed.
+    """
+    state = load(root)
+    if state is None:
+        raise RecordRefused("no CCA run is open; there is nothing to resume")
+    if not state.paused:
+        raise RecordRefused("the run is not paused; there is nothing to resume")
+    stored = state.paused.get("tree")
+    tree = _tree(state, root)
+    state.paused = None
+    # A resumed session is a new session: it gets the Stop hook's three refusals again.
+    state.stop_refusals = 0
+    state.stop_logged = False
+    raw = state.to_json()
+    nxt = None if state.legacy else core.next_owed(raw, tree)
+    result = {
+        "resumed": state.run_id,
+        "tree_changed": tree is None or stored is None or tree != stored,
+        "next": nxt,
+        "heading": core.HEADINGS[nxt] if nxt else None,
+        "outputs": {
+            layer: state.layers[layer]["output"] for layer in LAYERS
+            if isinstance(state.layers.get(layer), dict) and state.layers[layer].get("output")
+        },
+        "outstanding": [] if state.legacy else core.outstanding(raw, tree),
+    }
+    _write(state, root)
+    changed = ", tree changed while paused" if result["tree_changed"] else ""
+    core.append_log(
+        root, f"| {core.now()} | run {state.run_id} | RESUMED | next {nxt or 'none'}{changed} |"
+    )
+    return result

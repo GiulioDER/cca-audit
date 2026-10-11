@@ -16,14 +16,19 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline close` refuses an incomplete run; `no-fix` runs now close after verification instead of blocking the next commit.
 - L2.6 and L5.6 are recorded by their tools (`--record`), never by hand.
 - A second `pipeline start` is refused (exit 2, `{"refused": "start"}`) while a run is open, instead of replacing it. Replacing re-baselined the tree over the run's edits, dropped L0.4, and left no trail. Retire a run with `pipeline close` or `pipeline abort --reason`.
+- `pipeline record` of L1, L2, L2.5, L3 and L4 requires `--output <file>` on a schema 2 run: a JSON file under `.claude/audits/` (a file elsewhere would change the tree fingerprint, so it is refused) holding that layer's work, copied to `.claude/audits/runs/<run_id>/<layer>.json` and named in the layer entry. Any other layer given `--output` is refused rather than ignored.
 - The red-state proof (`cca_tautology_check.py verify`) runs pytest with `PYTHONDONTWRITEBYTECODE=1`. It used to leave `.pyc` files compiled from the pre-fix source, which changed the tree fingerprint after verify and left L5 stale in repositories that do not ignore `__pycache__`.
 
 ### Added
 - `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
 - `pipeline status --require-complete` for Codex, which has no hooks.
+- `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
 
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.
+
+### Fixed
+- The Codex skill keeps at most six subagents open, Codex's default `agents.max_threads`. A finished subagent holds its slot until `close_agent`, so the skill now records and closes each one before spawning the next queued role. A DEEP run used to launch every auditor at once and die on `agent thread limit reached`.
 
 ## [0.10.1] - 2026-08-31
 
