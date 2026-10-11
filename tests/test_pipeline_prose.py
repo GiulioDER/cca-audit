@@ -164,3 +164,66 @@ def test_contract_has_the_pause_row_and_step_2_records_its_output():
     step2 = PIPELINE[PIPELINE.find("## Step 2:"):PIPELINE.find("## Step 2.5:")]
     record = step2[step2.find("pipeline record L2 "):]
     assert "--output" in record[:record.find("```")]
+
+
+def test_contract_records_deferrals_and_the_base():
+    """The Contract table must carry the flags the gate now requires: `--deferred` on L2.5 and L3,
+    `--base` on the Step 0.6 start, and the `pipeline deferred` offer at the close.
+
+    Red 2026-10-11: baseline 0ec8c47 text; failed at `assert "--deferred <P>" in row25`.
+    """
+    contract = PIPELINE[PIPELINE.find("## The Contract"):PIPELINE.find("## Arguments")]
+    rows = {ln.split("|")[1].strip(): ln for ln in contract.splitlines()
+            if ln.startswith("| ") and ln.count("|") >= 4}
+    row25, row3, row06, row7 = rows["2.5"], rows["3"], rows["0.6"], rows["7"]
+    assert "--deferred <P>" in row25
+    assert "--deferred <D>" in row3 and '--detail "<D> deferred"' not in row3
+    assert "--base <REV>" in row06
+    assert "pipeline deferred" in row7
+
+
+def test_step_2_5_defers_unverified_findings_on_the_record():
+    """Step 2.5 must say P3 findings are recorded `DEFERRED`, not that they are "deferred anyway".
+
+    Red 2026-10-11: baseline 0ec8c47 text; failed at `assert "P3 are deferred anyway" not in section`.
+    """
+    section = PIPELINE[PIPELINE.find("## Step 2.5:"):PIPELINE.find("### Step 2.5b")]
+    assert "P3 are deferred anyway" not in section
+    assert "`DEFERRED`" in section and "--deferred" in section
+
+
+def test_step_3_plans_or_defers_every_confirmed_finding():
+    """Step 3 must record the plan as `{"to_fix": [...], "deferred": [...]}` with `--deferred`.
+
+    Red 2026-10-11: baseline 0ec8c47 text; failed at `assert "--deferred <D>" in section`.
+    """
+    section = PIPELINE[PIPELINE.find("## Step 3:"):PIPELINE.find("## Fix Attempt Budget")]
+    assert "--deferred <D>" in section
+    assert '"to_fix"' in section and '"deferred"' in section
+
+
+def test_the_summary_offers_the_pass_only_after_close():
+    """The Output Summary offers the deferred pass through `pipeline deferred`, after the close.
+
+    Red 2026-10-11: baseline 0ec8c47 text; failed at `assert offer >= 0`.
+    """
+    summary = PIPELINE[PIPELINE.find("## Output Summary"):PIPELINE.find("## Second Pass")]
+    offer = summary.find("python -m cca_checks pipeline deferred")
+    assert offer >= 0
+    assert "After `pipeline close` has succeeded" in summary
+    assert "To fix deferred items, run" not in summary
+
+
+def test_the_second_pass_is_a_gated_run():
+    """The Second Pass is a gated DEFERRED run: it loads the pool, starts with `--mode DEFERRED
+    --from`, verifies in MODE=DEFERRED with a STALE verdict, and records `--no-proofs` at 5.6.
+
+    Red 2026-10-11: baseline 0ec8c47 text; failed at
+    `assert "pipeline deferred --write .claude/audits/out/L1.json" in section`.
+    """
+    section = PIPELINE[PIPELINE.find("## Second Pass"):]
+    assert "pipeline deferred --write .claude/audits/out/L1.json" in section
+    assert "pipeline start --mode DEFERRED --from" in section
+    assert "--from commit:<sha>" in section
+    assert "MODE=DEFERRED" in section and "STALE" in section
+    assert "--no-proofs" in section
