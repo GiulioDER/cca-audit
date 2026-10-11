@@ -982,6 +982,39 @@ def test_start_refuses_an_unknown_mode(git_repo):
         ps.start("FAST", mode="SIDEWAYS", root=git_repo)
 
 
+def test_the_base_commit_survives_a_record(git_repo):
+    """`record` loads the state and writes it back, so from_json must carry base_commit.
+
+    Red 2026-10-11: mutation `base_commit=...` dropped from PipelineState.from_json; failed at
+    `assert ps.load(git_repo).base_commit == _head(git_repo)` (None against the HEAD sha, the
+    first record having written `base_commit: null`).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    assert ps.load(git_repo).base_commit == _head(git_repo)
+    raw = json.loads(ps.state_path(git_repo).read_text(encoding="utf-8"))
+    assert raw["base_commit"] == _head(git_repo) and raw["parent"] is None
+
+
+def test_a_parent_survives_a_record(git_repo):
+    """`parent` is carried by from_json too: a record must not drop a parent run it was given.
+
+    `start` stores no parent yet (it is accepted, used from the deferred pass on), so the
+    state file is given one by hand.
+
+    Red 2026-10-11: mutation `parent=...` dropped from PipelineState.from_json; failed at
+    `assert ps.load(git_repo).parent == "20261011T000000Z"` (None against the parent id).
+    """
+    ps.start("FAST", root=git_repo)
+    path = ps.state_path(git_repo)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["parent"] = "20261011T000000Z"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    assert ps.load(git_repo).parent == "20261011T000000Z"
+    assert json.loads(path.read_text(encoding="utf-8"))["parent"] == "20261011T000000Z"
+
+
 def test_a_bom_prefixed_ledger_is_still_counted(git_repo):
     """A ledger Windows PowerShell 5.1 created starts with a BOM; its first row still counts.
 
