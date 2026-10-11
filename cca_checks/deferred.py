@@ -150,6 +150,10 @@ class Offer:
     commit_reachable: bool
     other_pools: list[str] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
+    #: The run's start fingerprint (the tree its auditors read) and diff base, as its summary
+    #: states them: what a deferred pass hands fp-check for the STALE and scope checks.
+    base_tree: str | None = None
+    base_commit: str | None = None
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -164,13 +168,18 @@ def assess(summary: dict, summaries, findings: list[dict], *, commit_reachable: 
     others = [s["run_id"] for s in summaries
               if s["run_id"] != summary["run_id"] and why_not_offered(s, summaries) is None]
     notes = [] if commit_reachable else [
-        f"the run's commit {summary.get('commit')} is not an ancestor of HEAD, so fp-check "
-        "cannot tell STALE from FALSE_POSITIVE against it"
+        f"the run's commit {summary.get('commit')} is not an ancestor of HEAD: this history "
+        "does not hold that run's work (reset, rebased or another branch), so the pass would "
+        "verify its findings against code that run did not leave behind"
     ]
+
+    base_tree, base_commit = (summary.get(k) for k in ("base_tree", "base_commit"))
 
     def offer(offered: bool, rec: str | None, why: str) -> Offer:
         return Offer(summary["run_id"], offered, rec, [why, *notes], pool, counts, human,
-                     commit_reachable, others, list(unreadable))
+                     commit_reachable, others, list(unreadable),
+                     base_tree=base_tree if isinstance(base_tree, str) else None,
+                     base_commit=base_commit if isinstance(base_commit, str) else None)
 
     why_not = why_not_offered(summary, summaries)
     if why_not:

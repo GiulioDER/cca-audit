@@ -859,10 +859,17 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 
 
 def _write_summary(state: PipelineState, root) -> None:
-    """Write runs/<run_id>/summary.json: what a later deferred pass reads about this run."""
+    """Write runs/<run_id>/summary.json: what a later deferred pass reads about this run.
+
+    `base_tree` is the start fingerprint, the tree this run's auditors read. A deferred pass
+    judges STALE against it: `commit` already holds this run's own fixes, so a finding those
+    fixes removed would read there as never present. Readers use `.get`, so the key is an
+    addition within schema 1.
+    """
     summary = {
         "schema": deferred.SUMMARY_SCHEMA, "run_id": state.run_id, "tier": state.tier,
         "mode": state.mode, "no_fix": state.no_fix, "base_commit": state.base_commit,
+        "base_tree": state.base_tree,
         "commit": _commit_of(root, "HEAD"), "parent": state.parent,
         "completed_utc": core.now(),
         "pool": deferred.pool_ids(_stored_json(state, "L2.5", root),

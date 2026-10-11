@@ -38,16 +38,17 @@ errors: []
 A consolidated list of P1/P2 findings (ID, description, file:line, claimed impact) plus the
 diff command used by the audit (e.g. `git diff HEAD`). In MODE=DIFF and MODE=HUNT you are never
 sent P3 findings: the run records them `DEFERRED`. In MODE=DEFERRED you receive the deferred
-findings themselves, P2 and P3 alike, and verify every one. You are also given `base_commit` and
-`commit`, those of the earlier run that deferred them.
+findings themselves, P2 and P3 alike, and verify every one. You are also given `base_tree` and
+`base_commit` of the earlier run that deferred them: the tree its auditors read (before its own
+fixes), and the commit its diff was taken against.
 
 ## Verdict per Finding
 
 For each finding, check against the ACTUAL code with Read/Grep:
 
 1. **Existence** — Does the issue actually exist at the cited `file:line`? In MODE=DEFERRED, an
-   issue that is absent now but present at the earlier run's `commit` is **STALE**, not
-   FALSE_POSITIVE.
+   issue that is absent now but present in the tree the earlier run audited (its `base_tree`) is
+   **STALE**, not FALSE_POSITIVE.
 2. **In scope** — this criterion depends on the run's MODE, which the invocation states:
    - **MODE=DIFF (default)** — Is it in code that was CHANGED in this diff (use the provided diff
      command), not a pre-existing issue outside the audited change?
@@ -66,8 +67,12 @@ For each finding, check against the ACTUAL code with Read/Grep:
      code inside `git diff <base_commit>`, the code that run audited or fixed? Outside it is
      FALSE_POSITIVE, reason "out of scope". When no `base_commit` is given, say this check
      could not run. A fifth verdict exists in this mode only: **STALE**, when the issue is
-     present at that run's commit (`git show <commit>:<file>`) and absent now because later
-     work moved, rewrote or fixed it. FALSE_POSITIVE means it was never there.
+     present in the tree that run audited (`git show <base_tree>:<file>`) and absent now
+     because later work moved, rewrote or fixed it, that run's own fixes included. If no
+     `base_tree` is given, or git no longer has that tree, read
+     `git show <base_commit>:<file>` and weigh the finding's own evidence: the audited tree
+     may have held uncommitted changes that commit lacks. FALSE_POSITIVE means it was never
+     there.
 3. **Impact** — Is the stated impact real, or already mitigated elsewhere (config in another
    module, guard upstream, value validated before this point)?
 
@@ -78,9 +83,11 @@ Emit exactly one verdict per finding:
   Give the evidence.
 - **DUPLICATE** *(MODE=HUNT only)* — real, but already reported or already fixed on the target's
   default branch. Cite the issue/PR URL you actually read. It is someone else's find, not yours.
-- **STALE** *(MODE=DEFERRED only)*: present at the earlier run's commit, absent now because later
-  work moved, rewrote or fixed it. Give `git show <commit>:<file>` evidence for the earlier state
-  and what you read now. Nothing is left to fix, so it is not eligible for the fix plan.
+- **STALE** *(MODE=DEFERRED only)*: present in the tree the earlier run audited, absent now
+  because later work moved, rewrote or fixed it. Give `git show <base_tree>:<file>` evidence for
+  the earlier state (or `git show <base_commit>:<file>` and the finding's own evidence, when the
+  tree is gone) and what you read now. Nothing is left to fix, so it is not eligible for the fix
+  plan.
 - **UNCERTAIN** — cannot confirm or refute without runtime or business context. → never fix blind;
   escalate to a human.
 
@@ -302,6 +309,14 @@ that carries a tool artifact — that is, any verdict whose `source` is `pyright
 `clippy`, `ast`, `pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
 `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit `source: llm`.
 
+**One exception, MODE=DEFERRED only: a tool-backed `FALSE_POSITIVE` can be the first half of a
+STALE verdict.** The tool read the code as it is now; a finding fixed after the earlier run audited
+it comes back `FALSE_POSITIVE` for exactly that reason. When `git show <base_tree>:<file>` shows the
+issue present in the audited tree, the verdict is **STALE**, not FALSE_POSITIVE: keep the tool
+artifact verbatim as the evidence for "now", and cite the `git show` read as the evidence for
+"then". This does not overturn the tool, which is right about the code it read; it adds the
+earlier state the tool never saw. A tool-backed `CONFIRMED` is never overturned, in any mode.
+
 **Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.
 A `FALSE_POSITIVE` means no sink of that class exists anywhere in the enclosing scope, so the
 finding's premise does not hold — honour it. An `UNCERTAIN` that names a `taint-*` rule means
@@ -354,7 +369,7 @@ couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 - <ID>: <issue/PR URL you read> — <why it is the same defect>
 
 ## Stale (MODE=DEFERRED only)
-- <ID>: <`git show <commit>:<file>` evidence it was there>; <what moved, rewrote or fixed it>
+- <ID>: <`git show <base_tree>:<file>` evidence it was there>; <what moved, rewrote or fixed it>
 
 ## Uncertain — needs human
 - <ID>: <what context is missing>

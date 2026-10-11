@@ -1058,6 +1058,25 @@ def test_close_writes_a_summary_whose_pool_is_both_deferral_points(git_repo):
     assert s["mode"] == "DIFF" and s["parent"] is None and s["schema"] == 1
 
 
+def test_the_summary_keeps_the_tree_the_auditors_read(git_repo):
+    """The summary records `base_tree`, the start fingerprint: the tree the auditors read, before
+    the run's own fixes. A deferred pass judges STALE against it, and git can show a file in it.
+
+    Red 2026-10-11, two mutations in _write_summary: the `"base_tree": state.base_tree` entry
+    deleted; failed at `assert s.get("base_tree") == audited` (None). It became
+    `"base_tree": core.fingerprint(root)`, the tree at close; failed at the same assert (the
+    tree after the fix, not the audited one).
+    """
+    audited = tree_of(git_repo)
+    closed_parent(git_repo)
+    s = _summary_of(git_repo, "parent")
+    assert s.get("base_tree") == audited
+    assert s["base_tree"] != tree_of(git_repo) and s["schema"] == 1
+    shown = subprocess.run(["git", "-C", str(git_repo), "show", f"{s['base_tree']}:app.py"],
+                           capture_output=True, text=True, check=True).stdout
+    assert shown == "x = 1\n"
+
+
 def test_human_pending_counts_uncertain_and_parked_findings(git_repo):
     """Red 2026-10-11: mutation `+ deferred.parked_count(...)` removed in _write_summary;
     failed at `assert _summary_of(git_repo, "parent")["human_pending"] == 2` (1 == 2)."""

@@ -343,10 +343,13 @@ def test_fp_check_contract_lists_stale_as_a_verdict_with_evidence():
     Red 2026-10-11: baseline 59305b5 text (STALE appears only in the MODE=DEFERRED bullet); failed
     at `assert "**STALE** *(MODE=DEFERRED only)*" in verdicts`. The other assertions were each
     seen False on that same text.
+    Changed 2026-10-11 (I2): STALE is judged against the audited tree, so the evidence named is
+    `git show <base_tree>:<file>`. Red: the text before that fix (`git show <commit>:<file>`);
+    failed at `assert "`git show <base_tree>:<file>`" in verdicts`.
     """
     verdicts = FP_CHECK[FP_CHECK.find("Emit exactly one verdict"):FP_CHECK.find("## Deterministic-first")]
     assert "**STALE** *(MODE=DEFERRED only)*" in verdicts
-    assert "`git show <commit>:<file>`" in verdicts
+    assert "`git show <base_tree>:<file>`" in verdicts
     output_format = FP_CHECK[FP_CHECK.find("## Output Format"):FP_CHECK.find("## Execution Logging")]
     assert re.search(r"^\| \S+ \| STALE \| ", output_format, re.M)
     assert "## Stale (MODE=DEFERRED only)" in output_format
@@ -361,13 +364,18 @@ def test_fp_check_existence_and_input_cover_the_deferred_mode():
     Red 2026-10-11: baseline 59305b5 text (Existence says nothing of STALE; Input names no
     `base_commit`); failed at `assert "STALE" in existence`. The other assertions were each seen
     False on that same text.
+    Changed 2026-10-11 (I2): the earlier run's state is its `base_tree`, not its `commit`, which
+    already holds its own fixes. Red: the text before that fix (Existence names the earlier
+    run's `commit`, Input gives `base_commit` and `commit`); failed at `assert "`base_tree`" in
+    existence`. The Input assertion was also seen False on that same text.
     """
     existence = " ".join(
         FP_CHECK[FP_CHECK.find("1. **Existence**"):FP_CHECK.find("2. **In scope**")].split()
     )
     assert "STALE" in existence and "not FALSE_POSITIVE" in existence
+    assert "`base_tree`" in existence
     given = " ".join(FP_CHECK[FP_CHECK.find("## Input"):FP_CHECK.find("## Verdict per Finding")].split())
-    assert "given `base_commit` and `commit`" in given
+    assert "given `base_tree` and `base_commit`" in given
     phases = " ".join(FP_CHECK[FP_CHECK.find("## Deterministic-first"):].split())
     assert "For each finding you are sent (P1/P2, or every deferred finding in MODE=DEFERRED)" in phases
 
@@ -495,3 +503,47 @@ def test_a_deferred_run_keeps_duplicates_for_l2_5_instead_of_merging_them():
     d4 = " ".join(second[second.find("**D.4 Step 2.5"):second.find("**D.5 Steps")].split())
     assert "CONFIRMED, FALSE_POSITIVE, DUPLICATE, STALE or UNCERTAIN" in d4
     assert '`"verdict": "DUPLICATE"`' in d4 and "`--duplicate <D>`" in d4
+
+
+def test_stale_is_judged_against_the_tree_the_first_run_audited():
+    """The parent's `commit` already holds its own fixes, so a finding those fixes removed is
+    absent there too and would read as never present. STALE is judged against the parent's
+    `base_tree` (the tree its auditors read), with `base_commit` plus the finding's own evidence
+    when git no longer has that tree, and nothing still says `git show <commit>:<file>`.
+
+    Red 2026-10-11: the D.4 and cca-fp-check.md text before the fix (STALE judged with
+    `git show <commit>:<file>`); failed at `assert "`git show <commit>:<file>`" not in PIPELINE`.
+    Every later assertion was also seen False on that same text.
+    """
+    assert "`git show <commit>:<file>`" not in PIPELINE
+    assert "git show <commit>:<file>" not in FP_CHECK
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    d4 = " ".join(second[second.find("**D.4 Step 2.5"):second.find("**D.5 Steps")].split())
+    assert "given the parent's `base_tree`" in d4
+    assert "the tree the first run audited (`git show <base_tree>:<file>`)" in d4
+    assert "`git show <base_commit>:<file>` and weigh the finding's own evidence" in d4
+    in_scope = " ".join(FP_CHECK[FP_CHECK.find("2. **In scope**"):FP_CHECK.find("3. **Impact**")]
+                        .split())
+    deferred_bullet = in_scope[in_scope.find("**MODE=DEFERRED**"):]
+    assert "`git show <base_tree>:<file>`" in deferred_bullet
+    assert "`git show <base_commit>:<file>`" in deferred_bullet
+
+
+def test_fp_check_turns_a_tool_false_positive_into_stale_in_deferred_mode():
+    """In MODE=DEFERRED a finding fixed after the first run audited it comes back tool-backed
+    FALSE_POSITIVE; the no-overturn rule must say that this is the "now" half of a STALE
+    verdict, or the scorecard is told the auditor was wrong about a real issue.
+
+    Red 2026-10-11: the cca-fp-check.md text before the fix (the no-overturn rule with no
+    exception); failed at `assert "MODE=DEFERRED only" in exception`. Every later assertion was
+    also seen False on that same text.
+    """
+    rule_at = FP_CHECK.find("You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`")
+    assert rule_at >= 0
+    exception = " ".join(FP_CHECK[rule_at:FP_CHECK.find("**Taint verdicts are asymmetric.**")]
+                         .split())
+    assert "MODE=DEFERRED only" in exception
+    assert "the verdict is **STALE**, not FALSE_POSITIVE" in exception
+    assert 'keep the tool artifact verbatim as the evidence for "now"' in exception
+    assert '`git show` read as the evidence for "then"' in exception
+    assert "A tool-backed `CONFIRMED` is never overturned, in any mode." in exception

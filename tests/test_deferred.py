@@ -94,6 +94,23 @@ def test_an_unreachable_commit_is_reported():
     assert any("not an ancestor of HEAD" in r for r in offer.reasons)
 
 
+def test_the_offer_carries_the_runs_audited_tree_and_diff_base():
+    """fp-check needs the parent's `base_tree` (STALE) and `base_commit` (scope); the offer hands
+    them over as the summary states them, and None for a value that is not a string.
+
+    Red 2026-10-11, two mutations in assess: `base_tree=...` became `base_tree=None`; failed at
+    `assert offer.base_tree == "t1"` (None). `base_commit=...` became `base_commit=None`;
+    failed at `assert offer.base_commit == "b"` (None).
+    """
+    s = _s(base_tree="t1")
+    offer = deferred.assess(s, [s], [_f(1)], commit_reachable=True)
+    assert offer.base_tree == "t1" and offer.to_json()["base_tree"] == "t1"
+    assert offer.base_commit == "b"
+    bad = _s(base_tree=["t1"], base_commit=7)
+    offer = deferred.assess(bad, [bad], [_f(1)], commit_reachable=True)
+    assert offer.base_tree is None and offer.base_commit is None
+
+
 def test_an_older_unconsumed_pool_is_listed_beside_the_newest():
     """Red 2026-10-11: mutation `others = []` in assess; failed at
     `assert offer.other_pools == ["old"]` ([] == ['old'])."""

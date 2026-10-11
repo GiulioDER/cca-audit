@@ -989,8 +989,8 @@ and nothing after it:
 Yes: continue with § Second Pass in this session. No: stop; `/audit-fix deferred` still works
 later, until a completed deferred run takes the pool. The recommendation is advice: SKIP never
 refuses the pass. A `no-fix` run, a deferred run and a hunt are never offered one, and the
-command says which. If `commit_reachable` is false, repeat that reason too: it weakens the STALE
-check of the pass.
+command says which. If `commit_reachable` is false, repeat that reason too: the pass would verify
+the pool against a history that does not hold the first run's work.
 
 ## Second Pass: the Deferred Run
 
@@ -1056,8 +1056,9 @@ and D.4 gives the later one the verdict `DUPLICATE`. Record as Step 2 says. Afte
 `commit:<sha>` parent left no stored pool, so nothing is compared.
 
 **D.4 Step 2.5 (L2.5).** One `fp-check` over every finding, P2 and P3 alike, in MODE=DEFERRED,
-given the parent's `base_commit` and `commit` (`pipeline deferred` printed the run id; both are in
-`.claude/audits/runs/<run_id>/summary.json`):
+given the parent's `base_tree` (the tree its auditors read, before its own fixes) and `base_commit`
+(its diff base). `pipeline deferred` prints both; they are also in
+`.claude/audits/runs/<run_id>/summary.json`:
 
 ```
 subagent_type: fp-check
@@ -1068,14 +1069,20 @@ MODE=DEFERRED. For each finding, verify against ACTUAL code via Read/Grep:
        check could not run.
   (c) is the stated impact real, or already mitigated?
   (d) does it contradict an already-SETTLED decision?
-STALE: the issue is present at the first run's commit (`git show <commit>:<file>`) and absent
-now, because later work moved, rewrote or fixed it. FALSE_POSITIVE means it was never there.
+STALE: the issue is present in the tree the first run audited (`git show <base_tree>:<file>`)
+and absent now, because later work moved, rewrote or fixed it, that run's own fixes included.
+If base_tree is null or git no longer has that tree, read `git show <base_commit>:<file>` and
+weigh the finding's own evidence, since the audited tree may have held uncommitted changes.
+FALSE_POSITIVE means it was never there. A tool-backed FALSE_POSITIVE on a finding present in
+the audited tree is the "now" half of a STALE verdict, not a refutation.
 Verdict per finding: CONFIRMED | FALSE_POSITIVE | STALE | UNCERTAIN.
 ```
 
-On the commit-message fallback there is no `summary.json`. The parent's commit for the STALE check
-is the `<sha>` named in `--from commit:<sha>`, and the scope check (b″) is not run: give `fp-check`
-no `base_commit`, so it reports that the check could not run.
+On the commit-message fallback there is no `summary.json`, so there is no `base_tree` either. For
+the STALE check give `fp-check` the `<sha>` named in `--from commit:<sha>` in place of the audited
+tree, and say that this commit already holds the first run's fixes: a finding absent there is
+STALE when its own evidence shows it was present. The scope check (b″) is not run: give
+`fp-check` no `base_commit`, so it reports that the check could not run.
 
 A finding D.3 kept beside an earlier one with the same dedup key is not sent to `fp-check`: it
 gets the verdict `DUPLICATE`, with the id it duplicates as its evidence. So in a deferred run the

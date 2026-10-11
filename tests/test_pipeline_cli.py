@@ -313,6 +313,25 @@ def test_deferred_reports_the_newest_run_and_recommends(capsys, git_repo):
     assert out["counts"]["P3"] == 3 and out["other_pools"] == ["first"]
 
 
+def test_deferred_prints_the_parents_audited_tree_and_base(capsys, git_repo):
+    """D.4 hands fp-check the parent's `base_tree` and `base_commit`, read from this command's
+    JSON, with or without `--write`.
+
+    Red 2026-10-11: mutation `base_tree=...` became `base_tree=None` in deferred.assess; failed
+    at `assert code == 0 and out["base_tree"] == summary["base_tree"]` (None against the sha).
+    """
+    closed_parent(git_repo, p3=3)
+    summary = json.loads((git_repo / ".claude/audits/runs/parent/summary.json")
+                         .read_text(encoding="utf-8"))
+    assert summary["base_tree"]
+    code, out, _ = _cli(capsys, "deferred", "--root", str(git_repo))
+    assert code == 0 and out["base_tree"] == summary["base_tree"]
+    assert out["base_commit"] == summary["base_commit"]
+    code, out, _ = _cli(capsys, "deferred", "--write", ".claude/audits/out/L1.json",
+                        "--root", str(git_repo))
+    assert code == 0 and out["base_tree"] == summary["base_tree"]
+
+
 def test_deferred_run_selects_a_named_run_and_refuses_an_unknown_one(capsys, git_repo):
     """Red 2026-10-11: mutation `if run_id:` became `if False:` in _deferred_context; failed at
     `assert code == 0 and out["run_id"] == "first" ...` ('second' == 'first': the newest run was
