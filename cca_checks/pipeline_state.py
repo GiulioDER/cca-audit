@@ -46,9 +46,9 @@ from cca_checks import deferred, layer_outputs
 
 __all__ = [
     "CommitDecision", "LAYERS", "MODES", "OUTPUT_LAYERS", "PipelineState", "RecordRefused",
-    "TIERS", "abort", "close", "deferred_report", "load", "outstanding", "pause", "record",
-    "required_layers", "resume", "start", "state_path", "verify_commit_allowed",
-    "write_deferred",
+    "TIERS", "abort", "close", "current_tree", "deferred_report", "load", "outstanding",
+    "pause", "record", "required_layers", "resume", "start", "state_path",
+    "verify_commit_allowed", "write_deferred",
 ]
 
 
@@ -81,6 +81,16 @@ _PAUSED = (
 
 class RecordRefused(ValueError):
     """A layer that may not be recorded yet, or not with these numbers."""
+
+
+class _Unset:
+    """Marks a `tree` argument the caller did not pass: None is a real fingerprint answer."""
+
+
+#: Default for every `tree=` parameter. The fingerprint runs `git add -A` over a copy of
+#: the index, the costliest thing these functions do, so a caller answering several
+#: questions about one run computes it once with `current_tree` and passes it to each.
+_UNSET = _Unset()
 
 
 def state_path(root: str | pathlib.Path = ".") -> pathlib.Path:
@@ -283,7 +293,8 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     no trail. Retiring a run is `abort()`, which is explicit and logged. `base` is the
     revision the audited diff is taken against; its sha is stored as `base_commit`. A run id
     that already names a completed run (one holding a `summary.json`) is refused, so the
-    stored work a later deferred pass reads is never overwritten.
+    stored work a later deferred pass reads is never overwritten; so is any id an earlier run
+    left stored outputs or ledger rows under, whose rows would count toward this run's L2.5.
 
     A DEFERRED run names the run it follows in `parent` (a run id, or `commit:<sha>` for a
     run that left no summary). `_deferred_parent` checks it; the run then takes that run's
@@ -325,6 +336,13 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
             f"run id {new_id!r} already names a completed run under .claude/audits/runs/; "
             "pick another --run-id, so that run's stored work is not overwritten"
         )
+    if (deferred.runs_dir(root) / new_id).exists() or _ledger_mentions(root, new_id):
+        # A reused id would count the earlier run's ledger rows toward this run's L2.5
+        # and overwrite its stored outputs.
+        raise RecordRefused(
+            f"run id {new_id!r} was used by an earlier run (its outputs or ledger rows "
+            "exist); start with a new --run-id"
+        )
     if mode == "DEFERRED":
         stored_parent, base_commit = _deferred_parent(tier, no_fix, parent, root)
     else:
@@ -345,17 +363,38 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     return state
 
 
-def _ledger_rows(root, run_id: str) -> tuple[int, int]:
-    """(disposition rows for run_id, malformed lines). Outcome rows carry no
-    `verdict` key and are not dispositions (Review Focus 4). Read as `utf-8-sig`: a ledger
-    created by Windows PowerShell 5.1 starts with a BOM, which would make its first row
-    malformed and refuse L2.5."""
-    path = pathlib.Path(root) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
-    rows = malformed = 0
+#: Ledger verdict to the L2.5 count it tallies against. DEFERRED is absent on purpose: a
+#: finding passed on unverified received no verdict, so it gets no ledger row. STALE is
+#: present: a DEFERRED run's verifier gives it, and it gets a row like any other verdict.
+_VERDICT_COUNTS = {"CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp",
+                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate", "STALE": "stale"}
+
+
+LEDGER = ".claude/audits/AUDITOR_SCORECARD.jsonl"
+
+
+def ledger_path(root: str | pathlib.Path = ".") -> pathlib.Path:
+    return pathlib.Path(root) / LEDGER
+
+
+def ledger_rows(root: str | pathlib.Path = ".") -> tuple[list[dict], int]:
+    """(rows of the disposition ledger, malformed lines); the one reader every gate uses."""
+    return _ledger(root)
+
+
+def _ledger(root) -> tuple[list[dict], int]:
+    """(rows of the disposition ledger, malformed lines).
+
+    Read as `utf-8-sig`: a ledger created by Windows PowerShell 5.1 starts with a BOM, which
+    would make its first row malformed and refuse L2.5.
+    """
+    path = ledger_path(root)
+    rows: list[dict] = []
+    malformed = 0
     try:
         lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
-        return 0, 0
+        return [], 0
     for line in lines:
         if not line.strip():
             continue
@@ -364,9 +403,25 @@ def _ledger_rows(root, run_id: str) -> tuple[int, int]:
         except json.JSONDecodeError:
             malformed += 1
             continue
-        if isinstance(row, dict) and "verdict" in row and str(row.get("run_id")) == run_id:
-            rows += 1
+        if isinstance(row, dict):
+            rows.append(row)
     return rows, malformed
+
+
+def _ledger_mentions(root, run_id: str) -> bool:
+    return any(str(row.get("run_id")) == run_id for row in _ledger(root)[0])
+
+
+def _ledger_rows(root, run_id: str) -> tuple[dict[str, int], int]:
+    """(disposition rows for run_id tallied by verdict, malformed lines). Outcome rows
+    carry no `verdict` key and are not dispositions (Review Focus 4)."""
+    rows, malformed = _ledger(root)
+    tally: dict[str, int] = {}
+    for row in rows:
+        if "verdict" in row and str(row.get("run_id")) == run_id:
+            verdict = str(row.get("verdict"))
+            tally[verdict] = tally.get(verdict, 0) + 1
+    return tally, malformed
 
 
 def _need(counts: dict, key: str, layer: str) -> int:
@@ -399,32 +454,36 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
     if layer == "L2":
         _need(counts, "unique", layer)
     elif layer == "L2.5":
-        judged = sum(
-            _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
-        )
-        # `n_deferred`, not `deferred`: that name is kept free for the deferred-pass module
-        # this file imports.
-        n_deferred = _optional(counts, "deferred", layer)
-        stale = _optional(counts, "stale", layer)
-        if n_deferred and state.mode == "DEFERRED":
+        given = {
+            k: _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
+        }
+        # Findings passed on without a verdict (P3, and P2 on FAST): Step 2.5 verifies only
+        # P1/P2, so without this count every run with a P3 was refused here. The L2.5 file
+        # marks each of them DEFERRED, and the ledger holds no row for them.
+        unverified = _optional(counts, "unverified", layer)
+        given["stale"] = _optional(counts, "stale", layer)
+        if unverified and state.mode == "DEFERRED":
             raise RecordRefused(_NO_DEFERRAL)
-        if stale and state.mode != "DEFERRED":
+        if given["stale"] and state.mode != "DEFERRED":
             raise RecordRefused(
                 "--stale is for a DEFERRED run only: STALE means the code moved on since the "
                 "run that deferred the finding, and a first run has no earlier run"
             )
-        judged += stale
-        total = judged + n_deferred
+        judged = sum(given.values())
+        total = judged + unverified
         unique = _layer_count(state, "L2", "unique")
         if unique is not None and total != unique:
             raise RecordRefused(
-                f"L2.5 accounts for {total} findings but L2 recorded {unique} unique; "
-                "every consolidated finding needs exactly one verdict, DEFERRED included"
+                f"L2.5 accounts for {total} findings ({judged} verdicts, {unverified} "
+                f"unverified) but L2 recorded {unique} unique; every consolidated finding "
+                "needs exactly one verdict, or is counted with --unverified (and marked "
+                "DEFERRED in the L2.5 file) when Step 2.5 passes it on unverified"
             )
         if state.tier != "FAST":
-            rows, malformed = _ledger_rows(root, state.run_id)
+            tally, malformed = _ledger_rows(root, state.run_id)
+            rows = sum(tally.values())
+            note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
             if rows != judged:
-                note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
                 raise RecordRefused(
                     f"the disposition ledger holds {rows} row(s) for run {state.run_id} but "
                     f"L2.5 recorded {judged} verdicts{note}; append one row per verified "
@@ -432,8 +491,25 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
                     ".claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
                     f'"run_id": "{state.run_id}"'
                 )
+            unknown = sorted(set(tally) - set(_VERDICT_COUNTS))
+            mismatched = [
+                f"{verdict}: ledger {tally.get(verdict, 0)}, --{key} {given[key]}"
+                for verdict, key in _VERDICT_COUNTS.items()
+                if tally.get(verdict, 0) != given[key]
+            ]
+            if unknown or mismatched:
+                detail = "; ".join(
+                    mismatched + [f"unknown verdict {v!r}" for v in unknown]
+                )
+                raise RecordRefused(
+                    f"the disposition ledger for run {state.run_id} disagrees with the L2.5 "
+                    f"counts ({detail}){note}; each ledger row's verdict must be one of "
+                    f"{', '.join(_VERDICT_COUNTS)}"
+                )
     elif layer == "L3":
         to_fix = _need(counts, "to_fix", layer)
+        # `n_deferred`, not `deferred`: that name is kept free for the deferred-pass module
+        # this file imports.
         n_deferred = _optional(counts, "deferred", layer)
         if n_deferred and state.mode == "DEFERRED":
             raise RecordRefused(_NO_DEFERRAL)
@@ -601,7 +677,8 @@ def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
 
 def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | None = None,
            counts: dict | None = None, source: str = "cli", output=None,
-           root: str | pathlib.Path = ".") -> PipelineState:
+           root: str | pathlib.Path = ".",
+           tree: str | None | _Unset = _UNSET) -> PipelineState:
     """Record that `layer` was reached and given a verdict.
 
     Raises RecordRefused when the run is paused, the layer is out of order, is a tool
@@ -610,6 +687,9 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
     that disagrees with its counts or with the earlier files (see `_check_shape`). A layer outside
     OUTPUT_LAYERS given an `output` is refused too, so the prose cannot drift from the
     code by passing a flag that would be silently ignored.
+
+    `tree`, when passed, must be a fingerprint taken in this same call chain with
+    nothing but `.claude/audits/` written since; omitted, it is computed here.
     """
     if layer not in LAYERS:
         raise ValueError(f"unknown layer {layer!r} (expected one of {', '.join(LAYERS)})")
@@ -633,7 +713,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             raise RecordRefused(
                 f"{layer} is recorded by its tool, not by hand: {core.TOOL_LAYERS[layer]}"
             )
-        tree = core.fingerprint(root)
+        if isinstance(tree, _Unset):
+            tree = core.fingerprint(root)
         raw = state.to_json()
         owed = core.fixes_owed(raw, tree) or (fixes or 0) > 0
         missing = [p for p in core.predecessors(layer, raw, owed) if p not in state.layers]
@@ -641,6 +722,13 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             raise RecordRefused(
                 f"{layer} cannot be recorded before {', '.join(missing)}; re-read "
                 f"{core.HEADINGS[missing[0]]} of audit-fix.md and run it first"
+            )
+        if layer in core.FIX_VERDICT_LAYERS and tree is None:
+            raise RecordRefused(
+                f"{layer} cannot be recorded: the working tree could not be fingerprinted "
+                "(git missing from PATH, older than 2.31, or timed out), so the verdict "
+                "could never be shown current. Fix git and record again, or retire the run "
+                "with `pipeline abort --reason`"
             )
         gate04 = state.layers.get("L0.4")
         if "L0.4" in core.predecessors(layer, raw, owed) and \
@@ -672,32 +760,39 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
     return state
 
 
-def _tree(state: PipelineState, root) -> str | None:
+def current_tree(state: PipelineState, root: str | pathlib.Path = ".") -> str | None:
+    """The fingerprint this run is judged against; a 0.10.x run is never judged by one."""
     return None if state.legacy else core.fingerprint(root)
 
 
-def required_layers(state: PipelineState, root: str | pathlib.Path = ".") -> tuple[str, ...]:
+def _tree(state: PipelineState, root, tree: str | None | _Unset) -> str | None:
+    return current_tree(state, root) if isinstance(tree, _Unset) else tree
+
+
+def required_layers(state: PipelineState, root: str | pathlib.Path = ".", *,
+                    tree: str | None | _Unset = _UNSET) -> tuple[str, ...]:
     if state.legacy:
         required = list(core.LEGACY_CORE_REQUIRED)
         if state.fixes_applied > 0:
             required.extend(core.LEGACY_FIX_REQUIRED[state.tier])
         return tuple(required)
     raw = state.to_json()
-    return core.required_layers(raw, core.fixes_owed(raw, _tree(state, root)))
+    return core.required_layers(raw, core.fixes_owed(raw, _tree(state, root, tree)))
 
 
-def outstanding(state: PipelineState, root: str | pathlib.Path = ".") -> list[str]:
+def outstanding(state: PipelineState, root: str | pathlib.Path = ".", *,
+                tree: str | None | _Unset = _UNSET) -> list[str]:
     """What this run still owes before it may close. Legacy runs owe nothing here."""
     if state.legacy:
         return []
-    return core.outstanding(state.to_json(), _tree(state, root))
+    return core.outstanding(state.to_json(), _tree(state, root, tree))
 
 
-def verify_commit_allowed(state: PipelineState | None,
-                          root: str | pathlib.Path = ".") -> CommitDecision:
+def verify_commit_allowed(state: PipelineState | None, root: str | pathlib.Path = ".", *,
+                          tree: str | None | _Unset = _UNSET) -> CommitDecision:
     if state is None:
         return CommitDecision(allowed=True, reasons=["no CCA run is open"])
-    reasons = core.commit_reasons(state.to_json(), _tree(state, root))
+    reasons = core.commit_reasons(state.to_json(), _tree(state, root, tree))
     return CommitDecision(allowed=not reasons, reasons=reasons, run_id=state.run_id)
 
 
@@ -812,7 +907,7 @@ def resume(root: str | pathlib.Path = ".") -> dict:
     if not state.paused:
         raise RecordRefused("the run is not paused; there is nothing to resume")
     stored = state.paused.get("tree")
-    tree = _tree(state, root)
+    tree = current_tree(state, root)
     state.paused = None
     # A resumed session is a new session: it gets the Stop hook's three refusals again.
     state.stop_refusals = 0

@@ -55,7 +55,7 @@ def test_l2_5_maps_ids_to_verdicts_when_the_tally_matches():
     """Red 2026-10-11: mutation `return verdicts` became `return {}` in l25_verdicts; failed at
     the assert (`assert {} == {'F-1': 'CONFIRMED', 'F-2': 'DEFERRED'}`)."""
     data = [{"id": "F-1", "verdict": "CONFIRMED"}, {"id": "F-2", "verdict": "DEFERRED"}]
-    got = lo.l25_verdicts(data, {"confirmed": 1, "deferred": 1}, ["F-1", "F-2"])
+    got = lo.l25_verdicts(data, {"confirmed": 1, "unverified": 1}, ["F-1", "F-2"])
     assert got == {"F-1": "CONFIRMED", "F-2": "DEFERRED"}
 
 

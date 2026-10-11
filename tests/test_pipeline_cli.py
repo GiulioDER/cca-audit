@@ -243,10 +243,11 @@ def test_start_with_a_bad_run_id_exits_2(capsys, git_repo):
 
 
 def test_deferred_and_stale_flags_reach_the_counts(capsys, git_repo):
-    """--deferred reaches record's counts, so L2.5 can account for a deferred finding.
+    """--unverified reaches record's counts, so L2.5 can account for a DEFERRED finding.
 
     Red 2026-10-11: mutation `"deferred": a.deferred` became `"deferred": None` in _pipeline;
     failed at `assert code == 0` (2 == 0: accounts for 1 findings but L2 recorded 2 unique).
+    (key renamed to unverified at the master merge)
     --stale reaches it too: a first run refuses it, and the reason says so.
     Red 2026-10-11: mutation `"stale": a.stale` became `"stale": None` in _pipeline; failed at
     `assert "--stale is for a DEFERRED run only" in err["reason"]` (the reason instead read
@@ -262,8 +263,8 @@ def test_deferred_and_stale_flags_reach_the_counts(capsys, git_repo):
     assert code == 2
     assert "--stale is for a DEFERRED run only" in err["reason"]
     code, _, _ = _cli(capsys, "record", "L2.5", "--confirmed", "1", "--fp", "0",
-                      "--uncertain", "0", "--duplicate", "0", "--deferred", "1",
-                      "--output", verdicts_output(r, confirmed=1, deferred=1), "--root", r)
+                      "--uncertain", "0", "--duplicate", "0", "--unverified", "1",
+                      "--output", verdicts_output(r, confirmed=1, unverified=1), "--root", r)
     assert code == 0
 
 
@@ -591,3 +592,52 @@ def test_round_trip_from_closed_parent_to_a_started_deferred_run(capsys, git_rep
     code, rec, _ = _cli(capsys, "record", "L1", "--detail", "loaded 3 from parent",
                         "--output", out_file, "--root", r)
     assert code == 0 and rec["output"] == ".claude/audits/runs/child/L1.json"
+
+
+def _count_fingerprints(monkeypatch) -> list[int]:
+    from cca_checks import pipeline_state
+
+    calls = [0]
+    real = pipeline_state.core.fingerprint
+
+    def counted(root):
+        calls[0] += 1
+        return real(root)
+
+    monkeypatch.setattr(pipeline_state.core, "fingerprint", counted)
+    return calls
+
+
+def test_status_fingerprints_the_tree_once(capsys, git_repo, monkeypatch):
+    """`pipeline status` runs `git add -A` on a copied index once, not once per question.
+
+    Invariant: one CLI call judges the run against one tree. Failure mode: status asked
+    `verify_commit_allowed`, `outstanding` and `required_layers` separately, each of which
+    fingerprinted the whole repository again (three `git add -A` runs per status).
+
+    Red 2026-10-11: baseline 471030f; failed at `assert calls[0] == 1` (3 == 1).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "STANDARD", "--root", r)
+    calls = _count_fingerprints(monkeypatch)
+    code, out, _ = _cli(capsys, "status", "--root", r)
+    assert code == 0 and out["open"]
+    assert calls[0] == 1
+
+
+def test_record_fingerprints_the_tree_once(capsys, git_repo, monkeypatch):
+    """`pipeline record` judges the record and the commit decision against one tree.
+
+    Failure mode: `record` fingerprinted the tree, then the CLI's `verify_commit_allowed`
+    fingerprinted it again, although recording only writes under `.claude/audits/`, which
+    the fingerprint excludes.
+
+    Red 2026-10-11: baseline 471030f; failed at `assert calls[0] == 1` (2 == 1).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--root", r)
+    out_file = write_output(git_repo)
+    calls = _count_fingerprints(monkeypatch)
+    code, out, _ = _cli(capsys, "record", "L1", "--output", out_file, "--root", r)
+    assert code == 0 and out["recorded"] == "L1"
+    assert calls[0] == 1

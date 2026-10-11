@@ -65,7 +65,7 @@ def write_output(root, value=None) -> str:
 #: the first `to_fix + deferred` ids names only findings L2.5 confirmed.
 _VERDICT_ORDER = (("confirmed", "CONFIRMED"), ("fp", "FALSE_POSITIVE"),
                   ("uncertain", "UNCERTAIN"), ("duplicate", "DUPLICATE"),
-                  ("deferred", "DEFERRED"), ("stale", "STALE"))
+                  ("unverified", "DEFERRED"), ("stale", "STALE"))
 
 
 def finding_id(i: int) -> str:
@@ -84,7 +84,7 @@ def findings_output(root, n=0, *, priorities=None) -> str:
 
 def verdicts_output(root, **counts) -> str:
     """An L2.5 file whose verdicts match `counts`, keyed like the record flags
-    (confirmed, fp, uncertain, duplicate, deferred, stale)."""
+    (confirmed, fp, uncertain, duplicate, unverified, stale); `unverified` ids get DEFERRED."""
     rows, i = [], 1
     for key, verdict in _VERDICT_ORDER:
         for _ in range(counts.get(key, 0)):
@@ -99,14 +99,16 @@ def plan_output(root, *, to_fix=0, deferred=0) -> str:
     return write_output(root, {"to_fix": ids[:to_fix], "deferred": ids[to_fix:]})
 
 
-def append_ledger(repo, run_id, n, *, outcome_rows=0, outcome_result="fixed") -> None:
-    """`n` verdict rows and `outcome_rows` outcome rows for `run_id` in the disposition ledger."""
+def append_ledger(repo, run_id, n, *, outcome_rows=0, outcome_result="fixed",
+                  verdict="CONFIRMED") -> None:
+    """`n` verdict rows (each `verdict`) and `outcome_rows` outcome rows for `run_id` in the
+    disposition ledger. L2.5 tallies the rows per verdict, so each must match its count."""
     path = pathlib.Path(repo) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         for i in range(n):
             fh.write(json.dumps({"run_id": run_id, "auditor": "cca-bug-auditor",
-                                 "category": "x", "verdict": "CONFIRMED",
+                                 "category": "x", "verdict": verdict,
                                  "fix_id": f"FIX-{i}"}) + "\n")
         for i in range(outcome_rows):
             fh.write(json.dumps({"run_id": run_id, "fix_id": f"FIX-{i}",
@@ -128,10 +130,11 @@ def closed_parent(repo, *, run_id="parent", p2_deferred=0, p3=3, human=0, parked
     ps.record("L1", output=write_output(repo), root=repo)
     ps.record("L2", counts={"unique": unique},
               output=findings_output(repo, unique, priorities=p3_ids), root=repo)
-    append_ledger(repo, run_id, confirmed + human)
+    append_ledger(repo, run_id, confirmed)
+    append_ledger(repo, run_id, human, verdict="UNCERTAIN")
     ps.record("L2.5", counts={"confirmed": confirmed, "fp": 0, "uncertain": human,
-                              "duplicate": 0, "deferred": p3},
-              output=verdicts_output(repo, confirmed=confirmed, uncertain=human, deferred=p3),
+                              "duplicate": 0, "unverified": p3},
+              output=verdicts_output(repo, confirmed=confirmed, uncertain=human, unverified=p3),
               root=repo)
     ps.record("L2.6", detail="0 cells", source="tool", root=repo)
     ps.record("L3", counts={"to_fix": 1, "deferred": p2_deferred},

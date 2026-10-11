@@ -656,16 +656,16 @@ def test_deferred_findings_complete_the_l2_5_sum(git_repo):
 
     Red 2026-10-11: mutation `total = judged + n_deferred` became `total = judged` in
     _check_counts; failed at the second L2.5 record (uncaught RecordRefused: accounts for 1
-    findings but L2 recorded 3 unique).
+    findings but L2 recorded 3 unique). (key renamed to unverified at the master merge)
     """
     _to_l2(git_repo, "FAST", 3)
     with pytest.raises(ps.RecordRefused, match="3 unique"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
                   output=verdicts_output(git_repo, confirmed=1), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                              "deferred": 2},
-              output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
-    assert ps.load(git_repo).layers["L2.5"]["counts"]["deferred"] == 2
+                              "unverified": 2},
+              output=verdicts_output(git_repo, confirmed=1, unverified=2), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"]["unverified"] == 2
 
 
 def test_a_deferred_finding_gets_no_ledger_row(git_repo):
@@ -677,14 +677,15 @@ def test_a_deferred_finding_gets_no_ledger_row(git_repo):
     Red 2026-10-11 (closing assertion): mutation `entry["counts"] = counts` became
     `entry["counts"] = {k: v for k, v in counts.items() if k != "deferred"}` in record; failed
     at the closing `assert ... == {..., "deferred": 2}` (the stored counts lack "deferred").
+    (key renamed to unverified at the master merge)
     """
     _to_l2(git_repo, "STANDARD", 3, priorities={"F-2": "P3", "F-3": "P3"})
     append_ledger(git_repo, "r1", 1)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                              "deferred": 2},
-              output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
+                              "unverified": 2},
+              output=verdicts_output(git_repo, confirmed=1, unverified=2), root=git_repo)
     assert ps.load(git_repo).layers["L2.5"]["counts"] == {
-        "confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0, "deferred": 2,
+        "confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0, "unverified": 2,
     }
 
 
@@ -699,8 +700,8 @@ def test_a_ledger_row_for_a_deferred_finding_is_refused(git_repo):
     append_ledger(git_repo, "r1", 3)
     with pytest.raises(ps.RecordRefused, match="ledger holds 3"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                                  "deferred": 2},
-                  output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
+                                  "unverified": 2},
+                  output=verdicts_output(git_repo, confirmed=1, unverified=2), root=git_repo)
 
 
 def test_stale_is_refused_outside_a_deferred_run(git_repo):
@@ -868,8 +869,8 @@ def test_a_p1_cannot_be_passed_on_unverified(git_repo):
     _to_l2(git_repo, "FAST", 2, priorities={"F-2": "P1"})
     with pytest.raises(ps.RecordRefused, match=r"L2\.5 defers F-2 \(P1\)"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                                  "deferred": 1},
-                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+                                  "unverified": 1},
+                  output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
 
 
 def test_a_p2_cannot_be_passed_on_unverified_on_standard(git_repo):
@@ -883,8 +884,8 @@ def test_a_p2_cannot_be_passed_on_unverified_on_standard(git_repo):
     append_ledger(git_repo, "r1", 1)
     with pytest.raises(ps.RecordRefused, match=r"L2\.5 defers F-2 \(P2\)"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                                  "deferred": 1},
-                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+                                  "unverified": 1},
+                  output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
 
 
 def test_a_p2_may_be_passed_on_unverified_on_fast(git_repo):
@@ -896,9 +897,9 @@ def test_a_p2_may_be_passed_on_unverified_on_fast(git_repo):
     """
     _to_l2(git_repo, "FAST", 2)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                              "deferred": 1},
-              output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
-    assert ps.load(git_repo).layers["L2.5"]["counts"]["deferred"] == 1
+                              "unverified": 1},
+              output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"]["unverified"] == 1
 
 
 def test_l3_defers_a_confirmed_p2_but_never_a_p1(git_repo):
@@ -1022,6 +1023,8 @@ def test_a_bom_prefixed_ledger_is_still_counted(git_repo):
     Red 2026-10-11: mutation `read_text(encoding="utf-8-sig")` became
     `read_text(encoding="utf-8")` in _ledger_rows; failed at the L2.5 record (uncaught
     RecordRefused from the ledger check: 0 rows against 1 verdict, 1 malformed line skipped).
+    At the master merge the read moved into `_ledger`, which every ledger reader of the gate
+    now shares; the same mutation there, run 2026-10-11, fails the same way.
     """
     _to_l2(git_repo, "STANDARD", 1)
     ledger = git_repo / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
@@ -1082,8 +1085,8 @@ def test_a_no_fix_run_summary_pools_what_l2_5_deferred(git_repo):
               output=findings_output(git_repo, 2, priorities={"F-2": "P3"}), root=git_repo)
     append_ledger(git_repo, "nf", 1)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                              "deferred": 1},
-              output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+                              "unverified": 1},
+              output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
     ps.record("L2.6", detail="0 cells", source="tool", root=git_repo)
     ps.close(root=git_repo)
     s = _summary_of(git_repo, "nf")
@@ -1321,6 +1324,9 @@ def test_a_deferred_run_cannot_defer(git_repo):
     in the L2.5 branch of _check_counts; failed at the first pytest.raises (the regex did not
     match: the reason was "L2.5 defers F-2 (P2)", the shape rule). Also: the same mutation in
     the L3 branch; failed at the second pytest.raises (DID NOT RAISE RecordRefused).
+    (key renamed to unverified at the master merge)
+    The second ledger row is a STALE row since the master merge, which tallies the ledger per
+    verdict: a second CONFIRMED row against `--stale 1` would now be refused.
     """
     closed_parent(git_repo)
     ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
@@ -1329,9 +1335,9 @@ def test_a_deferred_run_cannot_defer(git_repo):
     append_ledger(git_repo, "c", 1)
     with pytest.raises(ps.RecordRefused, match="cannot defer"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                                  "deferred": 1},
-                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
-    append_ledger(git_repo, "c", 1)
+                                  "unverified": 1},
+                  output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
+    append_ledger(git_repo, "c", 1, verdict="STALE")
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                               "stale": 1},
               output=verdicts_output(git_repo, confirmed=1, stale=1), root=git_repo)
@@ -1339,6 +1345,26 @@ def test_a_deferred_run_cannot_defer(git_repo):
     with pytest.raises(ps.RecordRefused, match="cannot defer"):
         ps.record("L3", counts={"to_fix": 0, "deferred": 1},
                   output=plan_output(git_repo, to_fix=0, deferred=1), root=git_repo)
+
+
+def test_a_deferred_runs_stale_rows_tally_against_stale(git_repo):
+    """A STALE finding gets a ledger row whose verdict is STALE, and the per-verdict ledger
+    tally L2.5 runs on STANDARD and DEEP counts that row against `--stale`.
+
+    Red 2026-10-11: mutation `"STALE": "stale"` dropped from _VERDICT_COUNTS; failed at the
+    L2.5 record (uncaught RecordRefused: the disposition ledger for run c disagrees with the
+    L2.5 counts (unknown verdict 'STALE')).
+    """
+    closed_parent(git_repo)
+    ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    append_ledger(git_repo, "c", 1)
+    append_ledger(git_repo, "c", 1, verdict="STALE")
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                              "stale": 1},
+              output=verdicts_output(git_repo, confirmed=1, stale=1), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"]["stale"] == 1
 
 
 def test_a_deferred_run_owes_every_fix_layer_until_l6_approves(git_repo):
@@ -1516,6 +1542,7 @@ def test_a_deferred_run_cannot_defer_a_p3_finding_either(git_repo):
 
     Red 2026-10-11: mutation `if n_deferred and state.mode == "DEFERRED":` became `if False:`
     in the L2.5 branch of _check_counts; failed at pytest.raises (DID NOT RAISE RecordRefused).
+    (key renamed to unverified at the master merge)
     """
     closed_parent(git_repo)
     ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
@@ -1525,6 +1552,6 @@ def test_a_deferred_run_cannot_defer_a_p3_finding_either(git_repo):
     append_ledger(git_repo, "c", 1)
     with pytest.raises(ps.RecordRefused, match="cannot defer"):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
-                                  "deferred": 1},
-                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+                                  "unverified": 1},
+                  output=verdicts_output(git_repo, confirmed=1, unverified=1), root=git_repo)
     assert "L2.5" not in ps.load(git_repo).layers

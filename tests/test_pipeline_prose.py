@@ -167,16 +167,18 @@ def test_contract_has_the_pause_row_and_step_2_records_its_output():
 
 
 def test_contract_records_deferrals_and_the_base():
-    """The Contract table must carry the flags the gate now requires: `--deferred` on L2.5 and L3,
-    `--base` on the Step 0.6 start, and the `pipeline deferred` offer at the close.
+    """The Contract table must carry the flags the gate now requires: `--unverified` on L2.5 and
+    `--deferred` on L3, `--base` on the Step 0.6 start, and the `pipeline deferred` offer at the
+    close.
 
     Red 2026-10-11: baseline 0ec8c47 text; failed at `assert "--deferred <P>" in row25`.
+    (key renamed to unverified at the master merge)
     """
     contract = PIPELINE[PIPELINE.find("## The Contract"):PIPELINE.find("## Arguments")]
     rows = {ln.split("|")[1].strip(): ln for ln in contract.splitlines()
             if ln.startswith("| ") and ln.count("|") >= 4}
     row25, row3, row06, row7 = rows["2.5"], rows["3"], rows["0.6"], rows["7"]
-    assert "--deferred <P>" in row25
+    assert "--unverified <P>" in row25
     assert "--deferred <D>" in row3 and '--detail "<D> deferred"' not in row3
     assert "--base <REV>" in row06
     assert "pipeline deferred" in row7
@@ -189,7 +191,7 @@ def test_step_2_5_defers_unverified_findings_on_the_record():
     """
     section = PIPELINE[PIPELINE.find("## Step 2.5:"):PIPELINE.find("### Step 2.5b")]
     assert "P3 are deferred anyway" not in section
-    assert "`DEFERRED`" in section and "--deferred" in section
+    assert "`DEFERRED`" in section and "--unverified" in section
 
 
 def test_step_3_plans_or_defers_every_confirmed_finding():
@@ -417,3 +419,58 @@ def test_step_0_matches_deferred_only_as_a_whole_argument():
     assert '$ARGUMENTS contains "deferred"' not in step0
     assert 'IF "deferred" is one of the words in $ARGUMENTS' in step0
     assert "a whole argument, never part of a path" in step0
+
+
+_NOT_FIXED = ("STALE", "FALSE_POSITIVE", "UNCERTAIN")
+
+
+def _deferred_commit_example() -> tuple[str, str, set[str]]:
+    """The D.8 commit template with its placeholders filled: (subject, body, fixed ids).
+
+    Each `- <id>` bullet gets its own known finding id (CODE-1, CODE-2, ...). A bullet that
+    offers `STALE | FALSE_POSITIVE | UNCERTAIN` becomes one bullet per verdict, and it is a fix
+    only when it names none of them.
+    """
+    section = PIPELINE[PIPELINE.find("**D.8 Step 7.**"):]
+    block = section[section.find("```") + 3:]
+    block = block[block.find("\n") + 1:block.find("```")]
+    subject, _, body = block.partition("\n")
+    lines: list[str] = []
+    fixed: set[str] = set()
+    named = 0
+    for line in body.splitlines():
+        if not line.startswith("- <id>"):
+            lines.append(line)
+            continue
+        options = [v for v in _NOT_FIXED if v in line] or [None]
+        for verdict in options:
+            named += 1
+            finding = f"CODE-{named}"
+            text = line.replace("<id>", finding)
+            if verdict is not None:
+                text = text.replace(" | ".join(_NOT_FIXED), verdict)
+            else:
+                fixed.add(finding)
+            lines.append(text)
+    return subject, "\n".join(lines), fixed
+
+
+def test_the_deferred_commit_reads_as_its_fixes_only():
+    """The bug ledger reads every CCA fix commit, so a deferred run's commit must list as fixes
+    exactly the findings it fixed: a STALE or FALSE_POSITIVE bullet read as a fix would put a
+    bug that was never fixed (or never there) into the ledger.
+
+    The D.8 template example, placeholders filled, goes through the ledger's own parser.
+
+    Red 2026-10-11: the old D.8 template wording (bullets `- <id> FIXED <file:line>` and
+    `- <id> STALE | FALSE_POSITIVE | UNCERTAIN <one line why>` with no heading) restored in
+    audit-fix.md; failed at `assert found == fixed` ({'CODE-1', 'CODE-2', 'CODE-3'} against
+    {'CODE-1'}: the STALE and FALSE_POSITIVE bullets were read as fixes).
+    """
+    from cca_checks.bugs import parse
+
+    subject, body, fixed = _deferred_commit_example()
+    assert parse.is_cca_fix_subject(subject)
+    assert fixed
+    found = {bullet.finding_id for bullet in parse.parse_message(body)}
+    assert found == fixed

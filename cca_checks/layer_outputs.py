@@ -9,10 +9,11 @@ so here the file and the counts are made to agree.
 from __future__ import annotations
 
 PRIORITIES = ("P1", "P2", "P3")
-#: Verdict in an L2.5 file, and the count flag that tallies it.
+#: Verdict in an L2.5 file, and the count flag that tallies it. A finding passed on unverified
+#: is written DEFERRED in the file and counted with `--unverified`.
 COUNT_OF = {
     "CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp", "UNCERTAIN": "uncertain",
-    "DUPLICATE": "duplicate", "DEFERRED": "deferred", "STALE": "stale",
+    "DUPLICATE": "duplicate", "DEFERRED": "unverified", "STALE": "stale",
 }
 VERDICTS = tuple(COUNT_OF)
 

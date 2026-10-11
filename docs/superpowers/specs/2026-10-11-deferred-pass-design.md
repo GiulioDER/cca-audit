@@ -266,3 +266,13 @@ Three lines changed after approval, each to match the code it describes:
 - The pool lists `claim`, not `title`: the Findings Schema has no `title` key.
 - `start --mode DEFERRED` also refuses `--no-fix`: a deferred run exists to fix, and
   `/audit-fix deferred no-fix` runs `pipeline deferred` and stops instead.
+
+## Correction made at the master merge (2026-10-11)
+
+`origin/master` gained its own L2.5 count for findings passed on unverified, `--unverified`
+(commit 1ab15eb, U01/U02), while this branch was being built. The user ruled: at L2.5 the count
+is `--unverified` (counts key `unverified`), not `--deferred`; the verdict written in the L2.5
+file for such a finding stays `DEFERRED`; L3 keeps `--deferred`. So every `--deferred` this spec
+gives L2.5 (§ 2.3, § 4's L2.5 row, § 5, the Testing table) reads `--unverified`, and the sum rule
+is `confirmed + fp + uncertain + duplicate + unverified + stale == L2 unique`. The ledger is also
+tallied per verdict (master's U15), `STALE` included.

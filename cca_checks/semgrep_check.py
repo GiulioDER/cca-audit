@@ -24,12 +24,6 @@ SUPPORTED_SINK_CLASSES = frozenset({"sql", "command", "code_exec", "path"})
 #: unaffected and the mechanism is opt-in per language.
 CONTROL_RULE = "parse-control"
 
-# The Python backend's catalog. Kept as module constants because the packaging job
-# in ci.yml asserts these files reached the wheel; `catalog_for` is what the checker
-# itself uses, so a second language does not touch these names.
-SINKS_RULES = "python_sinks.yaml"
-TAINT_RULES = "python_taint.yaml"
-
 # Semgrep can neither prove a taint bug (it flags safely-parameterized calls) nor
 # prove its absence (rule coverage is finite). What it settles soundly is whether a
 # sink of a given class occurs in a scope. So: only a provably-absent sink refutes; a

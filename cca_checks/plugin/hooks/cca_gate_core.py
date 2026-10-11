@@ -176,32 +176,55 @@ def fingerprint(root) -> str | None:
     edit elsewhere is seen. FINGERPRINT_TIMEOUT_S is one deadline for everything
     here: each git call gets what is left of it, and past it there is no answer.
     """
+    return _fingerprint(root, staged=False)[0]
+
+
+def commit_view(root) -> tuple[str | None, bool | None]:
+    """(fingerprint, staged_ok) under ONE deadline, for the commit guard.
+
+    `git commit` ships the INDEX, while the verdicts judged the WORKING TREE. Content
+    staged and then changed again in the working tree would be committed while every
+    verdict read fresh. `staged_ok` is True when every staged path (index differing
+    from HEAD, outside the run's `.claude/audits`) holds exactly its working tree
+    content, False when one does not, None when it cannot be told. Staging only some
+    of the judged files stays allowed: each staged file is content a verdict saw.
+    """
+    return _fingerprint(root, staged=True)
+
+
+def _fingerprint(root, *, staged: bool) -> tuple[str | None, bool | None]:
     root = str(pathlib.Path(root).resolve())
     # Checked against the nearest `.git` ancestor BEFORE any execution, and again
     # against git's own answer below.
     git = _git_exe(_top_hint(root))
     if git is None:
-        return None
+        return None, None
     deadline = time.monotonic() + FINGERPRINT_TIMEOUT_S
 
-    def run(*args, top=None, env=None) -> str:
+    def run(*args, top=None, env=None, raw=False) -> str:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise subprocess.TimeoutExpired([git, *args], FINGERPRINT_TIMEOUT_S)
-        return subprocess.run(
+        out = subprocess.run(
             [git, "-C", top or root, *args], capture_output=True, check=True,
             timeout=max(0.1, remaining), env=env,
-        ).stdout.decode("utf-8", "replace").strip()
+        ).stdout.decode("utf-8", "replace")
+        # raw: a `-z` path list, where stripping would eat a leading space of a path.
+        return out if raw else out.strip()
+
+    def paths(*args, top, env) -> set[str]:
+        return {p for p in run(*args, top=top, env=env, raw=True).split("\0") if p}
 
     try:
         top = os.path.realpath(run("rev-parse", "--show-toplevel"))
         if _git_exe(top) is None:
-            return None
+            return None, None
         rel = os.path.relpath(os.path.realpath(root), top).replace(os.sep, "/")
         if rel == ".." or rel.startswith("../"):
-            return None
+            return None, None
         # `:(literal)`: a run directory named with glob characters is not a pattern.
-        excluded = ":(literal)" + (EXCLUDED if rel == "." else f"{rel}/{EXCLUDED}")
+        audits = EXCLUDED if rel == "." else f"{rel}/{EXCLUDED}"
+        excluded = ":(literal)" + audits
         index = run("rev-parse", "--path-format=absolute", "--git-path", "index", top=top)
         with tempfile.TemporaryDirectory(prefix="cca-fp-") as tmp:
             tmp_index = os.path.join(tmp, "index")
@@ -212,6 +235,23 @@ def fingerprint(root) -> str | None:
                 # (about 1 in 4 on a loaded Windows machine, measured 2026-10-10).
                 shutil.copy2(index, tmp_index)
             env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
+            staged_ok = None
+            if staged:
+                # Read from the copy BEFORE `add -A` rewrites it. A diff pathspec may
+                # exclude an ignored path (only `git add` refuses that). --no-renames:
+                # rename pairing is never used here and is quadratic inside the deadline,
+                # and without it a rename lists its source as a deletion.
+                scope = ("--", ".", f":(exclude,literal){audits}")
+                names = ("--no-renames", "--name-only", "-z")
+                cached = paths("diff", "--cached", *names, *scope, top=top, env=env)
+                dirty = paths("diff", *names, *scope, top=top, env=env)
+                # A staged deletion of a file still on disk is untracked to the index, so
+                # it is in no `dirty` list; yet the commit drops a file the verdicts saw.
+                gone = paths("diff", "--cached", "--diff-filter=D", *names, *scope,
+                             top=top, env=env)
+                staged_ok = not (cached & dirty) and not any(
+                    os.path.lexists(os.path.join(top, p)) for p in gone
+                )
             run("add", "-A", "--", ".", top=top, env=env)
             # Dropped from the index afterwards rather than excluded by pathspec: an
             # exclude pathspec naming an ignored path makes `git add` exit 1, and
@@ -219,10 +259,10 @@ def fingerprint(root) -> str | None:
             # removal is independent of every ignore rule.
             run("rm", "--cached", "-r", "-q", "--ignore-unmatch", "--", excluded,
                 top=top, env=env)
-            return run("write-tree", top=top, env=env) or None
+            return run("write-tree", top=top, env=env) or None, staged_ok
     except (OSError, ValueError, subprocess.SubprocessError):
         # ValueError: os.path.relpath across drives. Fail closed (fixes become owed).
-        return None
+        return None, None
 
 
 # --- rules -----------------------------------------------------------------------
@@ -247,10 +287,15 @@ def _int(value) -> int:
 
 
 def fixes_owed(state: dict, tree: str | None) -> bool:
-    """True when L4 onward is owed. Unknown fingerprints count as changed."""
+    """True when L4 onward is owed. Unknown fingerprints count as changed.
+
+    An L3 that planned fixes owes them before the tree changes too: otherwise L6 could
+    follow L3 directly and the run close COMPLETE with its planned fixes never applied.
+    """
     base = state.get("base_tree")
     return (
         _int(state.get("fixes_applied")) > 0 or tree is None or base is None or tree != base
+        or _fixes_planned(state)
     )
 
 
@@ -319,7 +364,13 @@ def _layer_reasons(layer: str, state: dict, owed: bool, tree: str | None) -> lis
     else:
         if layer in TOOL_LAYERS and entry.get("source") != "tool":
             reasons.append(f"{layer} must be recorded by its tool: {TOOL_LAYERS[layer]}")
-        if layer in FIX_VERDICT_LAYERS and owed and entry.get("tree") != tree:
+        if layer in FIX_VERDICT_LAYERS and owed and (tree is None or entry.get("tree") is None):
+            # Unknown is never current: None == None would read every verdict as fresh.
+            reasons.append(
+                f"{layer} cannot be shown current: the working tree could not be "
+                "fingerprinted (git missing from PATH, older than 2.31, or timed out)"
+            )
+        elif layer in FIX_VERDICT_LAYERS and owed and entry.get("tree") != tree:
             reasons.append(
                 f"{layer} was recorded before the latest edit to the tree; run it again "
                 f"(re-read {where})"
@@ -369,31 +420,28 @@ def next_owed(state: dict, tree: str | None) -> str | None:
     """The first required layer, in pipeline order, that is not satisfied; None when none is.
 
     A run can still be incomplete when this is None: a `no-fix` run whose tree changed owes
-    no layer, only an abort, and `outstanding` says so.
-
-    One addition to the required layers: L3 planning fixes (`to_fix > 0`) with no L4 recorded
-    after it makes L4 next, although the gate does not require L4 until the tree changes.
-    Without it a run paused between L3 and L4 would resume at Step 6 and skip the fixes.
+    no layer, only an abort, and `outstanding` says so. An L3 that planned fixes makes L4
+    next through `fixes_owed`, so a run paused between L3 and L4 resumes at Step 4.
     """
     owed = fixes_owed(state, tree)
     for layer in required_layers(state, owed):
         if _layer_reasons(layer, state, owed, tree):
             return layer
-        if layer == "L3" and not owed and _fixes_planned(state):
-            return "L4"
     return None
 
 
 def _fixes_planned(state: dict) -> bool:
-    """L3 planned at least one fix and no L4 was recorded after it."""
-    layers = _layers(state)
-    plan, done = layers.get("L3"), layers.get("L4")
+    """L3 planned at least one fix.
+
+    Whatever L4 later reports: an `L4 --fixes 0` used to cancel the plan, so L5 to L5.6
+    dropped out and L6 followed L4 directly. A plan whose fixes were all parked still
+    passes through L5.6, where `--no-proofs --parked` accounts for them.
+    """
+    plan = _layers(state).get("L3")
     if not isinstance(plan, dict):
         return False
     counts = plan.get("counts")
-    if _int(counts.get("to_fix") if isinstance(counts, dict) else 0) <= 0:
-        return False
-    return not isinstance(done, dict) or _int(done.get("seq")) < _int(plan.get("seq"))
+    return _int(counts.get("to_fix") if isinstance(counts, dict) else 0) > 0
 
 
 def legacy_commit_reasons(state: dict) -> list[str]:
