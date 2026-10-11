@@ -183,9 +183,16 @@ def _capabilities(file: str) -> dict:
     check = getattr(backend, "unavailable_claim_types", None)
     if check is not None:
         unavailable = check()
-    return {"file": file, "language": backend.name,
-            "claim_types": sorted(backend.claim_types),
-            "unavailable": unavailable}
+    out = {"file": file, "language": backend.name,
+           "claim_types": sorted(backend.claim_types),
+           "unavailable": unavailable}
+    # A claim type served by a remote host (cca_checks.remote) is named with where it
+    # runs, so a verdict's provenance is visible before the verdict exists.
+    served = getattr(backend, "remote_claim_types", None)
+    remote_map = served() if served is not None else {}
+    if remote_map:
+        out["remote"] = remote_map
+    return out
 
 
 def _pipeline(a) -> int:
