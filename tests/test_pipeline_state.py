@@ -916,3 +916,84 @@ def test_l3_defers_a_confirmed_p2_but_never_a_p1(git_repo):
     ps.record("L3", counts={"to_fix": 1, "deferred": 1},
               output=plan_output(git_repo, to_fix=1, deferred=1), root=git_repo)
     assert "L3" in ps.load(git_repo).layers
+
+
+# --- the base commit -----------------------------------------------------------------
+
+def _head(repo) -> str:
+    return subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_start_records_the_commit_the_diff_is_taken_against(git_repo):
+    """`start` stores the sha of `--base` (HEAD by default) as the run's base_commit.
+
+    Red 2026-10-11: mutation `base_commit=base_commit` became `base_commit=None` in start();
+    failed at `assert state.base_commit == _head(git_repo)` (None against the HEAD sha).
+    """
+    state = ps.start("FAST", root=git_repo)
+    assert state.base_commit == _head(git_repo)
+    raw = json.loads(ps.state_path(git_repo).read_text(encoding="utf-8"))
+    assert raw["base_commit"] == state.base_commit and raw["parent"] is None
+
+
+def test_start_resolves_a_relative_base(git_repo):
+    """A relative `--base` such as HEAD~1 is stored as the full sha it names.
+
+    Red 2026-10-11: mutation `_commit_of(root, base)` became `_commit_of(root, "HEAD")` in
+    start(); failed at `assert ps.start(..., base="HEAD~1", ...).base_commit == first` (the
+    sha of the second commit against the first).
+    """
+    first = _head(git_repo)
+    (git_repo / "app.py").write_text("x = 5\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(git_repo), "commit", "-qam", "two"], check=True)
+    assert ps.start("FAST", base="HEAD~1", root=git_repo).base_commit == first
+
+
+def test_start_refuses_a_base_that_names_no_commit(git_repo):
+    """A `--base` that names no commit is refused, and no run is opened.
+
+    Red 2026-10-11: mutation `if base_commit is None and base != "HEAD":` became `if False:`
+    in start(); failed at pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    with pytest.raises(ps.RecordRefused, match="does not name a commit"):
+        ps.start("FAST", base="no-such-rev", root=git_repo)
+    assert ps.load(git_repo) is None
+
+
+def test_start_in_a_repository_without_commits_stores_no_base(tmp_path):
+    """A repository with no commit has no HEAD to record, which is not a refusal.
+
+    Red 2026-10-11: mutation `if base_commit is None and base != "HEAD":` became
+    `if base_commit is None:` in start(); failed at the start call (uncaught RecordRefused:
+    --base HEAD does not name a commit).
+    """
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    assert ps.start("FAST", root=tmp_path).base_commit is None
+
+
+def test_start_refuses_an_unknown_mode(git_repo):
+    """A mode outside MODES is refused, not stored for a later layer to misread.
+
+    Red 2026-10-11: mutation `if mode not in MODES:` became `if False:` in start(); failed at
+    pytest.raises (DID NOT RAISE ValueError).
+    """
+    with pytest.raises(ValueError, match="unknown mode"):
+        ps.start("FAST", mode="SIDEWAYS", root=git_repo)
+
+
+def test_a_bom_prefixed_ledger_is_still_counted(git_repo):
+    """A ledger Windows PowerShell 5.1 created starts with a BOM; its first row still counts.
+
+    Red 2026-10-11: mutation `read_text(encoding="utf-8-sig")` became
+    `read_text(encoding="utf-8")` in _ledger_rows; failed at the L2.5 record (uncaught
+    RecordRefused from the ledger check: 0 rows against 1 verdict, 1 malformed line skipped).
+    """
+    _to_l2(git_repo, "STANDARD", 1)
+    ledger = git_repo / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
+    row = {"run_id": "r1", "auditor": "cca-bug-auditor", "category": "x",
+           "verdict": "CONFIRMED", "fix_id": "FIX-0"}
+    ledger.write_bytes(b"\xef\xbb\xbf" + json.dumps(row).encode("utf-8") + b"\n")
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=verdicts_output(git_repo, confirmed=1), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"]["confirmed"] == 1

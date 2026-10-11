@@ -199,7 +199,7 @@ def _pipeline(a) -> int:
         if a.pipeline_cmd == "start":
             try:
                 state = pipeline_state.start(
-                    a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
+                    a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, base=a.base, root=a.root
                 )
             except pipeline_state.RecordRefused as exc:
                 print(json.dumps({"refused": "start", "reason": str(exc)}), file=sys.stderr)
@@ -327,7 +327,10 @@ def main(argv=None) -> int:
         "start", help="open a run (call at Step 0.6, once the tier is known)"
     )
     pl_start.add_argument("--tier", required=True, choices=sorted(pipeline_state.TIERS))
-    pl_start.add_argument("--mode", default="DIFF", choices=["DIFF", "HUNT"])
+    pl_start.add_argument("--mode", default="DIFF", choices=list(pipeline_state.MODES))
+    pl_start.add_argument("--base", default="HEAD",
+                          help="the revision the audited diff is taken against (HEAD~N for "
+                               "`commit N`); stored as the run's base_commit")
     pl_start.add_argument("--no-fix", action="store_true")
     pl_start.add_argument("--run-id", default="")
     pl_start.add_argument("--root", default=".")

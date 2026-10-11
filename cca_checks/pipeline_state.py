@@ -39,14 +39,15 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 from dataclasses import dataclass, field
 
 from cca_checks import layer_outputs
 
 __all__ = [
-    "CommitDecision", "LAYERS", "OUTPUT_LAYERS", "PipelineState", "RecordRefused", "TIERS",
-    "abort", "close", "load", "outstanding", "pause", "record", "required_layers", "resume",
-    "start", "state_path", "verify_commit_allowed",
+    "CommitDecision", "LAYERS", "MODES", "OUTPUT_LAYERS", "PipelineState", "RecordRefused",
+    "TIERS", "abort", "close", "load", "outstanding", "pause", "record", "required_layers",
+    "resume", "start", "state_path", "verify_commit_allowed",
 ]
 
 
@@ -66,6 +67,7 @@ def _load_core():
 core = _load_core()
 LAYERS = core.LAYERS
 TIERS = core.TIERS
+MODES = core.MODES
 OUTPUT_LAYERS = core.OUTPUT_LAYERS
 #: A run id names a directory, so only characters every filesystem accepts.
 _RUN_ID = re.compile(r"[A-Za-z0-9._-]+")
@@ -99,6 +101,8 @@ class PipelineState:
     stop_refusals: int = 0
     stop_logged: bool = False
     paused: dict | None = None
+    base_commit: str | None = None
+    parent: str | None = None
 
     def to_json(self) -> dict:
         return {
@@ -107,6 +111,7 @@ class PipelineState:
             "fixes_applied": self.fixes_applied, "base_tree": self.base_tree,
             "seq": self.seq, "stop_refusals": self.stop_refusals,
             "stop_logged": self.stop_logged, "paused": self.paused, "layers": self.layers,
+            "base_commit": self.base_commit, "parent": self.parent,
         }
 
     @classmethod
@@ -132,6 +137,8 @@ class PipelineState:
             stop_refusals=int(raw.get("stop_refusals", 0) or 0),
             stop_logged=bool(raw.get("stop_logged", False)),
             paused=raw.get("paused") if isinstance(raw.get("paused"), dict) else None,
+            base_commit=raw.get("base_commit") if isinstance(raw.get("base_commit"), str) else None,
+            parent=raw.get("parent") if isinstance(raw.get("parent"), str) else None,
         )
 
     @property
@@ -155,18 +162,48 @@ def _write(state: PipelineState, root) -> None:
     core.write_state(root, state.to_json())
 
 
+def _git(root, *args: str) -> subprocess.CompletedProcess[bytes] | None:
+    """Run git in `root` with the gate's trusted git; None when it cannot run."""
+    git = core._git_exe(core._top_hint(str(pathlib.Path(root).resolve())))
+    if git is None:
+        return None
+    try:
+        return subprocess.run([git, "-C", str(root), *args], capture_output=True,
+                              timeout=core.FINGERPRINT_TIMEOUT_S, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _commit_of(root, rev: str) -> str | None:
+    """The full sha `rev` names; None when it names no commit."""
+    done = _git(root, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+    if done is None or done.returncode != 0:
+        return None
+    return done.stdout.decode("utf-8", "replace").strip() or None
+
+
+def _is_ancestor(root, sha: str) -> bool:
+    done = _git(root, "merge-base", "--is-ancestor", sha, "HEAD")
+    return done is not None and done.returncode == 0
+
+
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
+          base: str = "HEAD", parent: str = "",
           root: str | pathlib.Path = ".") -> PipelineState:
     """Open a run: at Step 0.6, or at Step 0.4 for a hunt.
 
     Refused while a state file exists, readable or not. Overwriting an open run would
     re-baseline `base_tree` over its edits (so a run with no fixes recorded would stop
     owing L4 onward), drop an L0.4 recorded by a hunt, reset `stop_refusals`, and leave
-    no trail. Retiring a run is `abort()`, which is explicit and logged.
+    no trail. Retiring a run is `abort()`, which is explicit and logged. `base` is the
+    revision the audited diff is taken against; its sha is stored as `base_commit`.
     """
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError(f"unknown tier {tier!r} (expected one of {', '.join(TIERS)})")
+    mode = mode.upper()
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r} (expected one of {', '.join(MODES)})")
     if run_id and (not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")):
         raise RecordRefused(
             f"run id {run_id!r} is refused: it names the directory "
@@ -179,11 +216,17 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
             "close`, or retire it with `python -m cca_checks pipeline abort --reason "
             '"<why>"`'
         )
+    base_commit = _commit_of(root, base)
+    if base_commit is None and base != "HEAD":
+        raise RecordRefused(
+            f"--base {base} does not name a commit; pass the revision the audited diff is "
+            "taken against (HEAD, or HEAD~N for `commit N`)"
+        )
     stamp = core.now()
     state = PipelineState(
         run_id=run_id or stamp.replace(":", "").replace("-", ""), tier=tier,
-        mode=mode.upper(), no_fix=no_fix, started_utc=stamp,
-        schema=core.SCHEMA, base_tree=core.fingerprint(root),
+        mode=mode, no_fix=no_fix, started_utc=stamp,
+        schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
     )
     _write(state, root)
     return state
@@ -191,11 +234,13 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
 
 def _ledger_rows(root, run_id: str) -> tuple[int, int]:
     """(disposition rows for run_id, malformed lines). Outcome rows carry no
-    `verdict` key and are not dispositions (Review Focus 4)."""
+    `verdict` key and are not dispositions (Review Focus 4). Read as `utf-8-sig`: a ledger
+    created by Windows PowerShell 5.1 starts with a BOM, which would make its first row
+    malformed and refuse L2.5."""
     path = pathlib.Path(root) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
     rows = malformed = 0
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return 0, 0
     for line in lines:

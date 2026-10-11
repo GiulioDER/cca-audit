@@ -265,3 +265,14 @@ def test_deferred_and_stale_flags_reach_the_counts(capsys, git_repo):
                       "--uncertain", "0", "--duplicate", "0", "--deferred", "1",
                       "--output", verdicts_output(r, confirmed=1, deferred=1), "--root", r)
     assert code == 0
+
+
+def test_base_reaches_the_state(capsys, git_repo):
+    """--base reaches `start`: a revision that names no commit is refused with exit 2.
+
+    Red 2026-10-11: mutation `base=a.base` dropped from the start call in _pipeline; failed at
+    `assert code == 2` (start used HEAD and succeeded: 0 == 2).
+    """
+    code, _, err = _cli(capsys, "start", "--tier", "FAST", "--base", "no-such-rev",
+                        "--root", str(git_repo))
+    assert code == 2 and "does not name a commit" in err["reason"]
