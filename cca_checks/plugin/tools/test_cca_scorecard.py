@@ -4,6 +4,8 @@ The load-bearing one is `test_never_emits_a_drop`: the additive-only property mu
 be structural, so it cannot regress into the code later as a "small optimisation".
 """
 import json
+import shutil
+import subprocess
 from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 
@@ -121,3 +123,46 @@ def test_never_emits_a_drop(tmp_path):
     assert rep.review == ["bug-auditor/cat"]            # ...and a human look
     # ...and nothing anywhere in the report tells a caller to skip that cell.
     assert "bug-auditor/cat" in sc.render(rep)
+
+
+def _git(root, *args):
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+@pytest.fixture
+def git_repo(tmp_path):
+    """A one commit repository that ignores .claude/ (local: tools/ has no conftest)."""
+    if shutil.which("git") is None:
+        pytest.skip("git is required for tree fingerprints")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.invalid")
+    _git(tmp_path, "config", "user.name", "t")
+    _git(tmp_path, "config", "core.autocrlf", "false")
+    (tmp_path / ".gitignore").write_text(".claude/\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "init")
+    return tmp_path
+
+
+def test_record_writes_l2_6_as_a_tool_layer(git_repo, monkeypatch, capsys):
+    """Node: test_record_writes_l2_6_as_a_tool_layer.
+
+    Mutation: pass source="cli" to pipeline_state.record in cca_scorecard.main.
+    Fails: RecordRefused, main returns 2, so the `== 0` assertion fails.
+
+    Red 2026-10-10: source="cli" in cca_scorecard.main; failed at `assert sc.main() == 0` (2 == 0)
+    """
+    from cca_checks import pipeline_state as ps
+    ps.start("STANDARD", root=git_repo)
+    ps.record("L1", root=git_repo)
+    ps.record("L2", counts={"unique": 0}, root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              root=git_repo)
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr("sys.argv", ["cca_scorecard.py", "--json", "--record"])
+    assert sc.main() == 0
+    state = ps.load(git_repo)
+    assert state is not None
+    entry = state.layers["L2.6"]
+    assert entry["source"] == "tool" and entry["status"] == "done"

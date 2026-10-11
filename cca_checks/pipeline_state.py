@@ -10,10 +10,11 @@ worse than not auditing, because the fixes then ship carrying the authority of a
 pipeline that did not run.
 
 The failure is structural rather than incidental, and the cause is worth naming:
-the pipeline's steps are ~28KB of text read once, at the top of a run, and they
-then have to survive six to eleven subagents returning long reports. By Step 2
-they sit far behind the most recent tokens, while the agent harness carries
-standing instructions that compete with them directly ("do not add further
+the pipeline's steps are ~49KB of text (measured 2026-10-10:
+git show origin/master:cca_checks/plugin/commands/audit-fix.md | wc -c) read once,
+at the top of a run, and they then have to survive six to eleven subagents
+returning long reports. By Step 2 they sit far behind the most recent tokens, while
+the agent harness carries standing instructions that compete with them directly ("do not add further
 review passes", "when you have enough information to act, act"). Prose loses
 that contest reliably. So the gates stop being prose here.
 
@@ -33,78 +34,42 @@ they only get the chance if they are reached at all.
 
 from __future__ import annotations
 
+import importlib.util
 import json
-import os
 import pathlib
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 
 __all__ = [
-    "CommitDecision",
-    "LAYERS",
-    "PipelineState",
-    "TIERS",
-    "abort",
-    "close",
-    "load",
-    "record",
-    "required_layers",
-    "start",
-    "state_path",
+    "CommitDecision", "LAYERS", "PipelineState", "RecordRefused", "TIERS", "abort",
+    "close", "load", "outstanding", "record", "required_layers", "start", "state_path",
     "verify_commit_allowed",
 ]
 
-# Canonical layer ids, in pipeline order. A tuple rather than a free-form string
-# so an unknown id is a hard error at `record()`. A typo'd layer name that
-# recorded successfully but satisfied no requirement would reintroduce exactly
-# the silent skip this module exists to remove.
-LAYERS = (
-    "L1",     # parallel auditors
-    "L2",     # consolidate findings
-    "L2.5",   # findings verification (anti-hallucination)
-    "L2.6",   # auditor scorecard (advisory; never required)
-    "L3",     # fix plan
-    "L4",     # implement fixes
-    "L5",     # re-verify (tests + lint)
-    "L5.5",   # regression diff (anti-regression)
-    "L5.6",   # red-state proof (tautological-test detector)
-    "L6",     # architect gate
-)
 
-# Layers that must carry a verdict before ANY commit, at every tier. L2.6 is
-# deliberately absent: it is a measurement over a trailing window, additive-only
-# by its own contract, and blocking on a statistic that reports `learning` below
-# n=10 would fire on every project that has not yet run ten audits.
-_CORE_REQUIRED = ("L1", "L2", "L2.5", "L6")
+def _load_core():
+    # By path, not by import: the core also has to load from a user's
+    # .claude/hooks/ directory where no package exists, and one loader for both
+    # places means one copy of the rules.
+    path = pathlib.Path(__file__).resolve().parent / "plugin" / "hooks" / "cca_gate_core.py"
+    spec = importlib.util.spec_from_file_location("cca_gate_core", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load the gate core from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-# Additional layers once fixes have actually been written to the tree, by tier.
-# Taken from the tier table at Step 0.6 of the pipeline: FAST runs no regression
-# diff and no red-state proof, so requiring them there would block a legitimate
-# fast run rather than catch a skipped one.
-_FIX_REQUIRED = {
-    "FAST": ("L5",),
-    "STANDARD": ("L5", "L5.5", "L5.6"),
-    "DEEP": ("L5", "L5.5", "L5.6"),
-}
 
-TIERS = tuple(_FIX_REQUIRED)
+core = _load_core()
+LAYERS = core.LAYERS
+TIERS = core.TIERS
 
-# The only L6 verdict that authorises a commit. REVISE and BLOCKED are recorded
-# outcomes, not passes; reading "the gate ran" as "the gate approved" would let a
-# BLOCKED run commit, which is the one thing the architect gate exists to stop.
-_APPROVING_VERDICT = "APPROVED"
 
-_TERMINAL_BAD_STATUS = frozenset({"skipped", "failed"})
+class RecordRefused(ValueError):
+    """A layer that may not be recorded yet, or not with these numbers."""
 
 
 def state_path(root: str | pathlib.Path = ".") -> pathlib.Path:
-    """Where the open run lives. One run per checkout, by design.
-
-    Per checkout rather than per branch: worktrees share a stash and a repo but
-    not a working tree, and it is the working tree that holds the unverified
-    fixes this gate is protecting.
-    """
-    return pathlib.Path(root) / ".claude" / "audits" / "run-state.json"
+    return core.state_file(root)
 
 
 @dataclass
@@ -116,16 +81,19 @@ class PipelineState:
     started_utc: str = ""
     fixes_applied: int = 0
     layers: dict = field(default_factory=dict)
+    schema: int = 1
+    base_tree: str | None = None
+    seq: int = 0
+    stop_refusals: int = 0
+    stop_logged: bool = False
 
     def to_json(self) -> dict:
         return {
-            "run_id": self.run_id,
-            "tier": self.tier,
-            "mode": self.mode,
-            "no_fix": self.no_fix,
-            "started_utc": self.started_utc,
-            "fixes_applied": self.fixes_applied,
-            "layers": self.layers,
+            "schema": self.schema, "run_id": self.run_id, "tier": self.tier,
+            "mode": self.mode, "no_fix": self.no_fix, "started_utc": self.started_utc,
+            "fixes_applied": self.fixes_applied, "base_tree": self.base_tree,
+            "seq": self.seq, "stop_refusals": self.stop_refusals,
+            "stop_logged": self.stop_logged, "layers": self.layers,
         }
 
     @classmethod
@@ -139,125 +107,224 @@ class PipelineState:
         if not isinstance(layers, dict):
             raise ValueError("run state 'layers' is missing or is not an object")
         return cls(
-            run_id=str(raw.get("run_id", "")),
-            tier=tier,
+            run_id=str(raw.get("run_id", "")), tier=tier,
             mode=str(raw.get("mode", "DIFF")).upper(),
             no_fix=bool(raw.get("no_fix", False)),
             started_utc=str(raw.get("started_utc", "")),
             fixes_applied=int(raw.get("fixes_applied", 0) or 0),
             layers=layers,
+            schema=int(raw.get("schema", 1) or 1),
+            base_tree=raw.get("base_tree"),
+            seq=int(raw.get("seq", 0) or 0),
+            stop_refusals=int(raw.get("stop_refusals", 0) or 0),
+            stop_logged=bool(raw.get("stop_logged", False)),
         )
+
+    @property
+    def legacy(self) -> bool:
+        return self.schema != core.SCHEMA
 
 
 @dataclass
 class CommitDecision:
-    """Why a commit was allowed or refused, in terms the reader can act on."""
-
     allowed: bool
     reasons: list[str] = field(default_factory=list)
     run_id: str = ""
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _write(state: PipelineState, root: str | pathlib.Path) -> pathlib.Path:
-    path = state_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Write-then-replace. A crash mid-write must not leave a truncated state
-    # file, because an unparseable state blocks every commit in the checkout
-    # until somebody aborts by hand.
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(state.to_json(), indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
-    return path
-
-
 def load(root: str | pathlib.Path = ".") -> PipelineState | None:
-    """Return the open run, or None when no audit is in flight.
+    raw = core.read_state(root)
+    return None if raw is None else PipelineState.from_json(raw)
 
-    Raises ValueError on a state file that exists but cannot be understood. The
-    caller must treat that as a refusal rather than as "no run": a state file we
-    cannot parse is evidence that a run started, and assuming it finished is the
-    optimistic guess this module exists to remove.
+
+def _write(state: PipelineState, root) -> None:
+    core.write_state(root, state.to_json())
+
+
+def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
+          root: str | pathlib.Path = ".") -> PipelineState:
+    """Open a run: at Step 0.6, or at Step 0.4 for a hunt.
+
+    Refused while a state file exists, readable or not. Overwriting an open run would
+    re-baseline `base_tree` over its edits (so a run with no fixes recorded would stop
+    owing L4 onward), drop an L0.4 recorded by a hunt, reset `stop_refusals`, and leave
+    no trail. Retiring a run is `abort()`, which is explicit and logged.
     """
-    path = state_path(root)
-    if not path.exists():
-        return None
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"run state at {path} is unreadable ({exc.__class__.__name__})"
-        ) from exc
-    if not isinstance(raw, dict):
-        raise ValueError(f"run state at {path} is not a JSON object")
-    return PipelineState.from_json(raw)
-
-
-def start(
-    tier: str,
-    mode: str = "DIFF",
-    *,
-    no_fix: bool = False,
-    run_id: str = "",
-    root: str | pathlib.Path = ".",
-) -> PipelineState:
-    """Open a run at Step 0.6, once the tier is known."""
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError(f"unknown tier {tier!r} (expected one of {', '.join(TIERS)})")
+    if state_path(root).exists():
+        raise RecordRefused(
+            "a CCA run is already open in this checkout; starting another would replace it "
+            "and discard what it recorded. Finish it with `python -m cca_checks pipeline "
+            "close`, or retire it with `python -m cca_checks pipeline abort --reason "
+            '"<why>"`'
+        )
+    stamp = core.now()
     state = PipelineState(
-        run_id=run_id or _now().replace(":", "").replace("-", ""),
-        tier=tier,
-        mode=mode.upper(),
-        no_fix=no_fix,
-        started_utc=_now(),
+        run_id=run_id or stamp.replace(":", "").replace("-", ""), tier=tier,
+        mode=mode.upper(), no_fix=no_fix, started_utc=stamp,
+        schema=core.SCHEMA, base_tree=core.fingerprint(root),
     )
     _write(state, root)
     return state
 
 
-def record(
-    layer: str,
-    *,
-    status: str = "done",
-    detail: str = "",
-    fixes: int | None = None,
-    root: str | pathlib.Path = ".",
-) -> PipelineState:
-    """Record that `layer` was reached and given a verdict."""
+def _ledger_rows(root, run_id: str) -> tuple[int, int]:
+    """(disposition rows for run_id, malformed lines). Outcome rows carry no
+    `verdict` key and are not dispositions (Review Focus 4)."""
+    path = pathlib.Path(root) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
+    rows = malformed = 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0, 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            malformed += 1
+            continue
+        if isinstance(row, dict) and "verdict" in row and str(row.get("run_id")) == run_id:
+            rows += 1
+    return rows, malformed
+
+
+def _need(counts: dict, key: str, layer: str) -> int:
+    value = counts.get(key)
+    if value is None:
+        raise RecordRefused(f"{layer} needs --{key.replace('_', '-')} <N>")
+    if int(value) < 0:
+        raise RecordRefused(f"{layer} --{key.replace('_', '-')} cannot be negative")
+    return int(value)
+
+
+def _layer_count(state: PipelineState, layer: str, key: str) -> int | None:
+    entry = state.layers.get(layer)
+    if not isinstance(entry, dict):
+        return None
+    value = (entry.get("counts") or {}).get(key)
+    return None if value is None else int(value)
+
+
+def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
+    if layer == "L2":
+        _need(counts, "unique", layer)
+    elif layer == "L2.5":
+        total = sum(
+            _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
+        )
+        unique = _layer_count(state, "L2", "unique")
+        if unique is not None and total != unique:
+            raise RecordRefused(
+                f"L2.5 accounts for {total} findings but L2 recorded {unique} unique; "
+                "every consolidated finding needs exactly one verdict"
+            )
+        if state.tier != "FAST":
+            rows, malformed = _ledger_rows(root, state.run_id)
+            if rows != total:
+                note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
+                raise RecordRefused(
+                    f"the disposition ledger holds {rows} row(s) for run {state.run_id} but "
+                    f"L2.5 recorded {total} verdicts{note}; append one row per verified "
+                    "finding to .claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
+                    f'"run_id": "{state.run_id}"'
+                )
+    elif layer == "L3":
+        to_fix = _need(counts, "to_fix", layer)
+        confirmed = _layer_count(state, "L2.5", "confirmed")
+        if confirmed is not None and to_fix > confirmed:
+            raise RecordRefused(
+                f"L3 --to-fix {to_fix} exceeds the {confirmed} findings L2.5 confirmed"
+            )
+
+
+def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | None = None,
+           counts: dict | None = None, source: str = "cli",
+           root: str | pathlib.Path = ".") -> PipelineState:
+    """Record that `layer` was reached and given a verdict.
+
+    Raises RecordRefused when the layer is out of order, is a tool layer recorded
+    by hand, or carries counts that do not agree with the run.
+    """
     if layer not in LAYERS:
         raise ValueError(f"unknown layer {layer!r} (expected one of {', '.join(LAYERS)})")
     state = load(root)
     if state is None:
         raise ValueError(
             "no CCA run is open; run `python -m cca_checks pipeline start --tier <TIER>` "
-            "at Step 0.6 before recording a layer"
+            "at Step 0.6 (Step 0.4 for a hunt) before recording a layer"
         )
-    state.layers[layer] = {"status": status, "detail": detail, "at": _now()}
+    entry = {"status": status, "detail": detail, "at": core.now()}
+    if not state.legacy:
+        if layer in core.TOOL_LAYERS and source != "tool":
+            raise RecordRefused(
+                f"{layer} is recorded by its tool, not by hand: {core.TOOL_LAYERS[layer]}"
+            )
+        tree = core.fingerprint(root)
+        raw = state.to_json()
+        owed = core.fixes_owed(raw, tree) or (fixes or 0) > 0
+        missing = [p for p in core.predecessors(layer, raw, owed) if p not in state.layers]
+        if missing:
+            raise RecordRefused(
+                f"{layer} cannot be recorded before {', '.join(missing)}; re-read "
+                f"{core.HEADINGS[missing[0]]} of audit-fix.md and run it first"
+            )
+        gate04 = state.layers.get("L0.4")
+        if "L0.4" in core.predecessors(layer, raw, owed) and \
+                str((gate04 or {}).get("detail", "")).strip().upper() != "PASS":
+            raise RecordRefused(
+                "L0.4 did not read PASS; a hunt that fails viability is aborted with "
+                "`pipeline abort --reason`, never continued"
+            )
+        counts = {k: v for k, v in (counts or {}).items() if v is not None}
+        _check_counts(layer, state, counts, root)
+        state.seq += 1
+        entry.update({"seq": state.seq, "source": source})
+        if counts:
+            entry["counts"] = counts
+        if layer in core.FIX_VERDICT_LAYERS:
+            entry["tree"] = tree
+    state.layers[layer] = entry
     if fixes is not None:
         state.fixes_applied = int(fixes)
     _write(state, root)
     return state
 
 
-def _append_log(root: str | pathlib.Path, line: str) -> pathlib.Path:
-    log = state_path(root).parent / "EXECUTION_LOG.md"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a", encoding="utf-8") as fh:
-        fh.write(line if line.endswith("\n") else line + "\n")
-    return log
+def _tree(state: PipelineState, root) -> str | None:
+    return None if state.legacy else core.fingerprint(root)
+
+
+def required_layers(state: PipelineState, root: str | pathlib.Path = ".") -> tuple[str, ...]:
+    if state.legacy:
+        required = list(core.LEGACY_CORE_REQUIRED)
+        if state.fixes_applied > 0:
+            required.extend(core.LEGACY_FIX_REQUIRED[state.tier])
+        return tuple(required)
+    raw = state.to_json()
+    return core.required_layers(raw, core.fixes_owed(raw, _tree(state, root)))
+
+
+def outstanding(state: PipelineState, root: str | pathlib.Path = ".") -> list[str]:
+    """What this run still owes before it may close. Legacy runs owe nothing here."""
+    if state.legacy:
+        return []
+    return core.outstanding(state.to_json(), _tree(state, root))
+
+
+def verify_commit_allowed(state: PipelineState | None,
+                          root: str | pathlib.Path = ".") -> CommitDecision:
+    if state is None:
+        return CommitDecision(allowed=True, reasons=["no CCA run is open"])
+    reasons = core.commit_reasons(state.to_json(), _tree(state, root))
+    return CommitDecision(allowed=not reasons, reasons=reasons, run_id=state.run_id)
 
 
 def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
-    """Close an open run WITHOUT satisfying its gates, leaving a trail.
-
-    The trail is the whole point. A skip that has to be declared, named and dated
-    is a different object from a skip that happens by forgetting, even when the
-    code that ships is identical: the first one can be found later and counted.
-    """
+    """Close an open run WITHOUT satisfying its gates, leaving a trail."""
     path = state_path(root)
     if not path.exists():
         return None
@@ -265,73 +332,31 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
         state = load(root)
         run_id = state.run_id if state else "unknown"
     except ValueError:
-        # An unparseable state is exactly when an abort is most needed, so this
-        # path must not raise. Record what we can and clear the block.
         run_id = "unparseable"
-    log = _append_log(root, f"| {_now()} | run {run_id} | ABORTED | {reason} |")
+    log = core.append_log(root, f"| {core.now()} | run {run_id} | ABORTED | {reason} |")
     path.unlink()
     return log
 
 
 def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
-    """Retire a run that passed its gates, appending the outcome to the log."""
+    """Retire a run that is complete. An incomplete run is refused, not logged."""
     path = state_path(root)
     if not path.exists():
         return None
     state = load(root)
-    recorded = ", ".join(sorted(state.layers)) if state else ""
-    log = _append_log(
+    if state is None:
+        return None
+    missing = outstanding(state, root)
+    if missing:
+        raise RecordRefused(
+            "this run is not complete: " + "; ".join(missing)
+            + ". Finish it, or retire it with `python -m cca_checks pipeline abort --reason`."
+        )
+    recorded = ", ".join(sorted(state.layers))
+    log = core.append_log(
         root,
-        f"| {_now()} | run {state.run_id if state else '?'} | COMPLETE | "
-        f"tier {state.tier if state else '?'} | layers: {recorded} |",
+        f"| {core.now()} | run {state.run_id} | COMPLETE | tier {state.tier} | "
+        f"layers: {recorded} |",
     )
     path.unlink()
     return log
-
-
-def required_layers(state: PipelineState) -> tuple[str, ...]:
-    """The layers this run must have recorded before it may commit."""
-    required = list(_CORE_REQUIRED)
-    if state.fixes_applied > 0:
-        required.extend(_FIX_REQUIRED[state.tier])
-    return tuple(required)
-
-
-def verify_commit_allowed(state: PipelineState | None) -> CommitDecision:
-    """Decide whether a commit may proceed against the open run."""
-    if state is None:
-        return CommitDecision(allowed=True, reasons=["no CCA run is open"])
-
-    reasons: list[str] = []
-
-    if state.no_fix:
-        # `no-fix` means report, never edit. A commit during such a run is either
-        # an unrelated change that should land after an abort, or the argument
-        # being ignored, and the second is a correctness failure of the pipeline
-        # rather than a nuisance.
-        reasons.append(
-            "this run was started with `no-fix`, which forbids editing and committing; "
-            "abort the run first if this commit is unrelated"
-        )
-
-    for layer in required_layers(state):
-        entry = state.layers.get(layer)
-        if not entry:
-            reasons.append(f"{layer} has no recorded verdict (tier {state.tier})")
-        elif str(entry.get("status", "")).lower() in _TERMINAL_BAD_STATUS:
-            reasons.append(f"{layer} is recorded as {entry.get('status')}")
-
-    gate = state.layers.get("L6")
-    if gate:
-        verdict = str(gate.get("detail", "")).strip().upper()
-        if not verdict:
-            reasons.append(
-                "L6 was recorded without a verdict; record it as "
-                "--detail APPROVED, REVISE or BLOCKED"
-            )
-        elif verdict != _APPROVING_VERDICT:
-            reasons.append(
-                f"the L6 architect gate returned {verdict}, not {_APPROVING_VERDICT}"
-            )
-
-    return CommitDecision(allowed=not reasons, reasons=reasons, run_id=state.run_id)

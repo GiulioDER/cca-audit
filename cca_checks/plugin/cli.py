@@ -59,8 +59,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--print-hook",
         action="store_true",
         help=(
-            "print the settings.json fragment that arms the commit guard, and "
-            "install nothing"
+            "print the settings.json fragment that arms the commit guard and the "
+            "stop guard, and install nothing"
         ),
     )
     codex_cmd = sub.add_parser(

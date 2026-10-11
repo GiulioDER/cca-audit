@@ -104,6 +104,21 @@ absolute prohibition on edits and commits.
 The canonical final commit is authorized only by an `audit+fix` invocation that permits fixes and
 only after the architect returns `APPROVED`. Never include unrelated preexisting changes.
 
+## Gate before reporting
+
+Codex has no hooks, so nothing stops a run from ending half done except this check. Before any final
+summary, run:
+
+```bash
+python -m cca_checks pipeline status --require-complete
+```
+
+Exit 2 means the run still owes the layers listed under `outstanding_to_close`. Run them, or retire
+the run on the record with `python -m cca_checks pipeline abort --reason "<why>"`. When the only item
+is the instruction to close the run, every layer is done: run `python -m cca_checks pipeline close`,
+then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
+same check without relying on the orchestrator to call it.
+
 ## Report completion
 
 Return the canonical summary with tier, scope, domains, deterministic coverage and blindness,

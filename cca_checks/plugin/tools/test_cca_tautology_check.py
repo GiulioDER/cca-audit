@@ -5,6 +5,7 @@ detector end-to-end — the check itself is about executing code, so testing it 
 mocking would reproduce exactly the mistake it exists to catch.
 """
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -121,3 +122,106 @@ def test_cli_exit_code_zero_when_all_proofs_genuine(proj):
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "1/1 genuine" in r.stdout
+
+
+def _git(root, *args):
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+@pytest.fixture
+def git_repo(tmp_path):
+    """A one commit repository that ignores .claude/ (local: tools/ has no conftest)."""
+    if shutil.which("git") is None:
+        pytest.skip("git is required for tree fingerprints")
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.invalid")
+    _git(tmp_path, "config", "user.name", "t")
+    _git(tmp_path, "config", "core.autocrlf", "false")
+    (tmp_path / ".gitignore").write_text(".claude/\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "init")
+    return tmp_path
+
+
+def test_l5_6_entry_fails_on_any_non_proof():
+    """Node: test_l5_6_entry_fails_on_any_non_proof.
+
+    Mutation: make _l5_6_entry always return status "done". Fails on the TAUTOLOGICAL case.
+
+    Red 2026-10-10: _l5_6_entry always "done"; failed at
+    `assert tc._l5_6_entry([red, taut])[0] == "failed"`
+    """
+    red = tc.ProofResult("FIX-1", "t::a", tc.RED, "")
+    taut = tc.ProofResult("FIX-2", "t::b", tc.TAUTOLOGICAL, "")
+    assert tc._l5_6_entry([red]) == ("done", "1 RED, 0 tautological, 0 inconclusive")
+    assert tc._l5_6_entry([red, taut])[0] == "failed"
+
+
+def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
+    """Node: test_no_proofs_record_needs_no_snapshot.
+
+    Mutation: record with source="cli" instead of "tool" in _record. record refuses, so
+    main returns non-zero and the `== 0` assertion fails.
+
+    Red 2026-10-10: _record with source="cli"; failed at `assert tc.main() == 0` (2 == 0)
+    """
+    from cca_checks import pipeline_state as ps
+    ps.start("STANDARD", root=git_repo)
+    for layer, counts in (("L1", None), ("L2", {"unique": 0})):
+        ps.record(layer, counts=counts, root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              root=git_repo)
+    ps.record("L2.6", source="tool", root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, root=git_repo)
+    (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+    ps.record("L4", fixes=1, root=git_repo)
+    ps.record("L5", root=git_repo)
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr(
+        "sys.argv", ["cca_tautology_check.py", "verify", "--no-proofs", "--record"])
+    assert tc.main() == 0
+    state = ps.load(git_repo)
+    assert state is not None
+    assert state.layers["L5.6"]["detail"] == "0 proofs claimed (no P1 to prove)"
+
+
+def test_verify_leaves_no_bytecode_behind_so_l5_does_not_go_stale(git_repo, monkeypatch):
+    """The red-state proof must not change the tree fingerprint.
+
+    Invariant: `fingerprint` taken after the fixed tests ran (what L5 records) equals the one
+    taken after `verify` reverted to the pre-fix source, ran pytest there and restored the fix.
+    The pre-fix run used to write `.pyc` files compiled from the pre-fix source, and the
+    restore left them, so L5 went stale forever in a repository that does not ignore
+    `__pycache__`. This workstation exports PYTHONDONTWRITEBYTECODE=1, which hides the bug, so
+    the test removes it from the environment.
+
+    Red 2026-10-10: baseline a8d7445 (`_run_one` passes no env); failed at
+    `assert after == before`.
+    """
+    import importlib.util
+
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    core_path = (Path(__file__).resolve().parents[1] / "hooks" / "cca_gate_core.py")
+    spec = importlib.util.spec_from_file_location("cca_gate_core_for_test", core_path)
+    assert spec is not None and spec.loader is not None
+    core = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(core)
+
+    monkeypatch.chdir(git_repo)
+    (git_repo / "money.py").write_text(BUGGY, encoding="utf-8")
+    (git_repo / "test_money.py").write_text(TESTS, encoding="utf-8")
+    snapshot_then_fix(git_repo)
+    ran = subprocess.run(
+        [sys.executable, "-m", "pytest", "test_money.py::test_genuine_proof", "-q",
+         "-p", "no:cacheprovider"], capture_output=True, text=True,
+    )
+    assert ran.returncode == 0, ran.stdout + ran.stderr          # L5: the fixed tests pass
+    assert list(git_repo.rglob("money*.pyc")), "the scenario needs bytecode written by L5"
+    before = core.fingerprint(git_repo)
+    assert before
+
+    results = tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert [r.verdict for r in results] == [tc.RED]
+    after = core.fingerprint(git_repo)
+    assert after == before
