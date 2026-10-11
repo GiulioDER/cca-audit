@@ -115,3 +115,12 @@ The known-answer premise was wrong for an informative reason: I chose `6aa7ff5bd
 produces one `proved` row traced to its artifacts; summaries are verbatim. The freshest local
 clone of the private repository has remote refs ending 2026-09-10, so that repository is
 undercounted after that date.
+
+## Correction to the gap analysis above (2026-10-11, later the same day)
+
+Format 1 in the list above is wrong. The headings I read as lacking a colon were truncated by my
+own display command; they do end with a colon and the parser already accepted them. A structure
+scan of the 96 unparsed commits, by section kind, found instead: 52 with bullets under P1/P2
+headings but no known finding ID, 15 with known IDs only under topic headings, and 29 with
+neither. Formats 2 and 3 stand. The parser was extended on that basis (`a7d07d6`), and its
+effect is pre-registered in `2026-10-11-cca-bug-parser-extension.md`.
