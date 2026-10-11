@@ -71,3 +71,12 @@ def test_write_creates_a_missing_directory(tmp_path, monkeypatch, capsys):
     assert out["written"] == {"rows": 1, "memos": 1, "dir": str(target)}
     assert (target / "bugs.jsonl").exists()
     assert (target / "unparsed.txt").read_text(encoding="utf-8") == ""
+
+
+def test_the_top_level_cli_forwards_bugs(tmp_path, monkeypatch, capsys):
+    """Red proof: forward a.bugs_args[1:] instead of a.bugs_args -> argparse exits 2."""
+    from cca_checks.__main__ import main as top
+
+    monkeypatch.setenv("CCA_BUGS_DIR", str(tmp_path / "ledger"))
+    assert top(["bugs", "backfill", "--repo", str(_published(tmp_path)), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["rows"] == 1
