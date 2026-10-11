@@ -1,6 +1,8 @@
 """Contract tests for the Codex native CCA skill."""
 
+import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -71,10 +73,33 @@ def test_codex_skill_queues_subagents_behind_the_six_thread_limit():
     assert "Never drop an applicable role" in skill
 
 
-def test_banner_states_one_auditor_count():
-    banner = (_REPO_ROOT / "docs" / "banner.svg").read_text(encoding="utf-8")
-    assert "auditors ×11" in banner
-    assert "11 auditors, non-overlapping scopes" in banner
+def test_architecture_diagram_names_every_dispatched_auditor():
+    """The diagram's two auditor boxes name exactly the auditors Step 1 dispatches.
+
+    Replaces the banner check: the README shows this diagram, so a prefix added to
+    or dropped from the spec without the diagram following would put a wrong
+    auditor count on the project page. Red proof: removing ENV from the Core
+    auditors sublabel in the diagram JSON fails the set comparison.
+    """
+    spec = (_REPO_ROOT / "cca_checks" / "plugin" / "commands" / "audit-fix.md").read_text(
+        encoding="utf-8"
+    )
+    step1 = spec[spec.index("## Step 1: Layer 1") : spec.index("## Step 2: Layer 2")]
+    dispatched = set(re.findall(r"`([A-Z]+)-`", step1)) | set(
+        re.findall(r"Prefix: ([A-Z]+)-", step1)
+    )
+
+    diagram = json.loads(
+        (_REPO_ROOT / "docs" / "diagrams" / "cca-overview.architecture.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    boxes = {c["id"]: c for c in diagram["components"]}
+    drawn = boxes["auditors"]["sublabel"].split() + boxes["conditional"]["sublabel"].split()
+
+    assert len(dispatched) == 11
+    assert len(drawn) == len(set(drawn))
+    assert set(drawn) == dispatched
 
 
 def test_install_codex_materializes_a_complete_skill(tmp_path):
