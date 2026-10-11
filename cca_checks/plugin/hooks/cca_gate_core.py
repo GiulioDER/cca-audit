@@ -282,7 +282,8 @@ def predecessors(layer: str, state: dict, owed: bool) -> tuple[str, ...]:
 
 def outstanding(state: dict, tree: str | None) -> list[str]:
     """Why this schema 2 run is not complete. Empty means complete."""
-    layers = state.get("layers") if isinstance(state.get("layers"), dict) else {}
+    raw_layers = state.get("layers")
+    layers: dict = raw_layers if isinstance(raw_layers, dict) else {}
     owed = fixes_owed(state, tree)
     reasons: list[str] = []
     for layer in required_layers(state, owed):

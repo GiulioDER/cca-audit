@@ -162,5 +162,7 @@ def test_record_writes_l2_6_as_a_tool_layer(git_repo, monkeypatch, capsys):
     monkeypatch.chdir(git_repo)
     monkeypatch.setattr("sys.argv", ["cca_scorecard.py", "--json", "--record"])
     assert sc.main() == 0
-    entry = ps.load(git_repo).layers["L2.6"]
+    state = ps.load(git_repo)
+    assert state is not None
+    entry = state.layers["L2.6"]
     assert entry["source"] == "tool" and entry["status"] == "done"

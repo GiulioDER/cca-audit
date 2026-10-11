@@ -181,7 +181,9 @@ def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
     monkeypatch.setattr(
         "sys.argv", ["cca_tautology_check.py", "verify", "--no-proofs", "--record"])
     assert tc.main() == 0
-    assert ps.load(git_repo).layers["L5.6"]["detail"] == "0 proofs claimed (no P1 to prove)"
+    state = ps.load(git_repo)
+    assert state is not None
+    assert state.layers["L5.6"]["detail"] == "0 proofs claimed (no P1 to prove)"
 
 
 def test_verify_leaves_no_bytecode_behind_so_l5_does_not_go_stale(git_repo, monkeypatch):
@@ -202,6 +204,7 @@ def test_verify_leaves_no_bytecode_behind_so_l5_does_not_go_stale(git_repo, monk
     monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
     core_path = (Path(__file__).resolve().parents[1] / "hooks" / "cca_gate_core.py")
     spec = importlib.util.spec_from_file_location("cca_gate_core_for_test", core_path)
+    assert spec is not None and spec.loader is not None
     core = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(core)
 
