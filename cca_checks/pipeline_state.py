@@ -198,7 +198,15 @@ _COMMIT_SHA = re.compile(r"[0-9A-Fa-f]{7,40}")
 
 
 def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, str | None]:
-    """Check the run a DEFERRED run follows; return (parent as stored, base_commit)."""
+    """Check the run a DEFERRED run follows; return (parent as stored, base_commit).
+
+    A run id is held to every rule in `deferred.why_not_offered`. `commit:<sha>` is for a run
+    that left no summary, so a sha that is the commit of a run that did leave one is refused:
+    it would otherwise skip those rules (a pool already taken, a hunt, no-fix or deferred
+    parent). The inherited base is resolved here, not copied, because the summary is a file a
+    person can edit. Unreadable summaries refuse the start (fail closed): one of them might be
+    the child that already took the pool.
+    """
     if not parent:
         raise RecordRefused(
             "--mode DEFERRED needs --from <run_id>: the completed run whose deferred findings "
@@ -214,7 +222,13 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
             "a DEFERRED run exists to fix; to list the deferred findings without edits, run "
             "`python -m cca_checks pipeline deferred` instead"
         )
-    summaries, _ = deferred.load_summaries(root)
+    summaries, unreadable = deferred.load_summaries(root)
+    if unreadable:
+        raise RecordRefused(
+            f"{len(unreadable)} run summary file(s) under .claude/audits/runs/ cannot be read "
+            f"({', '.join(unreadable)}), so it cannot be known whether a pool was already "
+            "taken; fix or move them, then start again"
+        )
     if parent.startswith("commit:"):
         rev = parent.removeprefix("commit:")
         if not _COMMIT_SHA.fullmatch(rev):
@@ -226,6 +240,12 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
         if sha is None or not _is_ancestor(root, sha):
             raise RecordRefused(
                 f"--from {parent} does not name a commit that is an ancestor of HEAD"
+            )
+        owners = [s["run_id"] for s in summaries if s.get("commit") == sha]
+        if owners:
+            raise RecordRefused(
+                f"--from {parent} is the commit of completed run {', '.join(owners)}, which has "
+                f"a summary; use --from {owners[0]} so that run's own rules apply"
             )
         stored = f"commit:{sha}"
         child = deferred.consumed_by(stored, summaries)
@@ -242,7 +262,9 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
     why_not = deferred.why_not_offered(summary, summaries)
     if why_not:
         raise RecordRefused(f"run {parent} cannot be followed up: {why_not}")
-    return parent, summary.get("base_commit")
+    inherited = summary.get("base_commit")
+    base_commit = _commit_of(root, inherited) if isinstance(inherited, str) else None
+    return parent, base_commit
 
 
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
@@ -260,8 +282,9 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
 
     A DEFERRED run names the run it follows in `parent` (a run id, or `commit:<sha>` for a
     run that left no summary). `_deferred_parent` checks it; the run then takes that run's
-    `base_commit` rather than resolving `base`, and `parent` is stored as given by that check.
-    `parent` is refused in any other mode.
+    `base_commit` (None when it no longer resolves) rather than resolving `base`, and `parent`
+    is stored as given by that check. `parent` is refused in any other mode, and `base` is
+    refused in DEFERRED mode.
     """
     tier = tier.upper()
     if tier not in TIERS:
@@ -272,6 +295,11 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     if parent and mode != "DEFERRED":
         raise RecordRefused(
             f"--from names the run a DEFERRED run follows up; it is refused with --mode {mode}"
+        )
+    if mode == "DEFERRED" and base != "HEAD":
+        raise RecordRefused(
+            f"--base {base} is refused with --mode DEFERRED: the run takes its parent's base, "
+            "so there is no diff base to choose"
         )
     if run_id and (not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")):
         raise RecordRefused(

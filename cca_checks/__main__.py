@@ -331,7 +331,8 @@ def main(argv=None) -> int:
     pl_start.add_argument("--mode", default="DIFF", choices=list(pipeline_state.MODES))
     pl_start.add_argument("--base", default="HEAD",
                           help="the revision the audited diff is taken against (HEAD~N for "
-                               "`commit N`); stored as the run's base_commit")
+                               "`commit N`); stored as the run's base_commit. Refused with "
+                               "--mode DEFERRED, which takes its parent's base")
     pl_start.add_argument("--from", dest="parent", default="",
                           help="--mode DEFERRED only: the completed run (or commit:<sha>) "
                                "whose deferred findings this run takes")
