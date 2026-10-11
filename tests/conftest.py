@@ -33,6 +33,20 @@ def _private_run_registry(monkeypatch, tmp_path_factory):
     return registry
 
 
+@pytest.fixture(autouse=True)
+def _private_user_claude_dir(monkeypatch, tmp_path_factory):
+    """`pipeline start` compares the user level `.claude/` with the package; never the real one.
+
+    Without this, every CLI start in the suite would read this machine's `~/.claude`, and
+    a stale file there would print warnings into output the tests parse.
+    """
+    from cca_checks.plugin import installer
+
+    user_dir = tmp_path_factory.mktemp("home") / ".claude"
+    monkeypatch.setattr(installer, "user_claude_dir", lambda: user_dir)
+    return user_dir
+
+
 def _git(root, *args, env=None) -> str:
     return subprocess.run(
         ["git", "-C", str(root), *args], check=True, capture_output=True, env=env

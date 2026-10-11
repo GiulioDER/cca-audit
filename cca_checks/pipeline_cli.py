@@ -106,6 +106,15 @@ def add_parser(sub) -> None:
     pl_deferred.add_argument("--root", default=".")
 
 
+def _stale_copy_warnings(root) -> list[str]:
+    """Installed pipeline files that differ from this package's; never a refusal."""
+    try:
+        from .plugin import stale_copies
+        return stale_copies(root)
+    except Exception as exc:  # noqa: BLE001 - a warning about warnings must not stop a run
+        return [f"could not compare the installed pipeline files with the package ({exc})"]
+
+
 def run(a) -> int:
     """Run the `pipeline` subcommand. Prints JSON; returns a process exit code.
 
@@ -126,7 +135,10 @@ def run(a) -> int:
             except pipeline_state.RecordRefused as exc:
                 print(json.dumps({"refused": "start", "reason": str(exc)}), file=sys.stderr)
                 return 2
-            print(json.dumps({"started": state.to_json()}))
+            warnings = _stale_copy_warnings(a.root)
+            for warning in warnings:
+                print(f"warning: {warning}", file=sys.stderr)
+            print(json.dumps({"started": state.to_json(), "warnings": warnings}))
             return 0
 
         if a.pipeline_cmd == "record":

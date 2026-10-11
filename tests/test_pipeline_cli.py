@@ -776,3 +776,46 @@ def test_a_tool_subcommand_passes_the_tool_exit_code_through(capsys, git_repo, m
     monkeypatch.chdir(git_repo)
     assert main(["scorecard", "--record"]) == 2
     assert "cannot record L2.6" in capsys.readouterr().err
+
+
+def test_start_warns_about_stale_installed_copies_and_still_starts(capsys, git_repo,
+                                                                    _private_user_claude_dir):
+    """A project's or the user's stale pipeline file is named, with the command to refresh it.
+
+    Red 2026-10-11: mutation `_stale_copy_warnings` returns `[]`; failed at
+    `assert len(out["warnings"]) == 2`.
+    """
+    stale = git_repo / ".claude" / "commands" / "audit-fix.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("# July's pipeline\n", encoding="utf-8")
+    user_tool = _private_user_claude_dir / "tools" / "cca_scorecard.py"
+    user_tool.parent.mkdir(parents=True)
+    user_tool.write_text("print('old')\n", encoding="utf-8")
+    code = main(["pipeline", "start", "--tier", "FAST", "--root", str(git_repo)])
+    out_text, err = capsys.readouterr()
+    out = json.loads(out_text)
+    assert code == 0 and out["started"]["tier"] == "FAST"
+    assert (git_repo / ".claude/audits/run-state.json").exists()
+    assert len(out["warnings"]) == 2
+    assert str(stale) in out["warnings"][0] and "cca-audit install --target" in out["warnings"][0]
+    assert str(user_tool) in out["warnings"][1]
+    assert err.count("warning: ") == 2
+
+
+def test_start_does_not_warn_about_identical_or_absent_copies(capsys, git_repo):
+    """An identical copy (even with CRLF endings) and an absent one are not warnings.
+
+    Red 2026-10-11: mutation `_lf` returns its input unchanged (no CRLF normalisation);
+    failed at `assert out["warnings"] == []`.
+    """
+    from cca_checks import plugin
+    text = dict(plugin.iter_commands())["audit-fix.md"]
+    same = git_repo / ".claude" / "commands" / "audit-fix.md"
+    same.parent.mkdir(parents=True)
+    same.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+    code = main(["pipeline", "start", "--tier", "FAST", "--root", str(git_repo)])
+    out_text, err = capsys.readouterr()
+    out = json.loads(out_text)
+    assert code == 0
+    assert out["warnings"] == []
+    assert "warning" not in err
