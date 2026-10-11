@@ -1,6 +1,8 @@
 import argparse
+import importlib.util
 import json
 import os
+import pathlib
 import sys
 from dataclasses import asdict
 
@@ -188,10 +190,46 @@ def _capabilities(file: str) -> dict:
             "unavailable": unavailable}
 
 
+#: The pipeline's two tools, run from inside this package. `audit-fix.md` used to run
+#: `.claude/tools/<tool>.py` when that file existed, and a gitignored `.claude/` from an
+#: older install then ran months-old tools under new prose, with no warning.
+_TOOLS = {"scorecard": "cca_scorecard.py", "tautology": "cca_tautology_check.py"}
+
+
+def _run_tool(name: str, args: list[str]) -> int:
+    """Run a packaged tool's `main` with `args` verbatim; its exit code is ours.
+
+    By path, like `pipeline_state._load_core`: `plugin/tools/` is not a package (its
+    tests import the tools as bare modules), and the same files ship as scripts.
+    """
+    path = pathlib.Path(__file__).resolve().parent / "plugin" / "tools" / _TOOLS[name]
+    module_name = f"_cca_checks_tool_{path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load the {name} tool from {path}")
+    module = importlib.util.module_from_spec(spec)
+    # Registered before it runs: a dataclass looks its module up in sys.modules.
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return int(module.main(args))
+
+
 def main(argv=None) -> int:
-    argv = sys.argv[1:] if argv is None else argv
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in _TOOLS:
+        # Before argparse, so every remaining word reaches the tool untouched, flags
+        # included (`--json`, `--record`, `--proof A=B`, `--help`).
+        return _run_tool(argv[0], argv[1:])
     p = argparse.ArgumentParser(prog="cca_checks")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    # Listed here so `--help` shows them; `main` dispatches them before parsing.
+    for name, filename in _TOOLS.items():
+        tool = sub.add_parser(
+            name, add_help=False,
+            help=f"run the packaged {filename} with the remaining arguments",
+        )
+        tool.add_argument("args", nargs=argparse.REMAINDER)
 
     c = sub.add_parser("check", help="settle a claim with a deterministic checker")
     c.add_argument("--claim-type", required=True, choices=CLAIM_TYPES)

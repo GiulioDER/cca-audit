@@ -41,9 +41,11 @@ LAYERS = ("L0.4", "L1", "L2", "L2.5", "L2.6", "L3", "L4", "L5", "L5.5", "L5.6", 
 TIERS = ("FAST", "STANDARD", "DEEP")
 MODES = ("DIFF", "HUNT", "DEFERRED")
 APPROVING_VERDICT = "APPROVED"
+#: The command that records each tool layer. The package's own copy of each tool, so a
+#: stale `.claude/tools/` from an older install can never be the one that runs.
 TOOL_LAYERS = {
-    "L2.6": "python .claude/tools/cca_scorecard.py --json --record",
-    "L5.6": "python .claude/tools/cca_tautology_check.py verify --proof ... --record",
+    "L2.6": "python -m cca_checks scorecard --json --record",
+    "L5.6": "python -m cca_checks tautology verify --proof ... --record",
 }
 FIX_VERDICT_LAYERS = ("L5", "L5.5", "L5.6", "L6")
 HEADINGS = {

@@ -717,3 +717,62 @@ def test_record_fingerprints_the_tree_once(capsys, git_repo, monkeypatch):
     code, out, _ = _cli(capsys, "record", "L1", "--output", out_file, "--root", r)
     assert code == 0 and out["recorded"] == "L1"
     assert calls[0] == 1
+def _through_l2_5(root) -> None:
+    from cca_checks import pipeline_state as ps
+    ps.start("STANDARD", root=root)
+    ps.record("L1", output=write_output(root), root=root)
+    ps.record("L2", counts={"unique": 0}, output=write_output(root), root=root)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=write_output(root), root=root)
+
+
+def test_scorecard_subcommand_records_l2_6_from_the_packaged_tool(capsys, git_repo,
+                                                                   monkeypatch):
+    """`python -m cca_checks scorecard --json --record` passes both flags to the tool.
+
+    Red 2026-10-11: mutation `_run_tool` calls `module.main(args[:-1])` (drops the last
+    argument, `--record`); failed at `assert "L2.6" in state.layers`.
+    """
+    from cca_checks import pipeline_state as ps
+    _through_l2_5(git_repo)
+    monkeypatch.chdir(git_repo)
+    capsys.readouterr()
+    assert main(["scorecard", "--json", "--record"]) == 0
+    state = ps.load(git_repo)
+    assert state is not None
+    assert "L2.6" in state.layers
+    assert state.layers["L2.6"]["source"] == "tool" and state.layers["L2.6"]["status"] == "done"
+    assert "rows_scored" in json.loads(capsys.readouterr().out)
+
+
+def test_tautology_subcommand_records_l5_6_with_no_proofs(capsys, git_repo, monkeypatch):
+    """`python -m cca_checks tautology verify --no-proofs --record` records L5.6.
+
+    Red 2026-10-11: mutation `_run_tool` calls `module.main(args[:-1])` (drops `--record`);
+    failed at `assert "L5.6" in state.layers`.
+    """
+    from cca_checks import pipeline_state as ps
+    _through_l2_5(git_repo)
+    ps.record("L2.6", source="tool", root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
+    ps.record("L4", fixes=1, output=write_output(git_repo), root=git_repo)
+    ps.record("L5", root=git_repo)
+    monkeypatch.chdir(git_repo)
+    assert main(["tautology", "verify", "--no-proofs", "--record"]) == 0
+    state = ps.load(git_repo)
+    assert state is not None
+    assert "L5.6" in state.layers
+    assert state.layers["L5.6"]["source"] == "tool"
+    assert state.layers["L5.6"]["detail"] == "0 proofs claimed (no P1 to prove)"
+
+
+def test_a_tool_subcommand_passes_the_tool_exit_code_through(capsys, git_repo, monkeypatch):
+    """No run is open, so the scorecard cannot record L2.6 and exits 2; so must we.
+
+    Red 2026-10-11: mutation `_run_tool` returns 0 after calling the tool; failed at
+    `assert main(["scorecard", "--record"]) == 2` (0 == 2).
+    """
+    monkeypatch.chdir(git_repo)
+    assert main(["scorecard", "--record"]) == 2
+    assert "cannot record L2.6" in capsys.readouterr().err

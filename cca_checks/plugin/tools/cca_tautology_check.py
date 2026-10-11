@@ -256,7 +256,13 @@ def _record(status: str, detail: str) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run the tool; `argv` defaults to `sys.argv[1:]`, as a standalone script reads it.
+
+    `python -m cca_checks scorecard|tautology ...` passes its remaining arguments here,
+    so the pipeline runs the copy inside the installed package, never a stale one in a
+    project's `.claude/tools/`.
+    """
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -278,7 +284,7 @@ def main() -> int:
                    help="with --no-proofs: N CONFIRMED P1 findings were parked (edit "
                         "reverted, UNCERTAIN to a human), so they need no proof")
 
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     if a.cmd == "snapshot":
         return cmd_snapshot(a.files, a.snapdir)
 
