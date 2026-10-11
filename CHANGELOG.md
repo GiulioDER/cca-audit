@@ -27,6 +27,9 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.
 
+### Fixed
+- The Codex skill keeps at most six subagents open, Codex's default `agents.max_threads`. A finished subagent holds its slot until `close_agent`, so the skill now records and closes each one before spawning the next queued role. A DEEP run used to launch every auditor at once and die on `agent thread limit reached`.
+
 ## [0.10.1] - 2026-08-31
 
 - **`pip install 'cca-audit[verify]'` no longer rewrites unrelated packages.** semgrep hard-pins
