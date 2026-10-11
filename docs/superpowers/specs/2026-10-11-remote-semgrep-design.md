@@ -209,3 +209,10 @@ they disagree with this one, this one wins. `docs/remote-semgrep.md` carries the
    options before it. A remote answer must list exactly `target.<ext>` as scanned.
 5. **§7, trust:** a remote scan puts that host in the trust base for refutations. The operator
    verifies the host key fingerprint out of band; the verdict names the host.
+6. **§4, the ssh path (found during the first real setup):** Tailscale SSH ignores
+   `authorized_keys`, so on a host whose port 22 is answered by `tailscaled` the forced command
+   never applies. The account is reached through OpenSSH on its own port on the private address
+   (`ssh.socket` drop-in, `FreeBind=yes`), allowed only from the tailnet
+   (`AllowUsers ... cca-analyzer@100.64.0.0/10`), and sshd itself forces the runner with a
+   `Match User` block appended to the main `sshd_config`. Measured on the author's host: port 22
+   served by `tailscaled`, OpenSSH limited to `AllowUsers sentiment`, ssh socket-activated.

@@ -72,13 +72,69 @@ printf '[Slice]\nMemoryMax=3G\nTasksMax=64\nCPUQuota=150%%\n' \
 sudo systemctl daemon-reload
 ```
 
+### 2b. Give the account its own OpenSSH port
+
+The forced command is enforced by OpenSSH, so the account must be reached through OpenSSH and
+nothing else. **Tailscale SSH ignores `authorized_keys`**: if port 22 on the address you use is
+answered by `tailscaled` (check with `ps -o comm= -p $PPID` in a session; it prints `tailscaled`),
+the `command=` line above never applies. So the account gets a port of its own, on the private
+address only, which Tailscale SSH does not intercept, and sshd itself forces the runner, so the
+key file is not the only lock. `<tailnet-ip>` is the host's Tailscale address (`tailscale ip -4`).
+
+The listener. On Ubuntu 24.04 ssh is socket-activated (`systemctl is-active ssh.socket` says
+`active`), so the port belongs to `ssh.socket`, not to `sshd_config`. `FreeBind=yes` matters: at
+boot the Tailscale address may not exist yet, and without it the whole socket, port 22 included,
+would fail to start.
+
+```bash
+sudo mkdir -p /etc/systemd/system/ssh.socket.d
+printf '[Socket]\nListenStream=<tailnet-ip>:2222\nFreeBind=yes\n' \
+  | sudo tee /etc/systemd/system/ssh.socket.d/cca-analyzer.conf >/dev/null
+```
+
+Who may log in. `AllowUsers` must name the account, and only from the tailnet. The file sorts
+before the existing drop-ins, so the result is right whether sshd takes the first `AllowUsers` or
+all of them (keep every user already allowed; here that is `sentiment`):
+
+```bash
+echo 'AllowUsers sentiment cca-analyzer@100.64.0.0/10' \
+  | sudo tee /etc/ssh/sshd_config.d/10-cca-analyzer.conf >/dev/null
+```
+
+What it may do. The `Match` block goes at the END of the main file, never in a drop-in: drop-ins
+are included at the top, and a `Match` there could capture the settings after it.
+
+```bash
+sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.before-cca-analyzer
+printf '\nMatch User cca-analyzer\n    ForceCommand /home/cca-analyzer/bin/cca-analyzer-runner\n    AuthenticationMethods publickey\n    DisableForwarding yes\n    PermitTTY no\n    PermitTunnel no\n    PermitUserRC no\n' \
+  | sudo tee -a /etc/ssh/sshd_config >/dev/null
+```
+
+Check before applying anything, then apply. Your existing access is untouched: Tailscale SSH does
+not go through sshd, so a mistake here cannot lock you out.
+
+```bash
+sudo sshd -t
+sudo sshd -T -C user=cca-analyzer,host=x,addr=100.100.100.100,lport=2222 \
+  | grep -iE '^(forcecommand|disableforwarding|permittty|authenticationmethods|allowusers)'
+sudo ufw allow in on tailscale0 to any port 2222 proto tcp
+sudo systemctl daemon-reload && sudo systemctl restart ssh.socket
+ss -ltn '( sport = :2222 or sport = :22 )'
+```
+
+Expected: `sshd -t` prints nothing; the `-T` lines show `forcecommand
+/home/cca-analyzer/bin/cca-analyzer-runner`, `disableforwarding yes`, `permittty no`, and
+`allowusers` with both entries; `ss` lists `<tailnet-ip>:2222` and still `0.0.0.0:22`. If `sshd -t`
+complains, restore `sshd_config.before-cca-analyzer`, remove `10-cca-analyzer.conf`, and stop.
+
 ## 3. The workstation side
 
 In `~/.ssh/config`:
 
 ```
 Host cca-analyzer
-    HostName <host>
+    HostName <tailnet-ip>
+    Port 2222
     User cca-analyzer
     IdentityFile ~/.ssh/cca_analyzer
     IdentitiesOnly yes
@@ -138,6 +194,11 @@ ssh -n cca-analyzer id
 
 Expected: the runner's JSON refusal (`not a well-formed tar archive`), never a uid line. (`-n`
 gives ssh an empty stdin; without it the runner waits for a request on your terminal.)
+
+Port 22 is a different path. If the host runs Tailscale SSH and your tailnet ACL lets you log in
+as non-root users, `ssh cca-analyzer@<tailnet-ip>` (port 22) opens a shell as the account through
+your tailnet identity, not through the key. That is no wider than the access you already have, but
+to close it, limit the ACL's `ssh` rule `users` to the accounts you actually log in as.
 
 On the host, the account must not read anything of the services that run there. Name their real
 secret locations, not only `/home`:
