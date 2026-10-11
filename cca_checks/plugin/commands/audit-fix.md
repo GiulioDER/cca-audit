@@ -19,12 +19,12 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 |---|-------|------------------|
 | 0.4 | viability *(HUNT only)* | `pipeline start --tier DEEP --mode HUNT [--no-fix]`, then `pipeline record L0.4 --detail PASS\|REJECT` |
 | 0.6 | tier chosen | `pipeline start --tier <TIER> [--no-fix]` *(DIFF mode; a hunt already started at 0.4)* |
-| 1 | parallel auditors | `pipeline record L1 --detail "<N> auditors" --output .claude/audits/L1.json` |
-| 2 | consolidate | `pipeline record L2 --unique <U> --detail "<raw> raw" --output .claude/audits/L2.json` |
-| 2.5 | **verify findings** | `pipeline record L2.5 --confirmed <C> --fp <F> --uncertain <U> --duplicate <D> --output .claude/audits/L2.5.json` |
+| 1 | parallel auditors | `pipeline record L1 --detail "<N> auditors" --output .claude/audits/out/L1.json` |
+| 2 | consolidate | `pipeline record L2 --unique <U> --detail "<raw> raw" --output .claude/audits/out/L2.json` |
+| 2.5 | **verify findings** | `pipeline record L2.5 --confirmed <C> --fp <F> --uncertain <U> --duplicate <D> --output .claude/audits/out/L2.5.json` |
 | 2.6 | scorecard *(STD/DEEP)* | the scorecard records it: `python "$CCA" --json --record` |
-| 3 | fix plan | `pipeline record L3 --to-fix <K> --detail "<D> deferred" --output .claude/audits/L3.json` |
-| 4 | implement | `pipeline record L4 --fixes <N> --detail "<N> fixes" --output .claude/audits/L4.json` |
+| 3 | fix plan | `pipeline record L3 --to-fix <K> --detail "<D> deferred" --output .claude/audits/out/L3.json` |
+| 4 | implement | `pipeline record L4 --fixes <N> --detail "<N> fixes" --output .claude/audits/out/L4.json` |
 | 5 | re-verify | `pipeline record L5 --detail "tests green"` |
 | 5.5 | **regression diff** *(STD/DEEP)* | `pipeline record L5.5 --detail "all SAFE"` |
 | 5.6 | **red-state proof** *(STD/DEEP)* | the checker records it: `python "$TC" verify ... --record` |
@@ -45,7 +45,7 @@ not an alternative: it leaves no trail, which is the failure the guard replaces.
 
 L1, L2, L2.5, L3 and L4 store their work: `--output <file>` names a JSON file that `record` copies
 into `.claude/audits/runs/<run_id>/`, and `record` refuses those layers without it. Write the file
-under `.claude/audits/` (for example `.claude/audits/L1.json`), the one place the gate ignores;
+under `.claude/audits/` (for example `.claude/audits/out/L1.json`), the one place the gate ignores;
 `record` refuses a file anywhere else, because in the working tree it would be an edit to the code
 under audit and would make the fix layers owed.
 
@@ -57,7 +57,9 @@ and `git commit` are refused and the Stop hook lets the session end. To continue
 run `python -m cca_checks pipeline resume`: it prints the next owed layer and its heading, and
 the output files of every recorded layer. Re-read that heading and load those files before doing
 anything else. An edit made while paused makes every later verdict stale, and `resume` lists them
-under `outstanding`.
+under `outstanding`. `resume` also gives the Stop hook its three refusals back, so the resumed
+session is guarded again. The feedback of an L6 REVISE verdict is not saved, so a run resumed at
+Step 6 runs the architect gate again.
 
 > ### ⚠️ Read this before Step 2, and again whenever you are about to summarise
 >
@@ -464,7 +466,7 @@ RULES:
 
 ```bash
 python -m cca_checks pipeline record L1 --detail "<N> auditors, <R> raw findings" \
-  --output .claude/audits/L1.json   # the auditors' findings arrays, as returned
+  --output .claude/audits/out/L1.json   # the auditors' findings arrays, as returned
 ```
 
 Then **re-read § Step 2 and § Step 2.5 of this file before doing anything else.** You have just taken
@@ -493,7 +495,7 @@ Output table: `| ID | Finding | Auditors | Severity | P | high-stakes? | File:li
 
 ```bash
 python -m cca_checks pipeline record L2 --unique <U> --detail "<R> raw, <U> unique" \
-  --output .claude/audits/L2.json   # the consolidated unique findings
+  --output .claude/audits/out/L2.json   # the consolidated unique findings
 ```
 
 ## Step 2.5: Layer 2.5, Findings Verification (ANTI-HALLUCINATION), every tier
@@ -502,7 +504,7 @@ Verify P1/P2 are real before any fix (P3 are deferred anyway). FAST verifies P1 
 `fp-check`, and reports P2 unverified; the layer is still recorded on every tier. If there
 are zero P1/P2 findings, there is nothing to verify, but the layer is still owed: record it with zero
 counts (`python -m cca_checks pipeline record L2.5 --confirmed 0 --fp 0 --uncertain 0 --duplicate 0
---output .claude/audits/L2.5.json`, the file holding an empty list).
+--output .claude/audits/out/L2.5.json`, the file holding an empty list).
 A layer with nothing to do is recorded, never skipped.
 
 **Non-high-stakes P1/P2** — one `fp-check` agent over the list:
@@ -607,7 +609,7 @@ layer, and recording it as though it were is a false entry in the run's own evid
 
 ```bash
 python -m cca_checks pipeline record L2.5 --confirmed <C> --fp <F> --uncertain <U> --duplicate <D> \
-  --output .claude/audits/L2.5.json   # the verdict for every consolidated finding
+  --output .claude/audits/out/L2.5.json   # the verdict for every consolidated finding
 ```
 
 If `no-fix`: on STANDARD or DEEP run Step 2.6 (it records itself), then close the run and STOP.
@@ -667,7 +669,7 @@ Print the checker's `Scorecard: …` summary line in the run output.
 
 ```bash
 python -m cca_checks pipeline record L3 --to-fix <N> --detail "<D> deferred" \
-  --output .claude/audits/L3.json   # the fix plan: finding ids to fix, deferred ids
+  --output .claude/audits/out/L3.json   # the fix plan: finding ids to fix, deferred ids
 ```
 
 ## Fix Attempt Budget & Journal (STANDARD/DEEP)
@@ -722,7 +724,7 @@ and L5.6 are owed whether or not this is recorded; `--fixes` is recorded for the
 
 ```bash
 python -m cca_checks pipeline record L4 --fixes <N> --detail "<N> fixes applied" \
-  --output .claude/audits/L4.json   # the fixes applied: fix id, finding id, files
+  --output .claude/audits/out/L4.json   # the fixes applied: fix id, finding id, files
 ```
 
 Then **re-read § Step 5, § Step 5.5 and § Step 5.6.** The tests going green here is the single most
