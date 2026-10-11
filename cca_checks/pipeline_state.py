@@ -43,8 +43,8 @@ from dataclasses import dataclass, field
 
 __all__ = [
     "CommitDecision", "LAYERS", "OUTPUT_LAYERS", "PipelineState", "RecordRefused", "TIERS",
-    "abort", "close", "load", "outstanding", "pause", "record", "required_layers", "resume",
-    "start", "state_path", "verify_commit_allowed",
+    "abort", "close", "current_tree", "load", "outstanding", "pause", "record",
+    "required_layers", "resume", "start", "state_path", "verify_commit_allowed",
 ]
 
 
@@ -76,6 +76,16 @@ _PAUSED = (
 
 class RecordRefused(ValueError):
     """A layer that may not be recorded yet, or not with these numbers."""
+
+
+class _Unset:
+    """Marks a `tree` argument the caller did not pass: None is a real fingerprint answer."""
+
+
+#: Default for every `tree=` parameter. The fingerprint runs `git add -A` over a copy of
+#: the index, the costliest thing these functions do, so a caller answering several
+#: questions about one run computes it once with `current_tree` and passes it to each.
+_UNSET = _Unset()
 
 
 def state_path(root: str | pathlib.Path = ".") -> pathlib.Path:
@@ -324,7 +334,8 @@ def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
 
 def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | None = None,
            counts: dict | None = None, source: str = "cli", output=None,
-           root: str | pathlib.Path = ".") -> PipelineState:
+           root: str | pathlib.Path = ".",
+           tree: str | None | _Unset = _UNSET) -> PipelineState:
     """Record that `layer` was reached and given a verdict.
 
     Raises RecordRefused when the run is paused, the layer is out of order, is a tool
@@ -332,6 +343,9 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
     is one of OUTPUT_LAYERS without a readable JSON `output` file. A layer outside
     OUTPUT_LAYERS given an `output` is refused too, so the prose cannot drift from the
     code by passing a flag that would be silently ignored.
+
+    `tree`, when passed, must be a fingerprint taken in this same call chain with
+    nothing but `.claude/audits/` written since; omitted, it is computed here.
     """
     if layer not in LAYERS:
         raise ValueError(f"unknown layer {layer!r} (expected one of {', '.join(LAYERS)})")
@@ -355,7 +369,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             raise RecordRefused(
                 f"{layer} is recorded by its tool, not by hand: {core.TOOL_LAYERS[layer]}"
             )
-        tree = core.fingerprint(root)
+        if isinstance(tree, _Unset):
+            tree = core.fingerprint(root)
         raw = state.to_json()
         owed = core.fixes_owed(raw, tree) or (fixes or 0) > 0
         missing = [p for p in core.predecessors(layer, raw, owed) if p not in state.layers]
@@ -393,32 +408,39 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
     return state
 
 
-def _tree(state: PipelineState, root) -> str | None:
+def current_tree(state: PipelineState, root: str | pathlib.Path = ".") -> str | None:
+    """The fingerprint this run is judged against; a 0.10.x run is never judged by one."""
     return None if state.legacy else core.fingerprint(root)
 
 
-def required_layers(state: PipelineState, root: str | pathlib.Path = ".") -> tuple[str, ...]:
+def _tree(state: PipelineState, root, tree: str | None | _Unset) -> str | None:
+    return current_tree(state, root) if isinstance(tree, _Unset) else tree
+
+
+def required_layers(state: PipelineState, root: str | pathlib.Path = ".", *,
+                    tree: str | None | _Unset = _UNSET) -> tuple[str, ...]:
     if state.legacy:
         required = list(core.LEGACY_CORE_REQUIRED)
         if state.fixes_applied > 0:
             required.extend(core.LEGACY_FIX_REQUIRED[state.tier])
         return tuple(required)
     raw = state.to_json()
-    return core.required_layers(raw, core.fixes_owed(raw, _tree(state, root)))
+    return core.required_layers(raw, core.fixes_owed(raw, _tree(state, root, tree)))
 
 
-def outstanding(state: PipelineState, root: str | pathlib.Path = ".") -> list[str]:
+def outstanding(state: PipelineState, root: str | pathlib.Path = ".", *,
+                tree: str | None | _Unset = _UNSET) -> list[str]:
     """What this run still owes before it may close. Legacy runs owe nothing here."""
     if state.legacy:
         return []
-    return core.outstanding(state.to_json(), _tree(state, root))
+    return core.outstanding(state.to_json(), _tree(state, root, tree))
 
 
-def verify_commit_allowed(state: PipelineState | None,
-                          root: str | pathlib.Path = ".") -> CommitDecision:
+def verify_commit_allowed(state: PipelineState | None, root: str | pathlib.Path = ".", *,
+                          tree: str | None | _Unset = _UNSET) -> CommitDecision:
     if state is None:
         return CommitDecision(allowed=True, reasons=["no CCA run is open"])
-    reasons = core.commit_reasons(state.to_json(), _tree(state, root))
+    reasons = core.commit_reasons(state.to_json(), _tree(state, root, tree))
     return CommitDecision(allowed=not reasons, reasons=reasons, run_id=state.run_id)
 
 
@@ -501,7 +523,7 @@ def resume(root: str | pathlib.Path = ".") -> dict:
     if not state.paused:
         raise RecordRefused("the run is not paused; there is nothing to resume")
     stored = state.paused.get("tree")
-    tree = _tree(state, root)
+    tree = current_tree(state, root)
     state.paused = None
     # A resumed session is a new session: it gets the Stop hook's three refusals again.
     state.stop_refusals = 0
