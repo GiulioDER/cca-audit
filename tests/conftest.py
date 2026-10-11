@@ -97,3 +97,15 @@ def git_repo(tmp_path) -> pathlib.Path:
 def git_repo_tracking_claude(tmp_path) -> pathlib.Path:
     """A user repository that does NOT ignore .claude/ (Review Focus 1)."""
     return _init(tmp_path, "")
+
+
+@pytest.fixture(autouse=True)
+def _no_remote_semgrep_unless_asked(monkeypatch):
+    """Keep the suite local even when the developer exports CCA_REMOTE_SEMGREP.
+
+    The existing semgrep tests stub subprocess.run globally; with a remote configured
+    they would route through ssh instead and test the wrong thing. CCA_TESTS_USE_REMOTE=1
+    keeps the variable, for a deliberate live run against a real host.
+    """
+    if os.environ.get("CCA_TESTS_USE_REMOTE") != "1":
+        monkeypatch.delenv("CCA_REMOTE_SEMGREP", raising=False)
