@@ -282,6 +282,41 @@ def _registered_guards(root: pathlib.Path) -> tuple[bool, bool]:
     return commit, stop
 
 
+def _short_guard_timeouts(root: pathlib.Path) -> list[str]:
+    """Registered guard hooks whose explicit timeout is below _HOOK_TIMEOUT_S.
+
+    0.10.x printed a 15 s timeout for the commit guard; 0.11 fingerprints the tree for up
+    to 30 s inside it, and a hook that times out fails OPEN. `_registered_guards` only
+    sees that a guard is named, so an upgraded settings file kept the 15 s entry and the
+    install reported nothing. A hook with no timeout gets Claude Code's default (60 s).
+    """
+    candidates = [
+        root / ".claude" / "settings.json",
+        root / ".claude" / "settings.local.json",
+        pathlib.Path.home() / ".claude" / "settings.json",
+    ]
+    found: list[str] = []
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        events = data.get("hooks") if isinstance(data, dict) else None
+        for groups in (events.values() if isinstance(events, dict) else ()):
+            for group in groups if isinstance(groups, list) else ():
+                hooks = group.get("hooks") if isinstance(group, dict) else None
+                for hook in hooks if isinstance(hooks, list) else ():
+                    if not isinstance(hook, dict):
+                        continue
+                    command = str(hook.get("command", ""))
+                    name = next((n for n in (_GUARD_NAME, _STOP_GUARD_NAME) if n in command),
+                                None)
+                    timeout = hook.get("timeout")
+                    if name and isinstance(timeout, (int, float)) and timeout < _HOOK_TIMEOUT_S:
+                        found.append(f"{name} in {path} (timeout {timeout} s)")
+    return found
+
+
 def hook_snippet(target: str | pathlib.Path = ".") -> str:
     """The settings.json fragment that arms the commit guard and the stop guard."""
     hooks_dir = pathlib.Path(target).resolve() / ".claude" / "hooks"
@@ -412,6 +447,12 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
             "the stop guard is installed but not registered (the commit guard is); add "
             "the Stop hook from `cca-audit install --print-hook` to your settings.json, "
             "or a run can end half done without anything noticing"
+        )
+    for entry in _short_guard_timeouts(root):
+        result.warnings.append(
+            f"{entry} is below {_HOOK_TIMEOUT_S} s; the guard can now take up to 30 s and a "
+            "hook that times out lets the commit through. Replace the entry with the "
+            "output of `cca-audit install --print-hook`"
         )
 
     return result

@@ -43,7 +43,10 @@ Map Claude specific terms in the canonical pipeline as follows:
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
 Codex must still write the `--output` file that every L1, L2, L2.5, L3 and L4 record requires,
-under `.claude/audits/`, even when it omits the rest of the trail.
+under `.claude/audits/`, even when it omits the rest of the trail. On STANDARD and DEEP it must
+also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_SCORECARD.jsonl`,
+carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
+Step 2.6 scorecard reads them. Neither is optional trail.
 
 Resolve the selected skill directory from this `SKILL.md` path. Use absolute paths when invoking
 the bundled checker scripts. Never assume the current repository has a `.claude/` directory.

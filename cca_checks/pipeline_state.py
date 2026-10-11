@@ -188,8 +188,17 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
             '"<why>"`'
         )
     stamp = core.now()
+    run_id = run_id or stamp.replace(":", "").replace("-", "")
+    if (pathlib.Path(root) / ".claude" / "audits" / "runs" / run_id).exists() or \
+            _ledger_mentions(root, run_id):
+        # A reused id would count the earlier run's ledger rows toward this run's L2.5
+        # and overwrite its stored outputs.
+        raise RecordRefused(
+            f"run id {run_id!r} was used by an earlier run (its outputs or ledger rows "
+            "exist); start with a new --run-id"
+        )
     state = PipelineState(
-        run_id=run_id or stamp.replace(":", "").replace("-", ""), tier=tier,
+        run_id=run_id, tier=tier,
         mode=mode.upper(), no_fix=no_fix, started_utc=stamp,
         schema=core.SCHEMA, base_tree=core.fingerprint(root),
     )
@@ -197,15 +206,19 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     return state
 
 
-def _ledger_rows(root, run_id: str) -> tuple[int, int]:
-    """(disposition rows for run_id, malformed lines). Outcome rows carry no
-    `verdict` key and are not dispositions (Review Focus 4)."""
+_VERDICT_COUNTS = {"CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp",
+                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate"}
+
+
+def _ledger(root) -> tuple[list[dict], int]:
+    """(rows of the disposition ledger, malformed lines)."""
     path = pathlib.Path(root) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
-    rows = malformed = 0
+    rows: list[dict] = []
+    malformed = 0
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
-        return 0, 0
+        return [], 0
     for line in lines:
         if not line.strip():
             continue
@@ -214,9 +227,25 @@ def _ledger_rows(root, run_id: str) -> tuple[int, int]:
         except json.JSONDecodeError:
             malformed += 1
             continue
-        if isinstance(row, dict) and "verdict" in row and str(row.get("run_id")) == run_id:
-            rows += 1
+        if isinstance(row, dict):
+            rows.append(row)
     return rows, malformed
+
+
+def _ledger_mentions(root, run_id: str) -> bool:
+    return any(str(row.get("run_id")) == run_id for row in _ledger(root)[0])
+
+
+def _ledger_rows(root, run_id: str) -> tuple[dict[str, int], int]:
+    """(disposition rows for run_id tallied by verdict, malformed lines). Outcome rows
+    carry no `verdict` key and are not dispositions (Review Focus 4)."""
+    rows, malformed = _ledger(root)
+    tally: dict[str, int] = {}
+    for row in rows:
+        if "verdict" in row and str(row.get("run_id")) == run_id:
+            verdict = str(row.get("verdict"))
+            tally[verdict] = tally.get(verdict, 0) + 1
+    return tally, malformed
 
 
 def _need(counts: dict, key: str, layer: str) -> int:
@@ -243,21 +272,42 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
         total = sum(
             _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
         )
+        # Findings passed on without a verdict (P3, and P2 on FAST): Step 2.5 verifies
+        # only P1/P2, so without this count every run with a P3 was refused here.
+        unverified = _need(counts, "unverified", layer) if "unverified" in counts else 0
         unique = _layer_count(state, "L2", "unique")
-        if unique is not None and total != unique:
+        if unique is not None and total + unverified != unique:
             raise RecordRefused(
-                f"L2.5 accounts for {total} findings but L2 recorded {unique} unique; "
-                "every consolidated finding needs exactly one verdict"
+                f"L2.5 accounts for {total + unverified} findings ({total} verdicts, "
+                f"{unverified} unverified) but L2 recorded {unique} unique; every "
+                "consolidated finding needs exactly one verdict, or is counted with "
+                "--unverified when Step 2.5 passes it on unverified"
             )
         if state.tier != "FAST":
-            rows, malformed = _ledger_rows(root, state.run_id)
+            tally, malformed = _ledger_rows(root, state.run_id)
+            rows = sum(tally.values())
+            note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
             if rows != total:
-                note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
                 raise RecordRefused(
                     f"the disposition ledger holds {rows} row(s) for run {state.run_id} but "
                     f"L2.5 recorded {total} verdicts{note}; append one row per verified "
                     "finding to .claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
                     f'"run_id": "{state.run_id}"'
+                )
+            unknown = sorted(set(tally) - set(_VERDICT_COUNTS))
+            mismatched = [
+                f"{verdict}: ledger {tally.get(verdict, 0)}, --{key} {counts[key]}"
+                for verdict, key in _VERDICT_COUNTS.items()
+                if tally.get(verdict, 0) != int(counts[key])
+            ]
+            if unknown or mismatched:
+                detail = "; ".join(
+                    mismatched + [f"unknown verdict {v!r}" for v in unknown]
+                )
+                raise RecordRefused(
+                    f"the disposition ledger for run {state.run_id} disagrees with the L2.5 "
+                    f"counts ({detail}){note}; each ledger row's verdict must be one of "
+                    f"{', '.join(_VERDICT_COUNTS)}"
                 )
     elif layer == "L3":
         to_fix = _need(counts, "to_fix", layer)
@@ -378,6 +428,13 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             raise RecordRefused(
                 f"{layer} cannot be recorded before {', '.join(missing)}; re-read "
                 f"{core.HEADINGS[missing[0]]} of audit-fix.md and run it first"
+            )
+        if layer in core.FIX_VERDICT_LAYERS and tree is None:
+            raise RecordRefused(
+                f"{layer} cannot be recorded: the working tree could not be fingerprinted "
+                "(git missing from PATH, older than 2.31, or timed out), so the verdict "
+                "could never be shown current. Fix git and record again, or retire the run "
+                "with `pipeline abort --reason`"
             )
         gate04 = state.layers.get("L0.4")
         if "L0.4" in core.predecessors(layer, raw, owed) and \

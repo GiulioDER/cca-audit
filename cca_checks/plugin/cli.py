@@ -14,6 +14,7 @@ we return.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import sys
 from importlib import metadata
 
@@ -103,6 +104,15 @@ def main(argv: list[str] | None = None) -> int:
         # tool that arms a commit-blocking hook without being asked is one nobody
         # should install twice.
         print(hook_snippet(args.target))
+        hooks_dir = pathlib.Path(args.target).resolve() / ".claude" / "hooks"
+        missing = [name for name in ("cca_pipeline_guard.py", "cca_stop_guard.py",
+                                     "cca_gate_core.py") if not (hooks_dir / name).is_file()]
+        if missing:
+            # A registered Stop hook whose script is absent exits 2 (python cannot open
+            # it), which Claude Code reads as "do not stop": every turn end is refused.
+            print(f"warning: {', '.join(missing)} not installed in {hooks_dir}; run "
+                  f"`cca-audit install --target {args.target}` before adding these hooks, "
+                  "or the Stop hook will refuse every turn end", file=sys.stderr)
         return 0
 
     is_codex = args.command == "install-codex"

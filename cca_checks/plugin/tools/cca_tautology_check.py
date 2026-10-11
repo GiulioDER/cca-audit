@@ -193,6 +193,43 @@ def _l5_6_entry(results: list[ProofResult]) -> tuple[str, str]:
     return status, f"{red} RED, {taut} tautological, {inc} inconclusive"
 
 
+def _planned_p1() -> int:
+    """CONFIRMED P1 ledger rows of the open run, when its L3 planned fixes; else 0.
+
+    `--no-proofs` claims no P1 needs a proof. The ledger (Step 2.5b) records each
+    verdict's priority, so the claim is checked rather than taken on trust. The rows
+    are written before any fix id exists, so they cannot say which P1 is still being
+    fixed; a P1 parked at the attempt cap is declared with `--parked`.
+    Raises ValueError for an unreadable run state, as `pipeline_state.load` does.
+    """
+    try:
+        from cca_checks import pipeline_state
+    except ImportError:
+        return 0  # _record reports the missing package
+    state = pipeline_state.load(".")
+    if state is None:
+        return 0
+    plan = state.layers.get("L3") or {}
+    if int((plan.get("counts") or {}).get("to_fix") or 0) <= 0:
+        return 0
+    ledger = Path(".claude/audits/AUDITOR_SCORECARD.jsonl")
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0
+    count = 0
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(row, dict) and str(row.get("run_id")) == state.run_id
+                and row.get("verdict") == "CONFIRMED"
+                and str(row.get("priority", "")).upper() == "P1"):
+            count += 1
+    return count
+
+
 def _record(status: str, detail: str) -> int:
     try:
         from cca_checks import pipeline_state
@@ -225,6 +262,9 @@ def main() -> int:
                    help="record L5.6 in the open CCA run")
     v.add_argument("--no-proofs", action="store_true",
                    help="no CONFIRMED P1 needs a proof; records L5.6 with zero proofs")
+    v.add_argument("--parked", type=int, default=0, metavar="N",
+                   help="with --no-proofs: N CONFIRMED P1 findings were parked (edit "
+                        "reverted, UNCERTAIN to a human), so they need no proof")
 
     a = ap.parse_args()
     if a.cmd == "snapshot":
@@ -233,7 +273,22 @@ def main() -> int:
     if a.no_proofs:
         if a.proof:
             raise SystemExit("--no-proofs and --proof are mutually exclusive")
-        return _record("done", "0 proofs claimed (no P1 to prove)") if a.record else 0
+        if not a.record:
+            return 0
+        try:
+            planned = _planned_p1()
+        except ValueError as exc:
+            print(f"cannot record L5.6: {exc}", file=sys.stderr)
+            return 2
+        if a.parked < 0 or planned > a.parked:
+            print(f"cannot record L5.6 with zero proofs: the disposition ledger holds "
+                  f"{planned} CONFIRMED P1 finding(s) for this run, L3 planned fixes, and "
+                  f"{max(a.parked, 0)} were declared parked; each fixed P1 needs a RED "
+                  "proof (verify --proof FIX-ID=NODEID --record)", file=sys.stderr)
+            return 2
+        if a.parked:
+            return _record("done", f"0 proofs claimed; {a.parked} CONFIRMED P1 parked")
+        return _record("done", "0 proofs claimed (no P1 to prove)")
 
     proofs = []
     for spec in a.proof:

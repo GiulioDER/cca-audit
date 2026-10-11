@@ -92,15 +92,51 @@ def read_command(raw: str) -> str:
     return text
 
 
+def chained_with(command: str) -> str | None:
+    """The first shell separator outside quotes in `command`, or None when it is lone.
+
+    The guard runs BEFORE the command, so it judges the tree as it is now. An edit
+    chained ahead of the commit (`<edit> && git add f && git commit`) would change the
+    tree after that judgement. A redirection (`2>&1`, `&>`) is not a separator, and a
+    backslash-newline is a line continuation. Command substitution inside the message
+    (a heredoc in `-m "$(...)"`) is not inspected: the bound is the accidental chain,
+    not a deliberate disguise.
+    """
+    text = command.strip()
+    quote = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+        elif ch == "\\":
+            i += 2
+            continue
+        elif quote == '"':
+            if ch == '"':
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "&" and (text[i - 1:i] in ("<", ">") or text[i + 1:i + 2] == ">"):
+            pass
+        elif ch in ";&|\n":
+            return "newline" if ch == "\n" else ch
+        i += 1
+    return None
+
+
+
 def refuse(root: pathlib.Path, reasons: list[str]) -> int:
     print("CCA pipeline gate: this commit is blocked.\n", file=sys.stderr)
     for reason in reasons:
         print(f"  - {reason}", file=sys.stderr)
     print(
         "\nThe CCA audit+fix pipeline is open in this checkout and has not finished."
-        "\nRun the missing layers and record each one:"
-        "\n  python -m cca_checks pipeline record <LAYER> --detail <verdict>"
-        "\nWhen the architect gate returns APPROVED the commit proceeds."
+        "\nRun each layer named above, re-reading its section of audit-fix.md; the"
+        "\nrecord command for each layer is in the Contract table at its top (L2.6 and"
+        "\nL5.6 are recorded by their tools). A paused run must be resumed first, and a"
+        "\nno-fix run never commits. The commit proceeds once nothing is listed here."
         "\n"
         "\nIf this commit is unrelated to the audit, close the run explicitly:"
         f"\n  python -m cca_checks pipeline abort --reason \"<why>\"   (in {root})"
@@ -147,8 +183,25 @@ def main(argv: list[str] | None = None) -> int:
             )
         if state is None:
             return 0
-        tree = None if core.is_legacy(state) else core.fingerprint(root)
+        legacy = core.is_legacy(state)
+        separator = None if legacy else chained_with(command)
+        if separator:
+            return refuse(root, [
+                f"this commit is chained with other commands (`{separator}`); the gate "
+                "judges the tree before the command runs, so an edit in the same command "
+                "would be committed unjudged. Run the edits, `git add` and `git commit` "
+                "as separate commands"
+            ])
+        # One deadline for the fingerprint and the staged check: two would let the guard
+        # outrun its hook timeout, and a hook that times out lets the commit through.
+        tree, staged_ok = (None, True) if legacy else core.commit_view(root)
         reasons = core.commit_reasons(state, tree)
+        if not reasons and staged_ok is not True:
+            reasons = [
+                "a staged file differs from its working tree content (or the two could "
+                "not be compared), so this commit would ship content no verdict judged; "
+                "re-stage it (`git add <file>`) or restore it, then commit"
+            ]
     except Exception as exc:  # noqa: BLE001
         # An uncaught exception exits 1, which Claude Code treats as non blocking, so a
         # run that cannot be evaluated would let the commit through. Refuse instead.

@@ -46,6 +46,7 @@ def add_parser(sub) -> None:
         ("--fp", "L2.5: FALSE_POSITIVE verdicts"),
         ("--uncertain", "L2.5: UNCERTAIN verdicts"),
         ("--duplicate", "L2.5: DUPLICATE verdicts"),
+        ("--unverified", "L2.5: findings passed on without a verdict (P3; P2 on FAST)"),
         ("--to-fix", "L3: findings the plan will fix"),
     ):
         pl_record.add_argument(flag, type=int, default=None, help=help_text)
@@ -109,7 +110,7 @@ def run(a) -> int:
         if a.pipeline_cmd == "record":
             counts = {"unique": a.unique, "confirmed": a.confirmed, "fp": a.fp,
                       "uncertain": a.uncertain, "duplicate": a.duplicate,
-                      "to_fix": a.to_fix}
+                      "unverified": a.unverified, "to_fix": a.to_fix}
             # Recording writes only under .claude/audits/, which the fingerprint
             # excludes, so the tree taken before it is the tree after it.
             run_state = pipeline_state.load(a.root)
