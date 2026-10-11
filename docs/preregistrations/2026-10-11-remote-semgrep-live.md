@@ -55,3 +55,16 @@ Metric: passed out of 11.
 * semgrep 1.178.0 on the host against whatever newer version CI installs: a rule behaving
   differently between versions would fail a test for a reason that is not the transport.
 * The remote adds a few seconds per call; a test with a tight time bound could fail on latency.
+
+## Result (2026-10-11)
+**Status:** measured. The prediction held.
+
+Measured: **11 of 11 pass** (18 of 18 in the selection, which also ran 7 tests of the same files
+that already passed locally), in 237 s, about 13 s per test. Predicted: 11 of 11.
+
+**Gap:** none on the count. The refutation tests matter most, because a refutation is what the
+remote exists to restore: `test_benign_code_is_still_refuted` (4 sink classes),
+`test_orm_with_no_raw_sql_sink_is_refuted_with_an_artifact` and the two Rust `FALSE_POSITIVE`
+cases now settle as `FALSE_POSITIVE` with `source: semgrep` where they escalated before. The latency
+confound did not bite. The plan's expectation that some tests reach semgrep another way was wrong;
+reading the tests before predicting caught it.
