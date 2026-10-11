@@ -17,6 +17,7 @@ import subprocess
 import pytest
 from conftest import (
     append_ledger,
+    finding_id,
     findings_output,
     plan_output,
     tree_of,
@@ -637,3 +638,112 @@ def test_dot_dot_inside_claude_audits_is_accepted_and_escaping_it_is_refused(git
     with pytest.raises(ps.RecordRefused, match="outside .claude/audits/"):
         ps.record("L2", counts={"unique": 0},
                   output=audits / "out" / ".." / ".." / ".." / "escaped.json", root=git_repo)
+
+
+# --- deferred findings are counted, never given a verdict they did not receive ----------
+
+def _to_l2(repo, tier, unique, run_id="r1", priorities=None):
+    state = ps.start(tier, run_id=run_id, root=repo)
+    ps.record("L1", output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": unique},
+              output=findings_output(repo, unique, priorities=priorities), root=repo)
+    return state
+
+
+def test_deferred_findings_complete_the_l2_5_sum(git_repo):
+    """A DEFERRED finding counts toward the L2.5 sum, so L2.5 accounts for every L2 finding.
+
+    Red 2026-10-11: mutation `total = judged + n_deferred` became `total = judged` in
+    _check_counts; failed at the second L2.5 record (uncaught RecordRefused: accounts for 1
+    findings but L2 recorded 3 unique).
+    """
+    _to_l2(git_repo, "FAST", 3)
+    with pytest.raises(ps.RecordRefused, match="3 unique"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
+                  output=verdicts_output(git_repo, confirmed=1), root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                              "deferred": 2},
+              output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"]["deferred"] == 2
+
+
+def test_a_deferred_finding_gets_no_ledger_row(git_repo):
+    """The ledger needs a row per judged finding, never one for a DEFERRED finding.
+
+    Red 2026-10-11: mutation `if rows != judged:` became `if rows != total:` in _check_counts;
+    failed at the L2.5 record (uncaught RecordRefused from the ledger check: 1 row against
+    the 3 findings of `total`).
+    """
+    _to_l2(git_repo, "STANDARD", 3)
+    append_ledger(git_repo, "r1", 1)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                              "deferred": 2},
+              output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
+
+
+def test_stale_is_refused_outside_a_deferred_run(git_repo):
+    """A first run has no earlier run, so it cannot record a STALE verdict.
+
+    Red 2026-10-11: mutation `if stale and state.mode != "DEFERRED":` became `if False:` in
+    _check_counts; failed at pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    _to_l2(git_repo, "FAST", 2)
+    with pytest.raises(ps.RecordRefused, match="--stale is for a DEFERRED run only"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                                  "stale": 1},
+                  output=verdicts_output(git_repo, confirmed=1, stale=1), root=git_repo)
+
+
+def test_the_l2_file_must_hold_the_unique_findings(git_repo):
+    """The L2 file holds exactly as many findings as --unique says.
+
+    Red 2026-10-11: mutation the `if layer == "L2":` branch of _check_shape deleted; failed at
+    pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    with pytest.raises(ps.RecordRefused, match="holds 1 findings but --unique is 2"):
+        ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 1),
+                  root=git_repo)
+
+
+def test_the_l2_5_file_must_agree_with_its_counts(git_repo):
+    """The L2.5 file's verdicts tally to the recorded counts.
+
+    Red 2026-10-11: mutation the `elif layer == "L2.5":` branch of _check_shape deleted; failed
+    at pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    _to_l2(git_repo, "FAST", 2)
+    with pytest.raises(ps.RecordRefused, match="disagrees with its counts"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 1, "uncertain": 0, "duplicate": 0},
+                  output=verdicts_output(git_repo, confirmed=2), root=git_repo)
+
+
+def test_l3_must_plan_or_defer_every_confirmed_finding(git_repo):
+    """Every confirmed finding is either planned or deferred, so a short plan is refused.
+
+    Red 2026-10-11: mutation `to_fix + n_deferred != confirmed` became `to_fix > confirmed` in
+    _check_counts; failed at pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    _to_l2(git_repo, "FAST", 2)
+    ps.record("L2.5", counts={"confirmed": 2, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=verdicts_output(git_repo, confirmed=2), root=git_repo)
+    with pytest.raises(ps.RecordRefused, match="either planned or deferred"):
+        ps.record("L3", counts={"to_fix": 1}, output=plan_output(git_repo, to_fix=1),
+                  root=git_repo)
+    ps.record("L3", counts={"to_fix": 1, "deferred": 1},
+              output=plan_output(git_repo, to_fix=1, deferred=1), root=git_repo)
+
+
+def test_l3_refuses_an_id_l2_5_did_not_confirm(git_repo):
+    """The L3 plan names only findings L2.5 confirmed.
+
+    Red 2026-10-11: mutation the `elif layer == "L3":` branch of _check_shape deleted; failed at
+    pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    _to_l2(git_repo, "FAST", 2)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 1, "duplicate": 0},
+              output=verdicts_output(git_repo, confirmed=1, uncertain=1), root=git_repo)
+    plan = write_output(git_repo, {"to_fix": [finding_id(2)], "deferred": []})
+    with pytest.raises(ps.RecordRefused, match="did not confirm"):
+        ps.record("L3", counts={"to_fix": 1}, output=plan, root=git_repo)

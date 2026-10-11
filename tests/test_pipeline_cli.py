@@ -240,3 +240,19 @@ def test_start_with_a_bad_run_id_exits_2(capsys, git_repo):
     code, _, err = _cli(capsys, "start", "--tier", "FAST", "--run-id", "run:1",
                         "--root", str(git_repo))
     assert code == 2 and err["refused"] == "start"
+
+
+def test_deferred_and_stale_flags_reach_the_counts(capsys, git_repo):
+    """--deferred reaches record's counts, so L2.5 can account for a deferred finding.
+
+    Red 2026-10-11: mutation `"deferred": a.deferred` became `"deferred": None` in _pipeline;
+    failed at `assert code == 0` (2 == 0: accounts for 1 findings but L2 recorded 2 unique).
+    """
+    r = str(git_repo)
+    _cli(capsys, "start", "--tier", "FAST", "--root", r)
+    _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
+    _cli(capsys, "record", "L2", "--unique", "2", "--output", findings_output(r, 2), "--root", r)
+    code, _, _ = _cli(capsys, "record", "L2.5", "--confirmed", "1", "--fp", "0",
+                      "--uncertain", "0", "--duplicate", "0", "--deferred", "1",
+                      "--output", verdicts_output(r, confirmed=1, deferred=1), "--root", r)
+    assert code == 0

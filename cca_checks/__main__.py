@@ -210,7 +210,7 @@ def _pipeline(a) -> int:
         if a.pipeline_cmd == "record":
             counts = {"unique": a.unique, "confirmed": a.confirmed, "fp": a.fp,
                       "uncertain": a.uncertain, "duplicate": a.duplicate,
-                      "to_fix": a.to_fix}
+                      "deferred": a.deferred, "stale": a.stale, "to_fix": a.to_fix}
             try:
                 state = pipeline_state.record(
                     a.layer, status=a.status, detail=a.detail, fixes=a.fixes,
@@ -349,6 +349,9 @@ def main(argv=None) -> int:
         ("--fp", "L2.5: FALSE_POSITIVE verdicts"),
         ("--uncertain", "L2.5: UNCERTAIN verdicts"),
         ("--duplicate", "L2.5: DUPLICATE verdicts"),
+        ("--deferred", "L2.5: findings passed on unverified (DEFERRED); "
+                       "L3: confirmed findings deferred, not fixed"),
+        ("--stale", "L2.5, DEFERRED run only: findings whose code moved on (STALE)"),
         ("--to-fix", "L3: findings the plan will fix"),
     ):
         pl_record.add_argument(flag, type=int, default=None, help=help_text)

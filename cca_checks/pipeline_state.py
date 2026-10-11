@@ -41,6 +41,8 @@ import pathlib
 import re
 from dataclasses import dataclass, field
 
+from cca_checks import layer_outputs
+
 __all__ = [
     "CommitDecision", "LAYERS", "OUTPUT_LAYERS", "PipelineState", "RecordRefused", "TIERS",
     "abort", "close", "load", "outstanding", "pause", "record", "required_layers", "resume",
@@ -218,6 +220,15 @@ def _need(counts: dict, key: str, layer: str) -> int:
     return int(value)
 
 
+def _optional(counts: dict, key: str, layer: str) -> int:
+    value = counts.get(key)
+    if value is None:
+        return 0
+    if int(value) < 0:
+        raise RecordRefused(f"{layer} --{key.replace('_', '-')} cannot be negative")
+    return int(value)
+
+
 def _layer_count(state: PipelineState, layer: str, key: str) -> int | None:
     entry = state.layers.get(layer)
     if not isinstance(entry, dict):
@@ -230,31 +241,45 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
     if layer == "L2":
         _need(counts, "unique", layer)
     elif layer == "L2.5":
-        total = sum(
+        judged = sum(
             _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
         )
+        # `n_deferred`, not `deferred`: that name is kept free for the deferred-pass module
+        # this file imports.
+        n_deferred = _optional(counts, "deferred", layer)
+        stale = _optional(counts, "stale", layer)
+        if stale and state.mode != "DEFERRED":
+            raise RecordRefused(
+                "--stale is for a DEFERRED run only: STALE means the code moved on since the "
+                "run that deferred the finding, and a first run has no earlier run"
+            )
+        judged += stale
+        total = judged + n_deferred
         unique = _layer_count(state, "L2", "unique")
         if unique is not None and total != unique:
             raise RecordRefused(
                 f"L2.5 accounts for {total} findings but L2 recorded {unique} unique; "
-                "every consolidated finding needs exactly one verdict"
+                "every consolidated finding needs exactly one verdict, DEFERRED included"
             )
         if state.tier != "FAST":
             rows, malformed = _ledger_rows(root, state.run_id)
-            if rows != total:
+            if rows != judged:
                 note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
                 raise RecordRefused(
                     f"the disposition ledger holds {rows} row(s) for run {state.run_id} but "
-                    f"L2.5 recorded {total} verdicts{note}; append one row per verified "
-                    "finding to .claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
+                    f"L2.5 recorded {judged} verdicts{note}; append one row per verified "
+                    "finding (a DEFERRED finding gets none) to "
+                    ".claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
                     f'"run_id": "{state.run_id}"'
                 )
     elif layer == "L3":
         to_fix = _need(counts, "to_fix", layer)
+        n_deferred = _optional(counts, "deferred", layer)
         confirmed = _layer_count(state, "L2.5", "confirmed")
-        if confirmed is not None and to_fix > confirmed:
+        if confirmed is not None and to_fix + n_deferred != confirmed:
             raise RecordRefused(
-                f"L3 --to-fix {to_fix} exceeds the {confirmed} findings L2.5 confirmed"
+                f"L3 plans {to_fix} (--to-fix) and defers {n_deferred} (--deferred) but L2.5 "
+                f"confirmed {confirmed}; every confirmed finding is either planned or deferred"
             )
 
 
@@ -297,6 +322,48 @@ def _read_output(layer: str, output, root) -> bytes:
             f"{exc}); it must hold {what}"
         ) from exc
     return data
+
+
+def _stored_json(state: PipelineState, layer: str, root):
+    """The work file `layer` stored in this run, parsed; None when absent or unreadable."""
+    entry = state.layers.get(layer)
+    rel = entry.get("output") if isinstance(entry, dict) else None
+    if not rel:
+        return None
+    try:
+        return json.loads((pathlib.Path(root) / rel).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, root) -> None:
+    """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files."""
+    value = json.loads(data)
+    try:
+        if layer == "L2":
+            layer_outputs.l2_findings(value, counts["unique"])
+        elif layer == "L2.5":
+            l2 = _stored_json(state, "L2", root)
+            if not isinstance(l2, list):
+                raise layer_outputs.ShapeError(
+                    "L2's stored file is missing or unreadable; record L2 again"
+                )
+            ids = [r.get("id") for r in l2 if isinstance(r, dict)]
+            layer_outputs.l25_verdicts(value, counts, ids)
+        elif layer == "L3":
+            l25 = _stored_json(state, "L2.5", root)
+            if not isinstance(l25, list):
+                raise layer_outputs.ShapeError(
+                    "L2.5's stored file is missing or unreadable; record L2.5 again"
+                )
+            verdicts = {
+                r["id"]: r["verdict"] for r in l25
+                if isinstance(r, dict) and isinstance(r.get("id"), str)
+                and isinstance(r.get("verdict"), str)
+            }
+            layer_outputs.l3_plan(value, counts["to_fix"], counts.get("deferred", 0), verdicts)
+    except layer_outputs.ShapeError as exc:
+        raise RecordRefused(str(exc)) from exc
 
 
 def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
@@ -375,6 +442,7 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         _check_counts(layer, state, counts, root)
         if layer in OUTPUT_LAYERS:
             data = _read_output(layer, output, root)
+            _check_shape(layer, state, counts, data, root)
         state.seq += 1
         entry.update({"seq": state.seq, "source": source})
         if counts:
