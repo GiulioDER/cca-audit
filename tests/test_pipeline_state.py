@@ -1000,8 +1000,8 @@ def test_the_base_commit_survives_a_record(git_repo):
 def test_a_parent_survives_a_record(git_repo):
     """`parent` is carried by from_json too: a record must not drop a parent run it was given.
 
-    `start` stores no parent yet (it is accepted, used from the deferred pass on), so the
-    state file is given one by hand.
+    `start` stores a parent only for a DEFERRED run, so this DIFF run's state file is given
+    one by hand.
 
     Red 2026-10-11: mutation `parent=...` dropped from PipelineState.from_json; failed at
     `assert ps.load(git_repo).parent == "20261011T000000Z"` (None against the parent id).
@@ -1136,3 +1136,227 @@ def test_a_summary_that_cannot_be_written_keeps_the_run_open(git_repo):
     assert ps.close(root=git_repo) is not None
     assert ps.load(git_repo) is None
     assert json.loads(summary.read_text(encoding="utf-8"))["run_id"] == state.run_id
+
+
+# --- the DEFERRED run ----------------------------------------------------------------
+
+def _write_summary_file(repo, run_id, **over):
+    s = {"schema": 1, "run_id": run_id, "tier": "STANDARD", "mode": "DIFF", "no_fix": False,
+         "base_commit": None, "commit": None, "parent": None,
+         "completed_utc": "2026-10-11T00:00:00Z", "pool": ["F-1"], "human_pending": 0}
+    s.update(over)
+    path = repo / ".claude/audits/runs" / run_id / "summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(s), encoding="utf-8")
+
+
+def _child_to_l5(repo, parent, *, run_id="child", n=3):
+    ps.start("STANDARD", mode="DEFERRED", parent=parent, run_id=run_id, root=repo)
+    ps.record("L1", output=write_output(repo), root=repo)
+    p3 = {finding_id(i): "P3" for i in range(1, n + 1)}
+    ps.record("L2", counts={"unique": n}, output=findings_output(repo, n, priorities=p3),
+              root=repo)
+    append_ledger(repo, run_id, n)
+    ps.record("L2.5", counts={"confirmed": n, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=verdicts_output(repo, confirmed=n), root=repo)
+    ps.record("L2.6", detail="0 cells", source="tool", root=repo)
+    ps.record("L3", counts={"to_fix": n}, output=plan_output(repo, to_fix=n), root=repo)
+    app = repo / "app.py"
+    app.write_text(app.read_text(encoding="utf-8") + f"# {run_id}\n", encoding="utf-8")
+    ps.record("L4", fixes=n, output=write_output(repo), root=repo)
+    return ps.record("L5", detail="green", root=repo)
+
+
+def _close_child(repo, run_id="child"):
+    ps.record("L5.5", detail="all SAFE", root=repo)
+    ps.record("L5.6", detail="no proofs", source="tool", root=repo)
+    ps.record("L6", detail="APPROVED", root=repo)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qam", f"fix: {run_id}"], check=True)
+    ps.close(root=repo)
+
+
+@pytest.mark.parametrize("kwargs, summary, match", [
+    ({"tier": "STANDARD"}, None, "needs --from"),
+    ({"tier": "FAST", "parent": "p"}, {}, "cannot be FAST"),
+    ({"tier": "STANDARD", "parent": "p", "no_fix": True}, {}, "exists to fix"),
+    ({"tier": "STANDARD", "parent": "absent"}, None, "no completed run 'absent'"),
+    ({"tier": "STANDARD", "parent": "p"}, {"mode": "DEFERRED"}, "third pass"),
+    ({"tier": "STANDARD", "parent": "p"}, {"mode": "HUNT"}, "hunt"),
+    ({"tier": "STANDARD", "parent": "p"}, {"no_fix": True}, "no-fix"),
+    ({"tier": "STANDARD", "parent": "p"}, {"pool": []}, "nothing was deferred"),
+])
+def test_start_deferred_refuses_a_parent_it_cannot_follow(git_repo, kwargs, summary, match):
+    """Each case is refused for its own reason, and no run is opened.
+
+    Red 2026-10-11, one mutation per case; every case failed at
+    `pytest.raises(ps.RecordRefused, match=match)`. Case 0: `if not parent:` became
+    `if False:` in _deferred_parent (the reason read "no completed run ''", which does not
+    match "needs --from"). Case 1: the FAST check became `if False:` in _deferred_parent (DID
+    NOT RAISE RecordRefused). Case 2: the no_fix check became `if False:` there (DID NOT
+    RAISE). Case 3: `return parent, None` added before the `summary is None` refusal there
+    (DID NOT RAISE). Cases 4 to 7: the matching check in deferred.why_not_offered (mode
+    DEFERRED, mode HUNT, no_fix, empty pool) became `if False:` (DID NOT RAISE each).
+    """
+    if summary is not None:
+        _write_summary_file(git_repo, "p", **summary)
+    kw = dict(kwargs)  # a copy: the parametrize dict is shared across reruns
+    with pytest.raises(ps.RecordRefused, match=match):
+        ps.start(kw.pop("tier"), mode="DEFERRED", root=git_repo, **kw)
+    assert ps.load(git_repo) is None
+
+
+def test_from_is_refused_outside_a_deferred_run(git_repo):
+    """Red 2026-10-11: mutation `if parent and mode != "DEFERRED":` became `if False:` in
+    start(); failed at pytest.raises (DID NOT RAISE RecordRefused)."""
+    with pytest.raises(ps.RecordRefused, match="--from"):
+        ps.start("STANDARD", parent="p", root=git_repo)
+
+
+def test_a_deferred_run_takes_its_parents_base_and_names_its_parent(git_repo):
+    """The child takes the parent's base_commit, not the current HEAD, and names its parent.
+
+    Red 2026-10-11: mutation `return parent, summary.get("base_commit")` became
+    `return parent, _commit_of(root, "HEAD")` in _deferred_parent; failed at
+    `assert child.parent == "parent" and child.base_commit == parent_base` (the base was the
+    HEAD sha, not the parent's). Also: mutation `parent=stored_parent` dropped from the
+    PipelineState(...) call in start(); failed at the same assert (parent was None).
+    """
+    parent_base = _head(git_repo)
+    closed_parent(git_repo)
+    child = ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
+    assert child.parent == "parent" and child.base_commit == parent_base
+
+
+def test_the_commit_fallback_needs_a_commit_that_is_an_ancestor_of_head(git_repo):
+    """A commit that is no ancestor of HEAD (or is unknown) cannot be followed.
+
+    Red 2026-10-11: mutation `sha is None or not _is_ancestor(root, sha)` became
+    `sha is None` in _deferred_parent; failed at the orphan pytest.raises (DID NOT RAISE
+    RecordRefused). The unknown sha cannot prove it: `_commit_of` already returns None for it.
+    """
+    def git(*args):
+        return subprocess.run(["git", "-C", str(git_repo), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    with pytest.raises(ps.RecordRefused, match="ancestor of HEAD"):
+        ps.start("STANDARD", mode="DEFERRED", parent="commit:deadbeef", root=git_repo)
+    orphan = git("commit-tree", "-m", "orphan", git("rev-parse", "HEAD^{tree}"))
+    with pytest.raises(ps.RecordRefused, match="ancestor of HEAD"):
+        ps.start("STANDARD", mode="DEFERRED", parent=f"commit:{orphan}", root=git_repo)
+    head = _head(git_repo)
+    state = ps.start("STANDARD", mode="DEFERRED", parent=f"commit:{head[:8]}", root=git_repo)
+    assert state.parent == f"commit:{head}" and state.base_commit is None
+
+
+@pytest.mark.parametrize("rev", [
+    "HEAD", "-x", "HEAD~0", "{head6}", "{head}0",
+])
+def test_the_commit_fallback_takes_only_a_hexadecimal_object_name(git_repo, rev):
+    """`commit:<x>` takes 7 to 40 hexadecimal characters and nothing git would read otherwise.
+
+    A revision expression (`HEAD`, `HEAD~0`), an option (`-x`), a prefix too short to be
+    safe and a name one character too long are all refused before git sees them, whatever
+    git would make of them.
+
+    Red 2026-10-11: mutation `if not _COMMIT_SHA.fullmatch(rev):` became `if False:` in
+    _deferred_parent; every case failed at pytest.raises. HEAD, HEAD~0, {head6} and {head}0:
+    DID NOT RAISE RecordRefused (git resolved each to the HEAD commit). -x: the regex did not
+    match (the reason was "does not name a commit that is an ancestor of HEAD").
+    """
+    head = _head(git_repo)
+    parent = "commit:" + rev.format(head=head, head6=head[:6])
+    with pytest.raises(ps.RecordRefused, match="7 to 40 hexadecimal characters"):
+        ps.start("STANDARD", mode="DEFERRED", parent=parent, root=git_repo)
+    assert ps.load(git_repo) is None
+
+
+def test_a_commit_is_taken_by_one_deferred_run_only(git_repo):
+    """A commit named with `--from commit:<sha>` is taken by one deferred run only.
+
+    Red 2026-10-11: mutation `if child:` became `if False:` after the consumed_by call in the
+    commit branch of _deferred_parent; failed at the second start's pytest.raises (DID NOT
+    RAISE RecordRefused).
+    """
+    head = _head(git_repo)
+    _child_to_l5(git_repo, f"commit:{head}")
+    _close_child(git_repo)
+    assert _summary_of(git_repo, "child")["parent"] == f"commit:{head}"
+    with pytest.raises(ps.RecordRefused, match="already took the findings"):
+        ps.start("STANDARD", mode="DEFERRED", parent=f"commit:{head[:10]}", run_id="again",
+                 root=git_repo)
+
+
+def test_a_deferred_run_cannot_defer(git_repo):
+    """A DEFERRED run may not defer, at L2.5 or at L3; STALE is still allowed at L2.5.
+
+    Red 2026-10-11: mutation `if n_deferred and state.mode == "DEFERRED":` became `if False:`
+    in the L2.5 branch of _check_counts; failed at the first pytest.raises (the regex did not
+    match: the reason was "L2.5 defers F-2 (P2)", the shape rule). Also: the same mutation in
+    the L3 branch; failed at the second pytest.raises (DID NOT RAISE RecordRefused).
+    """
+    closed_parent(git_repo)
+    ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 2}, output=findings_output(git_repo, 2), root=git_repo)
+    append_ledger(git_repo, "c", 1)
+    with pytest.raises(ps.RecordRefused, match="cannot defer"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                                  "deferred": 1},
+                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+    append_ledger(git_repo, "c", 1)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                              "stale": 1},
+              output=verdicts_output(git_repo, confirmed=1, stale=1), root=git_repo)
+    ps.record("L2.6", detail="0 cells", source="tool", root=git_repo)
+    with pytest.raises(ps.RecordRefused, match="cannot defer"):
+        ps.record("L3", counts={"to_fix": 0, "deferred": 1},
+                  output=plan_output(git_repo, to_fix=0, deferred=1), root=git_repo)
+
+
+def test_a_deferred_run_owes_every_fix_layer_until_l6_approves(git_repo):
+    """A DEFERRED run owes L5.5, L5.6 and L6 like any fix run, and is not done until L6 approves.
+
+    Red 2026-10-11: mutation `if state.get("mode") == "DEFERRED": return ("L1", "L2", "L2.5",
+    "L3", "L5")` added as the first lines of cca_gate_core.required_layers; failed at
+    `assert {"L5.5", "L5.6", "L6"} <= owed` (owed was the empty set).
+    """
+    closed_parent(git_repo)
+    state = _child_to_l5(git_repo, "parent")
+    owed = {r.split(" ")[0] for r in ps.verify_commit_allowed(state, root=git_repo).reasons}
+    assert {"L5.5", "L5.6", "L6"} <= owed
+    ps.record("L5.5", detail="all SAFE", root=git_repo)
+    ps.record("L5.6", detail="no proofs", source="tool", root=git_repo)
+    state = ps.record("L6", detail="REVISE", root=git_repo)
+    assert not ps.verify_commit_allowed(state, root=git_repo).allowed
+    state = ps.record("L6", detail="APPROVED", root=git_repo)
+    assert ps.verify_commit_allowed(state, root=git_repo).allowed
+
+
+def test_a_closed_deferred_run_takes_its_parents_pool(git_repo):
+    """A closed DEFERRED run is recorded as its parent's child, so the pool is taken once.
+
+    Red 2026-10-11: mutation `return None` as the first line of deferred.consumed_by; failed at
+    the final pytest.raises (DID NOT RAISE RecordRefused). Also: mutation
+    `parent=stored_parent` dropped from the PipelineState(...) call in start(); failed at
+    `assert _summary_of(git_repo, "child")["parent"] == "parent"` (None == 'parent').
+    """
+    closed_parent(git_repo)
+    _child_to_l5(git_repo, "parent")
+    _close_child(git_repo)
+    assert _summary_of(git_repo, "child")["parent"] == "parent"
+    with pytest.raises(ps.RecordRefused, match="already took this pool"):
+        ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="again", root=git_repo)
+
+
+def test_an_aborted_deferred_run_leaves_the_pool_on_offer(git_repo):
+    """Review Focus 3: an aborted deferred run writes no summary, so the pool stays on offer.
+
+    Red 2026-10-11: mutation `_write_summary(load(root), root)` added before the unlink in
+    abort(); failed at the second start (uncaught RecordRefused: run parent cannot be followed
+    up: deferred run c1 already took this pool).
+    """
+    closed_parent(git_repo)
+    ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c1", root=git_repo)
+    ps.abort("blocked", root=git_repo)
+    assert ps.start("STANDARD", mode="DEFERRED", parent="parent", run_id="c2",
+                    root=git_repo).parent == "parent"

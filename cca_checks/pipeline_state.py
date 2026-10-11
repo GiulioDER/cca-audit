@@ -187,6 +187,64 @@ def _is_ancestor(root, sha: str) -> bool:
     return done is not None and done.returncode == 0
 
 
+_NO_DEFERRAL = (
+    "a DEFERRED run cannot defer: its findings are the deferred ones, so each is verified and "
+    "then fixed, or left UNCERTAIN for a human"
+)
+#: What `--from commit:<sha>` may hold: an abbreviated or full object name, never a revision
+#: expression. `HEAD`, `-x`, `main~2` and `a..b` are all things `git rev-parse` would accept
+#: or read as an option, so the form is checked before git sees it.
+_COMMIT_SHA = re.compile(r"[0-9A-Fa-f]{7,40}")
+
+
+def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, str | None]:
+    """Check the run a DEFERRED run follows; return (parent as stored, base_commit)."""
+    if not parent:
+        raise RecordRefused(
+            "--mode DEFERRED needs --from <run_id>: the completed run whose deferred findings "
+            "this run takes (`python -m cca_checks pipeline deferred` names it)"
+        )
+    if tier == "FAST":
+        raise RecordRefused(
+            "a DEFERRED run cannot be FAST: FAST verifies P1 findings only, and every "
+            "deferred finding is verified before it is edited; start it STANDARD or DEEP"
+        )
+    if no_fix:
+        raise RecordRefused(
+            "a DEFERRED run exists to fix; to list the deferred findings without edits, run "
+            "`python -m cca_checks pipeline deferred` instead"
+        )
+    summaries, _ = deferred.load_summaries(root)
+    if parent.startswith("commit:"):
+        rev = parent.removeprefix("commit:")
+        if not _COMMIT_SHA.fullmatch(rev):
+            raise RecordRefused(
+                f"--from {parent} is not of the form commit:<sha>, where <sha> is 7 to 40 "
+                "hexadecimal characters"
+            )
+        sha = _commit_of(root, rev)
+        if sha is None or not _is_ancestor(root, sha):
+            raise RecordRefused(
+                f"--from {parent} does not name a commit that is an ancestor of HEAD"
+            )
+        stored = f"commit:{sha}"
+        child = deferred.consumed_by(stored, summaries)
+        if child:
+            raise RecordRefused(f"deferred run {child} already took the findings of {stored}")
+        return stored, None
+    summary = next((s for s in summaries if s["run_id"] == parent), None)
+    if summary is None:
+        raise RecordRefused(
+            f"no completed run {parent!r} has a summary under .claude/audits/runs/; "
+            "`pipeline deferred` names the runs that do, and a run that predates summaries "
+            "is taken with --from commit:<sha>"
+        )
+    why_not = deferred.why_not_offered(summary, summaries)
+    if why_not:
+        raise RecordRefused(f"run {parent} cannot be followed up: {why_not}")
+    return parent, summary.get("base_commit")
+
+
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
           base: str = "HEAD", parent: str = "",
           root: str | pathlib.Path = ".") -> PipelineState:
@@ -199,6 +257,11 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     revision the audited diff is taken against; its sha is stored as `base_commit`. A run id
     that already names a completed run (one holding a `summary.json`) is refused, so the
     stored work a later deferred pass reads is never overwritten.
+
+    A DEFERRED run names the run it follows in `parent` (a run id, or `commit:<sha>` for a
+    run that left no summary). `_deferred_parent` checks it; the run then takes that run's
+    `base_commit` rather than resolving `base`, and `parent` is stored as given by that check.
+    `parent` is refused in any other mode.
     """
     tier = tier.upper()
     if tier not in TIERS:
@@ -206,6 +269,10 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     mode = mode.upper()
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r} (expected one of {', '.join(MODES)})")
+    if parent and mode != "DEFERRED":
+        raise RecordRefused(
+            f"--from names the run a DEFERRED run follows up; it is refused with --mode {mode}"
+        )
     if run_id and (not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")):
         raise RecordRefused(
             f"run id {run_id!r} is refused: it names the directory "
@@ -225,16 +292,21 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
             f"run id {new_id!r} already names a completed run under .claude/audits/runs/; "
             "pick another --run-id, so that run's stored work is not overwritten"
         )
-    base_commit = _commit_of(root, base)
-    if base_commit is None and base != "HEAD":
-        raise RecordRefused(
-            f"--base {base} does not name a commit; pass the revision the audited diff is "
-            "taken against (HEAD, or HEAD~N for `commit N`)"
-        )
+    if mode == "DEFERRED":
+        stored_parent, base_commit = _deferred_parent(tier, no_fix, parent, root)
+    else:
+        stored_parent = None
+        base_commit = _commit_of(root, base)
+        if base_commit is None and base != "HEAD":
+            raise RecordRefused(
+                f"--base {base} does not name a commit; pass the revision the audited diff "
+                "is taken against (HEAD, or HEAD~N for `commit N`)"
+            )
     state = PipelineState(
         run_id=new_id, tier=tier,
         mode=mode, no_fix=no_fix, started_utc=stamp,
         schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
+        parent=stored_parent,
     )
     _write(state, root)
     return state
@@ -301,6 +373,8 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
         # this file imports.
         n_deferred = _optional(counts, "deferred", layer)
         stale = _optional(counts, "stale", layer)
+        if n_deferred and state.mode == "DEFERRED":
+            raise RecordRefused(_NO_DEFERRAL)
         if stale and state.mode != "DEFERRED":
             raise RecordRefused(
                 "--stale is for a DEFERRED run only: STALE means the code moved on since the "
@@ -328,6 +402,8 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
     elif layer == "L3":
         to_fix = _need(counts, "to_fix", layer)
         n_deferred = _optional(counts, "deferred", layer)
+        if n_deferred and state.mode == "DEFERRED":
+            raise RecordRefused(_NO_DEFERRAL)
         confirmed = _layer_count(state, "L2.5", "confirmed")
         if confirmed is not None and to_fix + n_deferred != confirmed:
             raise RecordRefused(

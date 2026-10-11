@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from conftest import findings_output, verdicts_output, write_output
+from conftest import closed_parent, findings_output, verdicts_output, write_output
 
 from cca_checks.__main__ import main
 
@@ -276,3 +276,15 @@ def test_base_reaches_the_state(capsys, git_repo):
     code, _, err = _cli(capsys, "start", "--tier", "FAST", "--base", "no-such-rev",
                         "--root", str(git_repo))
     assert code == 2 and "does not name a commit" in err["reason"]
+
+
+def test_from_reaches_start(capsys, git_repo):
+    """--from reaches `start`: a DEFERRED run is opened on the completed run it names.
+
+    Red 2026-10-11: mutation `parent=a.parent` dropped from the start call in _pipeline; failed
+    at `assert code == 0` (2 == 0: the run was refused, --mode DEFERRED needs --from).
+    """
+    closed_parent(git_repo)
+    code, out, _ = _cli(capsys, "start", "--tier", "STANDARD", "--mode", "DEFERRED",
+                        "--from", "parent", "--root", str(git_repo))
+    assert code == 0 and out["started"]["parent"] == "parent"
