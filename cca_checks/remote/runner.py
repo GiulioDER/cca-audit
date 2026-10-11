@@ -126,15 +126,16 @@ def version_argv(semgrep_cmd: list[str], wrap: bool, timeout: float = TIMEOUT_S)
 
 def _try_lock(fh) -> bool:
     fh.seek(0)
-    try:
-        import fcntl
-    except ImportError:  # Windows, where the tests run
+    # A sys.platform test, not try/import: the type checker narrows on it, so each branch
+    # is checked only for the platform it runs on.
+    if sys.platform == "win32":  # where the tests run; the host is Linux
         import msvcrt
         try:
             msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
             return True
         except OSError:
             return False
+    import fcntl
     try:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         return True
