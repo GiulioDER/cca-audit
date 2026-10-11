@@ -185,3 +185,27 @@ CI sets no remote, so Ubuntu keeps testing local semgrep exactly as now.
 * Network isolation of the semgrep process beyond its offline flags (systemd's `IPAddressDeny`
   needs privileges a user scope may not have; a later hardening if wanted).
 * Installing or updating the runner on the host automatically.
+
+## 10. Corrections from the whole-branch review (2026-10-11)
+
+Found by a security review of the implementation; the sections above stay as approved, and where
+they disagree with this one, this one wins. `docs/remote-semgrep.md` carries the operator steps.
+
+1. **§5, refusals:** a member must be a plain file (`REGTYPE`/`AREGTYPE`, not sparse), and the 5 MB
+   budget is checked from each header before its data is read. A sparse member passed `isreg()`
+   and was read with its holes filled, so a 2.5 KB archive could allocate gigabytes in the runner,
+   outside every cap. Malformed input and unexpected errors are answered in JSON. A request that
+   does not arrive within 30 s is dropped.
+2. **§5, the run:** `timeout -k 5 120` sits inside the scope, as §5 specified and the plan dropped,
+   so semgrep-core dies with its run. The version probe takes a slot and runs through the same
+   scope, so a host where the scope cannot start reports semgrep unavailable. `XDG_RUNTIME_DIR`
+   defaults to `/run/user/<uid>`.
+3. **§4, host setup:** the account's home, `bin/`, runner, virtualenv, `.ssh/` and
+   `authorized_keys` are root-owned; the account writes only its lock folder and `/tmp`. The
+   runner's shebang is `#!/usr/bin/python3 -I`. The account's user slice is capped
+   (`MemoryMax=3G`, `TasksMax=64`, `CPUQuota=150%`). The isolation checks add a write test and a
+   check that the cgroup limits really apply.
+4. **§6, the setting:** neither part of the destination may start with `-`, and `--` ends ssh's
+   options before it. A remote answer must list exactly `target.<ext>` as scanned.
+5. **§7, trust:** a remote scan puts that host in the trust base for refutations. The operator
+   verifies the host key fingerprint out of band; the verdict names the host.
