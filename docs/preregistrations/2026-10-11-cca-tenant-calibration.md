@@ -43,3 +43,23 @@ RE-call reports them: certification verdict, separability, threshold.
   ones the embedder separates easily.
 * The unanswerable half is checked only by term absence, not by retrieval, so a question the
   corpus answers with different words would still count as unanswerable and pull the figure down.
+
+## Result, attempt 1 (2026-10-11)
+**Status:** measured. Prediction 1 falsified, for a reason the prediction did not consider.
+
+RE-call refused to certify before any separability was computed: "too few samples
+(answerable=18; need >= 20 of each)". The uncertified threshold it reported was **0.428**, below
+the predicted band, but with 18 answerable points a q05/q95 boundary is not identifiable, so that
+number is not evidence about the corpus. Separability: not reported. Nothing was promoted; the
+generation stays built and unserved.
+
+**Gap.** The query set's size came from the plan ("at least 15 answerable"), which I wrote
+without reading RE-call's certification minimum of 20 per class. The apparatus caught it; the
+prediction was about the corpus and never got tested.
+
+## Attempt 2: prediction, written before running it
+
+Four answerable questions are added (22 answerable, 27 unanswerable), chosen from memos in all
+four repositories the same way as the first eighteen, before seeing any new score. Predictions 1
+to 3 above stand unchanged for this attempt: certifies; separability at least 0.90; threshold
+between 0.45 and 0.70.
