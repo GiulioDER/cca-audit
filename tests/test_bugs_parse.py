@@ -70,7 +70,7 @@ def test_one_bullet_per_finding_with_its_continuation_joined():
 
 
 def test_sections_that_were_not_fixed_are_skipped():
-    """Red proof: the non-heading branch keeps the section (section = None -> pass) -> DEPLOY-001 parsed."""
+    """Red proof: _heading_kind without the skip-word check -> DEPLOY-001 counted."""
     assert _ids(parse_message(DEEP)) == [
         ("STAKES-001", "P1"),
         ("SEC-002", "P2"),
@@ -106,7 +106,7 @@ def test_multi_id_bullets():
 
 
 def test_bold_and_markdown_headings_open_a_section():
-    """Review Focus 1. Red proof: _heading_severity without .strip('*') -> the bold heading opens nothing."""
+    """Review Focus 1. Red proof: _heading_kind without .strip('*') -> the bold heading opens nothing."""
     body = "fix: 2 audit fixes from CCA\n\n**P1:**\n- BUG-001: a.\n\n## P2\n- BUG-002: b.\n"
     assert _ids(parse_message(body)) == [("BUG-001", "P1"), ("BUG-002", "P2")]
 
@@ -126,21 +126,21 @@ P1:
 
 
 def test_a_squash_subject_line_is_not_a_finding():
-    """Review C2. Red proof: is_finding = bool(m) -> the subject is read as ID R2-2.
+    """Review C2. Red proof: star_finding without the ':' or ',' check -> R2-1 read as an ID.
 
-    The prefix filter alone would drop R2-2, so the assertion that matters is that the
-    subject closes the section: it is not reported as an unknown ID, and a bullet after
-    it with no heading of its own is not counted under the previous commit's P1.
+    The subject must close the section: it is not a finding of any kind, and a bullet
+    after it with no heading of its own is not counted under the previous commit's P1
+    (since 2026-10-11 it counts as a topic-section finding, with no severity).
     """
     rejected = []
     assert _ids(parse_message(SQUASH, rejected)) == [("FIX-1", "P1"), ("FIX-1", "P1")]
     assert rejected == []
     tail = "P1:\n- FIX-1: a.\n\n* R2-2 forget: second commit\n\n- FIX-2: no heading of its own.\n"
-    assert _ids(parse_message(tail)) == [("FIX-1", "P1")]
+    assert _ids(parse_message(tail)) == [("FIX-1", "P1"), ("FIX-2", None)]
 
 
 def test_a_severity_heading_that_says_deferred_opens_nothing():
-    """Review I2. Red proof: _heading_severity without the skip-word check -> BUG-001 counted."""
+    """Review I2. Red proof: _heading_kind without the skip-word check -> BUG-001 counted."""
     body = "P2 (deferred to follow-up):\n- BUG-001: a.\nP2, not fixed here:\n- BUG-002: b.\n"
     assert parse_message(body) == []
 
@@ -152,9 +152,97 @@ def test_a_number_after_a_comma_is_text_not_an_id():
     assert only.summary == "3 call sites now hold the lock."
 
 
-def test_an_unknown_prefix_is_reported_not_counted():
-    """Review I3. Red proof: flush without the KNOWN_PREFIXES check -> UTF-8 counted as a finding."""
+def test_an_unknown_label_under_a_severity_heading_counts_under_a_stand_in_id():
+    """Review I3, revised 2026-10-11. Red proof: _known_ids skips the KNOWN_PREFIXES check -> UTF-8 is an ID.
+
+    Under P1/P2 every top-level bullet is a fix. A token like UTF-8 must not become its
+    finding ID, but the bullet still counts, under a stand-in ID, with its whole text.
+    """
     rejected = []
     body = "P1:\n- UTF-8 decoding is strict now.\n- SHA-256 digests match.\n- BUG-001: real.\n"
-    assert _ids(parse_message(body, rejected)) == [("BUG-001", "P1")]
-    assert rejected == ["UTF-8", "SHA-256"]
+    bullets = parse_message(body, rejected)
+    assert _ids(bullets) == [("P1-1", "P1"), ("P1-2", "P1"), ("BUG-001", "P1")]
+    assert bullets[0].summary == "UTF-8 decoding is strict now."
+    assert rejected == []
+
+
+def test_an_unknown_id_under_a_topic_heading_is_reported_not_counted():
+    """Red proof: topic sections count any ID-shaped token -> UTF-8 counted as a finding."""
+    rejected = []
+    assert parse_message("Notes:\n- UTF-8 decoding is strict now.\n", rejected) == []
+    assert rejected == ["UTF-8"]
+
+
+LETTERED = """fix(lrp_growth): 7 audit fixes from CCA v2 (9-auditor) review
+
+P1 Critical:
+- B
+  DELETE ran before the reward window closed.
+
+P2:
+- A
+  regardless of the server setting.
+- F-01: the index covers condition_id.
+- gate.py: a fault is logged at warning.
+- Renamed the helper so callers stop guessing.
+
+P3 fixes:
+- C: hygiene.
+"""
+
+
+def test_every_bullet_under_p1_or_p2_counts_even_without_an_id():
+    """Red proof: the stand-in append -> pass -> nothing from LETTERED."""
+    bullets = parse_message(LETTERED)
+    assert _ids(bullets) == [("P1-1", "P1"), ("P2-1", "P2"), ("P2-2", "P2"),
+                             ("P2-3", "P2"), ("P2-4", "P2")]
+    assert bullets[0].summary == "B DELETE ran before the reward window closed."
+    assert bullets[2].summary == "F-01: the index covers condition_id."
+
+
+THEMATIC = """fix(beam): 12 deferred fixes from CCA second pass
+
+Second pass over the P2/P3 findings deferred in round one.
+
+Shipped library and install:
+- DEPLOY-003: the execution provider is part of the fingerprint.
+- CODE-001/002: helpers pinned.
+- a plain bullet with no finding ID.
+
+Stale (already fixed in round 1):
+- BUG-009: nothing to do.
+
+SKIPPED (with reason):
+- SEC-004: out of scope.
+"""
+
+
+def test_known_ids_under_a_topic_heading_count_with_no_severity():
+    """Red proof: a topic heading opens a skipped section -> nothing from THEMATIC."""
+    assert _ids(parse_message(THEMATIC)) == [
+        ("DEPLOY-003", None), ("CODE-001", None), ("CODE-002", None),
+    ]
+
+
+def test_stale_and_skipped_headings_open_nothing():
+    """Red proof: remove 'stale' from _SKIP_HEADING -> BUG-009 counted."""
+    found = {b.finding_id for b in parse_message(THEMATIC)}
+    assert "BUG-009" not in found and "SEC-004" not in found
+
+
+def test_a_mixed_p2_p3_heading_counts_known_ids_only():
+    """Red proof: _heading_kind ignores a P3 beside P2 -> the ID-less bullet counts as P2-1."""
+    body = "P2/P3:\n- tidy the helper.\n- BUG-004: real.\n"
+    assert _ids(parse_message(body)) == [("BUG-004", None)]
+
+
+def test_a_bullet_that_says_false_positive_is_skipped():
+    """Red proof: remove 'false positive' from _SKIP_TEXT -> BUG-003 counted."""
+    body = "P2:\n- BUG-003: false positive, no change.\n- BUG-005: real.\n"
+    assert _ids(parse_message(body)) == [("BUG-005", "P2")]
+
+
+def test_an_id_less_star_line_is_a_subject_not_a_bullet():
+    """Red proof: count ID-less '*' lines under a severity heading -> the subject is P1-2."""
+    body = "P1:\n- a fix.\n\n* Second commit subject\n- another line\n"
+    assert _ids(parse_message(body)) == [("P1-1", "P1")]

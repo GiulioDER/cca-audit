@@ -191,3 +191,12 @@ def test_unparsed_commits_are_reported_and_summarised(tmp_path):
     assert summary["unparsed"] == 1
     assert summary["by_repo"] == {"acme/widgets": 2}
     assert summary["evidence"]["red_proof"] == {"claimed": 1, "absent": 1}
+
+
+def test_a_stand_in_id_has_no_auditor(tmp_path):
+    """Red proof: _row derives the auditor from any ID prefix -> P1-1 gets auditor 'P1'."""
+    message = "fix: 2 audit fixes from CCA\n\nP1:\n- B\n  the window closed late.\n- SEC-001: real.\n"
+    rows = _by_id(backfill([_repo(tmp_path, message)], []))
+    assert rows["P1-1"].auditor is None
+    assert rows["P1-1"].summary == "B the window closed late."
+    assert rows["SEC-001"].auditor == "SEC"

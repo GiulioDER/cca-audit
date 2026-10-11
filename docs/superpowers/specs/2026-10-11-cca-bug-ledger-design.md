@@ -268,3 +268,17 @@ Also settled while planning, where the spec was silent:
    a full ID continues the ID list; a `*` line whose ID runs straight into words is a squash
    commit subject and closes the section; an ID whose prefix is not one the pipeline's auditors
    emit (or `FIX`) is reported, never counted.
+
+### Correction from the first dry run (2026-10-11)
+
+9. **§5.4 is replaced: the parser reads three section kinds.** The first dry run read 21 of 117
+   selected commits (`docs/preregistrations/2026-10-11-cca-bug-backfill-dry-run.md`), because most
+   real fix messages list fixes without finding IDs or under topic headings. Every unindented
+   non-bullet line is now a heading of one of three kinds. Under **P1/P2**, every top-level `- `
+   bullet is one fix: bullets naming known IDs are those findings, and any other bullet counts
+   under a stand-in ID (`P1-1`, `P1-2`) with its whole text as summary. **Skip** sections (P3,
+   a mixed heading's P3 aside, and headings saying deferred, not fixed, owner decision, won't fix,
+   stale, skipped, false positive, rejected, dropped, parked or uncertain) count nothing, and a
+   bullet starting with one of those words is skipped too. Under any other, **topic**, heading,
+   only bullets naming known IDs count, with no severity. Commits written as prose stay unparsed:
+   reading them would take a model to write the description. A stand-in ID names no auditor.

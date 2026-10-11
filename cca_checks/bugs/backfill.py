@@ -33,7 +33,7 @@ from .ledgers import (
     merge_runs,
 )
 from .model import ABSENT, CLAIMED, CONDITIONS, EVIDENCED, SHA_LEN, BugRow
-from .parse import parse_message
+from .parse import KNOWN_PREFIXES, parse_message
 
 TEST_HINT = re.compile(r"\+\s*test|\btest_\w+|\bred\b", re.IGNORECASE)
 
@@ -158,12 +158,15 @@ def _bound_run(runs: list[LedgerRun], repo: str, sha: str, bindings: dict[str, s
 
 
 def _row(repo: str, commit, bullet) -> BugRow:
-    is_fix_id = fix_number(bullet.finding_id) is not None
+    # Only an auditor-style ID names its auditor: FIX-n does not, and neither does a
+    # stand-in ID such as P1-1.
+    prefix = bullet.finding_id.rsplit("-", 1)[0]
+    auditor = prefix if prefix in KNOWN_PREFIXES and prefix != "FIX" else None
     return BugRow(
         project=repo.split("/", 1)[1], repo=repo, finding_id=bullet.finding_id,
         fix_commit=commit.sha, date=commit.date, files=list(commit.files),
         summary=bullet.summary, severity=bullet.severity,
-        auditor=None if is_fix_id else bullet.finding_id.rsplit("-", 1)[0],
+        auditor=auditor,
         evidence={
             "confirmed_l25": CLAIMED,
             "fixed": EVIDENCED,
