@@ -29,7 +29,21 @@ def _bind_arg(spec: str) -> tuple[str, str]:
     return sha.lower(), run
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _printable(text: str) -> str:
+    # Commit subjects come from repositories the author may not control. A raw ESC or
+    # BEL in one could rewrite or hide what the terminal shows, so control characters
+    # are replaced before printing. --json is already safe: json.dumps escapes them.
+    return _CONTROL.sub("�", text)
+
+
 def _render(summary: dict) -> str:
+    return _printable(_render_raw(summary))
+
+
+def _render_raw(summary: dict) -> str:
     lines = [
         f"bugs: {summary['rows']}  tiers: {summary['tiers']}",
         f"lower bound: {summary['unparsed']} commit(s) matched but could not be parsed",

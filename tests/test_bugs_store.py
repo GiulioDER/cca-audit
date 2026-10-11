@@ -104,3 +104,21 @@ def test_a_cli_binding_reaches_the_backfill(tmp_path, monkeypatch, capsys):
             "--ledger", f"{audits / 'AUDITOR_SCORECARD.jsonl'}=acme/widgets", "--bind", f"{sha}=r1"]
     assert main(argv) == 0
     assert json.loads(capsys.readouterr().out)["tiers"] == {"proved": 1}
+
+
+def test_text_output_cannot_carry_terminal_escapes():
+    """Security review. Red proof: _render without _printable -> the ESC byte reaches the terminal.
+
+    Commit subjects come from repositories the author may not control; printed raw, an ANSI
+    sequence in one can rewrite or hide what the terminal shows.
+    """
+    from cca_checks.bugs.__main__ import _render
+
+    summary = {"rows": 0, "tiers": {}, "unparsed": 1, "by_repo": {}, "evidence": {},
+               "unparsed_commits": ["acme/x 0123 fix: audit fixes from CCA \x1b[2J\x1b]0;pwned\x07"],
+               "skipped": [], "ambiguous": [], "candidates": [], "unused_bindings": [],
+               "unknown_ids": [], "reverted": [], "cross_repo": [], "ignored_proofs": [],
+               "malformed_ledger_lines": 0}
+    text = _render(summary)
+    assert "\x1b" not in text and "\x07" not in text
+    assert "fix: audit fixes from CCA" in text
