@@ -17,10 +17,11 @@ Design: [`superpowers/specs/2026-10-11-remote-semgrep-design.md`](superpowers/sp
 ## 1. A key for this purpose only (workstation)
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/cca_analyzer -C cca-workstation
+ssh-keygen -t ed25519 -f "$HOME/.ssh/cca_analyzer" -C cca-workstation
 ```
 
-Leave the passphrase empty or load the key into an agent: the checker runs ssh with
+`$HOME`, not `~`: PowerShell passes `~` to native programs unexpanded, so `ssh-keygen` looks
+for a folder literally named `~`. Leave the passphrase empty or load the key into an agent: the checker runs ssh with
 `BatchMode=yes`, so a passphrase prompt is a failure, not a wait.
 
 ## 2. The host account (once, with sudo)
@@ -28,7 +29,7 @@ Leave the passphrase empty or load the key into an agent: the checker runs ssh w
 Copy the runner and the public key to the host first, from the cca-audit version you run locally:
 
 ```bash
-scp cca_checks/remote/runner.py ~/.ssh/cca_analyzer.pub <admin>@<host>:
+scp cca_checks/remote/runner.py "$HOME/.ssh/cca_analyzer.pub" <admin>@<host>:
 ```
 
 Then, on the host:
