@@ -271,7 +271,7 @@ def _pipeline(a) -> int:
 
         if a.pipeline_cmd == "deferred":
             try:
-                if a.write:
+                if a.write is not None:
                     offer, path = pipeline_state.write_deferred(a.write, a.run, root=a.root)
                     print(json.dumps({**offer.to_json(), "written": path}))
                     return 0

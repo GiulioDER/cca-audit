@@ -328,15 +328,28 @@ def test_deferred_run_selects_a_named_run_and_refuses_an_unknown_one(capsys, git
 
 
 def test_deferred_write_copies_exactly_the_pool(capsys, git_repo):
-    """Red 2026-10-11: mutation `json.dumps(findings, ...)` became a dump of the parent's whole
+    """The L1 file holds the parent's stored L2 objects for exactly the pool ids, in pool order,
+    whole: the tier rule and the scorecard read `auditor`, `category` and `high_stakes`, which the
+    five key projection in `Offer.pool` does not carry.
+
+    Red 2026-10-11: mutation `json.dumps(findings, ...)` became a dump of the parent's whole
     stored L2.json in write_deferred; failed at `assert code == 0 and [f["id"] for f in written]
-    == ["F-2", "F-3"]` (got F-1, F-2, F-3)."""
+    == ["F-2", "F-3"]` (got F-1, F-2, F-3).
+    Red 2026-10-11 (fix round 1): mutation `json.dumps(findings, ...)` became
+    `json.dumps(offer.pool, ...)` in write_deferred; failed at `assert written == [stored[i] for
+    i in pool]` (the written objects lacked auditor, category and high_stakes).
+    """
     closed_parent(git_repo, p3=2)
+    run = git_repo / ".claude/audits/runs/parent"
+    stored = {f["id"]: f for f in json.loads((run / "L2.json").read_bytes())}
+    pool = json.loads((run / "summary.json").read_text(encoding="utf-8"))["pool"]
+    assert {"auditor", "category", "high_stakes"} <= set(stored["F-2"])
     target = git_repo / ".claude/audits/out/L1.json"
     code, out, _ = _cli(capsys, "deferred", "--write", str(target), "--root", str(git_repo))
     written = json.loads(target.read_text(encoding="utf-8"))
     assert code == 0 and [f["id"] for f in written] == ["F-2", "F-3"]
     assert all(f["priority"] == "P3" and "claim" in f for f in written)
+    assert written == [stored[i] for i in pool]
     assert out["written"] == str(target) and out["run_id"] == "parent"
 
 
@@ -360,6 +373,65 @@ def test_deferred_write_is_refused_outside_claude_audits(capsys, git_repo):
                         "--root", str(git_repo))
     assert code == 2 and "outside .claude/audits/" in err["reason"]
     assert not (git_repo / "L1.json").exists()
+
+
+def test_deferred_write_takes_a_path_relative_to_the_root(capsys, git_repo, monkeypatch):
+    """The form `/audit-fix deferred` uses: a path relative to `--root`, not to the cwd.
+
+    Red 2026-10-11 (fix round 1): mutation the `path = pathlib.Path(root) / path` join of a
+    relative `output` deleted in write_deferred; failed at `assert code == 0 and
+    target.is_file() and out["written"] == str(target)` (2 == 0: the cwd-relative path was
+    refused as outside .claude/audits/).
+    """
+    closed_parent(git_repo, p3=3)
+    monkeypatch.chdir(git_repo.parent)
+    code, out, _ = _cli(capsys, "deferred", "--write", ".claude/audits/out/L1.json",
+                        "--root", str(git_repo))
+    target = git_repo / ".claude/audits/out/L1.json"
+    assert code == 0 and target.is_file() and out["written"] == str(target)
+    assert [f["id"] for f in json.loads(target.read_text(encoding="utf-8"))] == [
+        "F-2", "F-3", "F-4"]
+
+
+def test_deferred_write_with_an_empty_name_is_refused(capsys, git_repo):
+    """`--write ""` reaches write_deferred, where confinement refuses it; it is not a report.
+
+    Red 2026-10-11 (fix round 1): mutation `if a.write is not None:` became `if a.write:` in
+    _pipeline; failed at `assert code == 2` (0 == 2: the plain report was printed).
+    """
+    closed_parent(git_repo, p3=3)
+    code, out, err = _cli(capsys, "deferred", "--write", "", "--root", str(git_repo))
+    assert code == 2 and "outside .claude/audits/" in err["reason"] and out == {}
+
+
+def test_deferred_write_refuses_the_files_the_pipeline_keeps_for_itself(capsys, git_repo):
+    """`--write` may not name the run state or anything under `.claude/audits/runs/`, and the
+    path is resolved before it is compared.
+
+    Red 2026-10-11 (fix round 1), three mutations in write_deferred. The equality test against
+    `core.state_file(root)` deleted: failed at the first assert, `code == 2 and
+    ".claude/audits/run-state.json" in err["reason"]` (0 == 2). The `or core._inside(resolved,
+    str(deferred.runs_dir(root)))` deleted: failed at the second, `runs/parent/L2.json` (0 == 2).
+    `resolved = os.path.realpath(path)` became `resolved = str(path)`: failed at the third,
+    `out/../run-state.json` (0 == 2).
+    """
+    closed_parent(git_repo, p3=3)
+    root = str(git_repo)
+    state = git_repo / ".claude/audits/run-state.json"
+    stored = git_repo / ".claude/audits/runs/parent/L2.json"
+    before = stored.read_bytes()
+    code, _, err = _cli(capsys, "deferred", "--write", ".claude/audits/run-state.json",
+                        "--root", root)
+    assert code == 2 and ".claude/audits/run-state.json" in err["reason"]
+    assert not state.exists()
+    code, _, err = _cli(capsys, "deferred", "--write", ".claude/audits/runs/parent/L2.json",
+                        "--root", root)
+    assert code == 2 and "runs/parent/L2.json" in err["reason"]
+    assert stored.read_bytes() == before
+    code, _, err = _cli(capsys, "deferred", "--write", ".claude/audits/out/../run-state.json",
+                        "--root", root)
+    assert code == 2 and "out/../run-state.json" in err["reason"]
+    assert not state.exists()
 
 
 def test_deferred_write_to_a_directory_is_refused_not_a_traceback(capsys, git_repo):
@@ -386,17 +458,20 @@ def test_deferred_write_is_refused_when_the_pass_is_not_offered(capsys, git_repo
     assert code == 2 and "nothing was deferred" in err["reason"]
 
 
-def test_deferred_write_on_an_empty_newest_run_points_at_the_older_pool(capsys, git_repo):
-    """R10: an empty newest run must not dead-end `/audit-fix deferred` while an older pool is
-    on offer. Red 2026-10-11: mutation the `+ older` suffix of the not-offered refusal in
+def test_deferred_write_on_an_empty_newest_run_points_at_the_other_pool(capsys, git_repo):
+    """R10: an empty newest run must not dead-end `/audit-fix deferred` while another pool is
+    on offer ("other", not "older": with `--run` naming a non-newest run the list can include
+    newer ones). Red 2026-10-11: mutation the `+ older` suffix of the not-offered refusal in
     write_deferred deleted; failed at `assert "older pools still on offer: first" in
-    err["reason"]` (the reason ended at "nothing was deferred")."""
+    err["reason"]` (the reason ended at "nothing was deferred"). Red 2026-10-11 (fix round 1):
+    the same deletion, after the wording became "other pools"; failed at `assert "other pools
+    still on offer: first" in err["reason"]`."""
     closed_parent(git_repo, run_id="first", p3=3)
     closed_parent(git_repo, run_id="second", p3=0)
     target = str(git_repo / ".claude/audits/out/L1.json")
     code, _, err = _cli(capsys, "deferred", "--write", target, "--root", str(git_repo))
     assert code == 2 and "nothing was deferred" in err["reason"]
-    assert "older pools still on offer: first" in err["reason"]
+    assert "other pools still on offer: first" in err["reason"]
     assert "pass --run first" in err["reason"]
     code, out, _ = _cli(capsys, "deferred", "--run", "first", "--write", target,
                         "--root", str(git_repo))
@@ -439,12 +514,44 @@ def test_deferred_without_a_summary_exits_2(capsys, git_repo):
 
 
 def test_deferred_without_a_readable_summary_names_the_unreadable_files(capsys, git_repo):
-    """Red 2026-10-11: mutation `+ note` dropped from the no-summary refusal in
-    _deferred_context; failed at `assert code == 2 and broken in err["reason"] and
-    "commit:<sha>" in err["reason"]` (the path of the corrupt file was absent)."""
+    """Only unreadable summaries exist: the refusal names them and says to fix or move them
+    aside, and does NOT offer the `commit:<sha>` fallback (D.1 routes on that phrase, and
+    `start` refuses while any summary is unreadable).
+
+    Red 2026-10-11 (fix round 1): mutation the `elif unreadable:` branch of _deferred_context
+    deleted, so that the unreadable files fall to the plain no-summary refusal; failed at
+    `assert code == 2 and broken in err["reason"] and "moved aside" in err["reason"]` (the
+    path of the corrupt file was absent).
+    Red 2026-10-11 (fix round 1): mutation `--from commit:<sha>` appended to the message of
+    that branch; failed at `assert "commit:<sha>" not in err["reason"]`.
+    """
     broken = _corrupt_summary(git_repo)
     code, _, err = _cli(capsys, "deferred", "--root", str(git_repo))
-    assert code == 2 and broken in err["reason"] and "commit:<sha>" in err["reason"]
+    assert code == 2 and broken in err["reason"] and "moved aside" in err["reason"]
+    assert "commit:<sha>" not in err["reason"]
+
+
+def test_deferred_with_a_malformed_summary_is_refused_not_a_traceback(capsys, git_repo):
+    """A pool holding a non-string, or a `human_pending` that is not an int, once escaped from
+    `pipeline deferred` as a TypeError traceback; such a summary is now unreadable.
+
+    Red 2026-10-11 (fix round 1): mutation the pool element test
+    `not all(isinstance(i, str) for i in raw["pool"])` deleted in deferred.load_summaries;
+    failed at `assert code == 2 and path.as_posix() in err["reason"]` on the pool case
+    ('escaped' == 2: TypeError, unhashable type 'list', from findings_for). Mutation the
+    `human_pending` type test deleted; failed at the same assert on the human_pending case
+    ('escaped' == 2: TypeError from int(['x']) in assess).
+    """
+    closed_parent(git_repo, p3=3)
+    path = git_repo / ".claude/audits/runs/parent/summary.json"
+    original = json.loads(path.read_text(encoding="utf-8"))
+    for over in ({"pool": ["F-2", ["F-3"]]}, {"human_pending": ["x"]}):
+        path.write_text(json.dumps({**original, **over}), encoding="utf-8")
+        try:
+            code, _, err = _cli(capsys, "deferred", "--root", str(git_repo))
+        except TypeError as exc:
+            code, err = "escaped", {"reason": repr(exc)}
+        assert code == 2 and path.as_posix() in err["reason"]
 
 
 def test_deferred_names_a_run_directory_without_its_l2_file(capsys, git_repo):

@@ -184,6 +184,10 @@ def _commit_of(root, rev: str) -> str | None:
 
 
 def _is_ancestor(root, sha: str) -> bool:
+    """True when `sha` is an ancestor of HEAD. A value starting with `-` is never one: the
+    value can come from a summary file, and git would read it as an option."""
+    if sha.startswith("-"):
+        return False
     done = _git(root, "merge-base", "--is-ancestor", sha, "HEAD")
     return done is not None and done.returncode == 0
 
@@ -845,10 +849,15 @@ def _deferred_context(run_id: str, root) -> tuple[dict, list[dict], deferred.Off
             )
     elif summaries:
         summary = summaries[-1]
-    else:
-        note = f" ({len(unreadable)} unreadable: {', '.join(unreadable)})" if unreadable else ""
+    elif unreadable:
+        # No `commit:<sha>` fallback here: `start` refuses while any summary is unreadable, so
+        # offering it would send the caller to a start that refuses.
         raise RecordRefused(
-            "no completed run has a summary under .claude/audits/runs/" + note + "; for a "
+            "no completed run has a readable summary; " + _unreadable_block(unreadable)
+        )
+    else:
+        raise RecordRefused(
+            "no completed run has a summary under .claude/audits/runs/; for a "
             "run that predates summaries, parse the Deferred section of its CCA commit into "
             "the L1 file and start with --from commit:<sha> (audit-fix.md § Second Pass)"
         )
@@ -888,8 +897,9 @@ def write_deferred(output, run_id: str = "",
     """Write the offered pool's full finding objects to `output`: a deferred run's L1 input.
 
     Refused when unreadable summaries exist (`start --mode DEFERRED` would refuse the run this
-    file is for), when the pass is not offered (naming any older pools that still are, so an
-    empty newest run does not dead-end), and when `output` lies outside `.claude/audits/`.
+    file is for), when the pass is not offered (naming any other pools that still are, so an
+    empty newest run does not dead-end), when `output` lies outside `.claude/audits/`, and when
+    it names the run state or anything under `.claude/audits/runs/`.
     """
     _, findings, offer = _deferred_context(run_id, root)
     if offer.unreadable:
@@ -897,7 +907,7 @@ def write_deferred(output, run_id: str = "",
     if not offer.offered:
         older = ""
         if offer.other_pools:
-            older = (f"; older pools still on offer: {', '.join(offer.other_pools)}; "
+            older = (f"; other pools still on offer: {', '.join(offer.other_pools)}; "
                      f"pass --run {offer.other_pools[-1]}")
         raise RecordRefused(
             f"run {offer.run_id}'s deferred findings are not offered: {offer.reasons[0]}" + older
@@ -909,6 +919,16 @@ def write_deferred(output, run_id: str = "",
         raise RecordRefused(
             f"--write {output} is outside .claude/audits/; write it there (for example "
             ".claude/audits/out/L1.json), where the tree fingerprint ignores it"
+        )
+    # Resolved before comparing, so `out/../run-state.json` is the run state too. Case is
+    # folded for the one equality test: Windows paths do not differ by case.
+    resolved = os.path.realpath(path)
+    if os.path.normcase(resolved) == os.path.normcase(os.path.realpath(core.state_file(root))) \
+            or core._inside(resolved, str(deferred.runs_dir(root))):
+        raise RecordRefused(
+            f"--write {output} names a file the pipeline keeps for itself (the run state, or "
+            "a run's stored work under .claude/audits/runs/); write the L1 file under a name "
+            "of its own, for example .claude/audits/out/L1.json"
         )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -1254,6 +1254,28 @@ def test_the_commit_fallback_needs_a_commit_that_is_an_ancestor_of_head(git_repo
     assert state.parent == f"commit:{head}" and state.base_commit is None
 
 
+def test_is_ancestor_never_hands_git_a_value_that_reads_as_an_option(git_repo, monkeypatch):
+    """A summary's `commit` is untrusted text; a value starting with `-` must not reach git as
+    an option. The stub `_git` answers "ancestor" (exit 0) to anything it is asked, so the only
+    thing that can make the answer False is the guard.
+
+    Red 2026-10-11 (fix round 1): mutation the `if sha.startswith("-"): return False` guard of
+    _is_ancestor deleted; failed at `assert ps._is_ancestor(git_repo, "--all") is False and
+    calls == []` (True is False). The second assert pins that an ordinary sha still goes to git
+    as `merge-base --is-ancestor <sha> HEAD`.
+    """
+    calls = []
+
+    def fake_git(root, *args):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(ps, "_git", fake_git)
+    assert ps._is_ancestor(git_repo, "--all") is False and calls == []
+    assert ps._is_ancestor(git_repo, "abc1234") is True
+    assert calls == [("merge-base", "--is-ancestor", "abc1234", "HEAD")]
+
+
 @pytest.mark.parametrize("rev", [
     "HEAD", "-x", "HEAD~0", "{head6}", "{head}0",
 ])

@@ -195,6 +195,33 @@ def test_a_summary_naming_another_run_or_another_schema_is_unreadable(tmp_path):
     assert sorted(p.split("/")[-2] for p in unreadable) == ["bare", "future", "liar"]
 
 
+@pytest.mark.parametrize("over", [
+    {"pool": ["F-1", 2]}, {"pool": [["F-1"]]}, {"pool": [None]},
+    {"human_pending": True}, {"human_pending": "1"}, {"human_pending": 1.5},
+    {"human_pending": None}, {"human_pending": [1]},
+], ids=["pool-int", "pool-list", "pool-null", "hp-bool", "hp-str", "hp-float", "hp-null",
+        "hp-list"])
+def test_a_summary_with_a_malformed_pool_or_human_pending_is_unreadable(tmp_path, over):
+    """The rules over a summary raise TypeError on a pool element that is not a string (an
+    unhashable one, or a `join` over a number) or a `human_pending` that is not an int, and
+    `True` is not an int here, so such a summary is reported unreadable instead.
+
+    Red 2026-10-11 (fix round 1), three mutations in load_summaries. The pool element test
+    `not all(isinstance(i, str) for i in raw["pool"])` deleted: the three pool-* cases failed at
+    `assert [s["run_id"] for s in summaries] == ["a"]` (['a', 'bad']). The `human_pending` test
+    deleted: the five hp-* cases failed at the same assert. `type(raw.get("human_pending")) is
+    not int` became `not isinstance(raw.get("human_pending"), int)`: only hp-bool failed, at
+    the same assert.
+    """
+    runs = tmp_path / ".claude/audits/runs"
+    for name, body in (("a", _s("a")), ("bad", _s("bad", **over))):
+        (runs / name).mkdir(parents=True)
+        (runs / name / "summary.json").write_text(json.dumps(body), encoding="utf-8")
+    summaries, unreadable = deferred.load_summaries(tmp_path)
+    assert [s["run_id"] for s in summaries] == ["a"]
+    assert unreadable == [(runs / "bad" / "summary.json").as_posix()]
+
+
 def test_a_bom_prefixed_ledger_still_counts_its_parked_rows(tmp_path):
     """A ledger Windows PowerShell 5.1 created starts with a BOM; its first row still counts.
 

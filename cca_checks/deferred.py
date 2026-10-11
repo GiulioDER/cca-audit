@@ -70,9 +70,13 @@ def load_summaries(root) -> tuple[list[dict], list[str]]:
             continue
         # A summary that names another run, or a schema this code does not know, is not
         # loaded: `findings_for` builds a path from its run id, so trusting the file's word
-        # over its directory would let one run's summary read another run's L2 file.
+        # over its directory would let one run's summary read another run's L2 file. Nor is
+        # one whose pool holds a non-string or whose `human_pending` is not an int (`bool`
+        # is not one): the rules below would raise TypeError on it.
         if not isinstance(raw, dict) or not isinstance(raw.get("run_id"), str) \
                 or not isinstance(raw.get("pool"), list) \
+                or not all(isinstance(i, str) for i in raw["pool"]) \
+                or type(raw.get("human_pending")) is not int \
                 or raw["run_id"] != path.parent.name or raw.get("schema") != SUMMARY_SCHEMA:
             unreadable.append(path.as_posix())
             continue
