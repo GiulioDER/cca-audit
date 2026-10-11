@@ -53,6 +53,8 @@ def _load_core():
     # places means one copy of the rules.
     path = pathlib.Path(__file__).resolve().parent / "plugin" / "hooks" / "cca_gate_core.py"
     spec = importlib.util.spec_from_file_location("cca_gate_core", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load the gate core from {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -412,7 +414,9 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
     if not path.exists():
         return None
     state = load(root)
-    if state is not None and state.paused:
+    if state is None:
+        return None
+    if state.paused:
         raise RecordRefused(_PAUSED)
     missing = outstanding(state, root)
     if missing:
