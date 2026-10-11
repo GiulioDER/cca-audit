@@ -72,6 +72,20 @@ printf '[Slice]\nMemoryMax=3G\nTasksMax=64\nCPUQuota=150%%\n' \
 sudo systemctl daemon-reload
 ```
 
+Finally, check what else the account can READ. Ownership stops it writing, but files other
+services leave readable by everyone (`o+r`, the default for most checkouts under `/opt`) are
+readable by it too, and it is the account that parses untrusted files. Deny it the folders it has
+no business in, with an ACL that changes nobody else's access (semgrep needs none of them):
+
+```bash
+sudo apt-get install -y acl
+sudo setfacl -m u:cca-analyzer:--- /opt /srv /home/<each other account>
+```
+
+On the first host this was set up on, 85,062 of 103,074 files of the production service's code
+under `/opt` were readable by any local account, and a home folder of mode `751` let any account
+open files whose path it knew.
+
 ### 2b. Give the account its own OpenSSH port
 
 The forced command is enforced by OpenSSH, so the account must be reached through OpenSSH and

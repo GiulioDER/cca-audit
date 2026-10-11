@@ -216,3 +216,9 @@ they disagree with this one, this one wins. `docs/remote-semgrep.md` carries the
    (`AllowUsers ... cca-analyzer@100.64.0.0/10`), and sshd itself forces the runner with a
    `Match User` block appended to the main `sshd_config`. Measured on the author's host: port 22
    served by `tailscaled`, OpenSSH limited to `AllowUsers sentiment`, ssh socket-activated.
+7. **§4, reading (found during the first real setup):** root ownership stops the account writing,
+   not reading. On the author's host 85,062 of 103,074 files of the production code under `/opt`
+   were world-readable, and the service account's home was `751`. The setup now denies the account
+   `/opt`, `/srv` and other accounts' homes with a per-user ACL (`setfacl -m u:cca-analyzer:---`),
+   which changes nobody else's access. Verified: the account gets `Permission denied`, the service
+   account reads as before, and a remote scan still settles a refutation.
