@@ -294,10 +294,10 @@ def _registry(action: str, *args) -> None:
     try:
         getattr(core, action)(*args)
     except Exception as exc:  # noqa: BLE001 - see the docstring
+        # Not `core.registry_path()` here: it is what may have failed (no home directory).
         print(
-            f"warning: could not update the CCA run registry at {core.registry_path()} "
-            f"({exc.__class__.__name__}: {exc}); the hooks will find this run only from "
-            "its own directory",
+            f"warning: could not update the CCA run registry ({exc.__class__.__name__}: "
+            f"{exc}); the hooks will find this run only from its own directory",
             file=sys.stderr,
         )
 
