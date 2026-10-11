@@ -63,3 +63,24 @@ Four answerable questions are added (22 answerable, 27 unanswerable), chosen fro
 four repositories the same way as the first eighteen, before seeing any new score. Predictions 1
 to 3 above stand unchanged for this attempt: certifies; separability at least 0.90; threshold
 between 0.45 and 0.70.
+
+## Result, attempt 2 (2026-10-11)
+**Status:** measured. Prediction 1 falsified again; prediction 2 held as a point estimate only;
+prediction 3 falsified.
+
+Separability **0.958** (prediction 2: at least 0.90), but its 95% interval is **[0.896, 1.000]**,
+so RE-call refused to certify: 22 answerable against 27 unanswerable cannot establish the 0.9 bar.
+Uncertified threshold **0.394**, below the predicted 0.45 to 0.70 for the second time. Nothing
+promoted.
+
+**Gap.** The corpus separates about as well as I predicted (0.958 against the existing tenants'
+0.974 to 0.988), but the threshold sits lower than any existing tenant's. These memos are short and
+template-shaped, so a paraphrased question scores lower against its own memo than a question
+against prose would; I think that is why, but nothing here measures it.
+
+## Attempt 3: prediction, written before running it
+
+Eighteen answerable questions are added (40 answerable, 27 unanswerable), chosen and phrased as
+before and before any new score. Predictions: certifies; separability between 0.93 and 0.98 with
+the interval's lower bound at least 0.90; threshold between 0.33 and 0.46, the band attempts 1
+and 2 suggest rather than the existing tenants'.
