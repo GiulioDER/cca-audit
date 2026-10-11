@@ -197,20 +197,33 @@ def _pipeline(a) -> int:
     """
     try:
         if a.pipeline_cmd == "start":
-            state = pipeline_state.start(
-                a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
-            )
+            try:
+                state = pipeline_state.start(
+                    a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
+                )
+            except pipeline_state.RecordRefused as exc:
+                print(json.dumps({"refused": "start", "reason": str(exc)}), file=sys.stderr)
+                return 2
             print(json.dumps({"started": state.to_json()}))
             return 0
 
         if a.pipeline_cmd == "record":
-            state = pipeline_state.record(
-                a.layer, status=a.status, detail=a.detail, fixes=a.fixes, root=a.root
-            )
-            decision = pipeline_state.verify_commit_allowed(state)
+            counts = {"unique": a.unique, "confirmed": a.confirmed, "fp": a.fp,
+                      "uncertain": a.uncertain, "duplicate": a.duplicate,
+                      "to_fix": a.to_fix}
+            try:
+                state = pipeline_state.record(
+                    a.layer, status=a.status, detail=a.detail, fixes=a.fixes,
+                    counts=counts, output=a.output, root=a.root,
+                )
+            except pipeline_state.RecordRefused as exc:
+                print(json.dumps({"refused": a.layer, "reason": str(exc)}), file=sys.stderr)
+                return 2
+            decision = pipeline_state.verify_commit_allowed(state, root=a.root)
             print(json.dumps({
                 "recorded": a.layer,
                 "run_id": state.run_id,
+                "output": state.layers[a.layer].get("output"),
                 "commit_allowed": decision.allowed,
                 "outstanding": decision.reasons if not decision.allowed else [],
             }))
@@ -218,14 +231,41 @@ def _pipeline(a) -> int:
 
         if a.pipeline_cmd == "status":
             state = pipeline_state.load(a.root)
-            decision = pipeline_state.verify_commit_allowed(state)
+            decision = pipeline_state.verify_commit_allowed(state, root=a.root)
+            owed = pipeline_state.outstanding(state, a.root) if state else []
+            if state is not None and state.paused:
+                # A paused run cannot close until it is resumed, whatever else it owes.
+                owed = ["the run is paused; run `python -m cca_checks pipeline resume` to "
+                        "continue it, or `pipeline abort --reason` to retire it", *owed]
+            if a.require_complete and state is not None and not owed:
+                # Nothing is missing, but the run is still open: the Stop hook and the
+                # commit guard keep treating it as in flight until it is retired.
+                owed = ["every layer is recorded but the run is still open: run "
+                        "`python -m cca_checks pipeline close` to retire it"]
+            required = pipeline_state.required_layers(state, a.root) if state else []
             print(json.dumps({
                 "open": state is not None,
                 "run": state.to_json() if state else None,
-                "required": list(pipeline_state.required_layers(state)) if state else [],
+                "paused": state.paused if state else None,
+                "required": list(required),
                 "commit_allowed": decision.allowed,
                 "outstanding": decision.reasons if not decision.allowed else [],
+                "outstanding_to_close": owed,
             }))
+            return 2 if (a.require_complete and owed) else 0
+
+        if a.pipeline_cmd in ("pause", "resume"):
+            try:
+                if a.pipeline_cmd == "pause":
+                    state = pipeline_state.pause(a.reason, root=a.root)
+                    result = {"paused": state.run_id, **(state.paused or {})}
+                else:
+                    result = pipeline_state.resume(root=a.root)
+            except pipeline_state.RecordRefused as exc:
+                print(json.dumps({"refused": a.pipeline_cmd, "reason": str(exc)}),
+                      file=sys.stderr)
+                return 2
+            print(json.dumps(result))
             return 0
 
         if a.pipeline_cmd == "abort":
@@ -233,7 +273,11 @@ def _pipeline(a) -> int:
             print(json.dumps({"aborted": log is not None, "logged_to": str(log) if log else None}))
             return 0
 
-        log = pipeline_state.close(root=a.root)
+        try:
+            log = pipeline_state.close(root=a.root)
+        except pipeline_state.RecordRefused as exc:
+            print(json.dumps({"refused": "close", "reason": str(exc)}), file=sys.stderr)
+            return 2
         print(json.dumps({"closed": log is not None, "logged_to": str(log) if log else None}))
         return 0
     except ValueError as exc:
@@ -299,10 +343,39 @@ def main(argv=None) -> int:
     pl_record.add_argument("--detail", default="")
     pl_record.add_argument("--fixes", type=int, default=None,
                            help="number of fixes written to the tree (record at L4)")
+    for flag, help_text in (
+        ("--unique", "L2: unique findings after consolidation"),
+        ("--confirmed", "L2.5: CONFIRMED verdicts"),
+        ("--fp", "L2.5: FALSE_POSITIVE verdicts"),
+        ("--uncertain", "L2.5: UNCERTAIN verdicts"),
+        ("--duplicate", "L2.5: DUPLICATE verdicts"),
+        ("--to-fix", "L3: findings the plan will fix"),
+    ):
+        pl_record.add_argument(flag, type=int, default=None, help=help_text)
+    pl_record.add_argument(
+        "--output", default=None,
+        help="L1, L2, L2.5, L3, L4: a JSON file holding the layer's work; it is copied "
+             "into .claude/audits/runs/<run_id>/ so a paused run can resume from it",
+    )
     pl_record.add_argument("--root", default=".")
 
     pl_status = plsub.add_parser("status", help="print the open run and what it still owes")
+    pl_status.add_argument(
+        "--require-complete", action="store_true",
+        help="exit 2 while the open run still owes a layer (Codex has no Stop hook)",
+    )
     pl_status.add_argument("--root", default=".")
+
+    pl_pause = plsub.add_parser(
+        "pause", help="pause the open run right after a record, to resume in a later session"
+    )
+    pl_pause.add_argument("--reason", required=True)
+    pl_pause.add_argument("--root", default=".")
+
+    pl_resume = plsub.add_parser(
+        "resume", help="resume a paused run; prints the next layer and its output files"
+    )
+    pl_resume.add_argument("--root", default=".")
 
     pl_abort = plsub.add_parser(
         "abort", help="close a run without satisfying its gates, on the record"

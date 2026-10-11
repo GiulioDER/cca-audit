@@ -1,13 +1,11 @@
 """The PreToolUse guard, and the drift pin that keeps it honest.
 
-The guard carries its own copy of the required-layer table because it runs from
-the user's global hooks directory against repositories where `cca_checks` was
-never installed, and an ImportError in a PreToolUse hook fails in the worst
-available way: it either blocks every commit on the machine or is swallowed and
-silently stops guarding. Duplication is the right trade there, but only while
-something proves the two copies still agree. That is
-`test_guard_agrees_with_pipeline_state_across_a_matrix`, and it is the most
-important test in this file.
+The guard holds no rules of its own: it loads `cca_gate_core.py` from beside itself
+by path, because it runs from the user's global hooks directory against
+repositories where `cca_checks` was never installed. The drift pin
+`test_guard_agrees_with_pipeline_state_across_a_matrix` still proves that the
+guard and `pipeline_state` reach the same verdict on legacy states, and the
+"lonely guard" tests prove a guard copied without its core fails closed.
 """
 
 from __future__ import annotations
@@ -18,6 +16,7 @@ import json
 import pathlib
 
 import pytest
+from conftest import write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -77,13 +76,16 @@ def test_guard_blocks_every_shape_of_commit(monkeypatch, tmp_path, command):
     assert _run(monkeypatch, repo, command) == 2, command
 
 
-def test_guard_allows_the_commit_once_the_gates_are_satisfied(monkeypatch, tmp_path):
-    repo = _repo(tmp_path)
-    ps.start("FAST", root=repo)
-    for layer in ("L1", "L2", "L2.5"):
-        ps.record(layer, detail="done", root=repo)
-    ps.record("L6", detail="APPROVED", root=repo)
-    assert _run(monkeypatch, repo, "git commit -m x") == 0
+def test_guard_allows_the_commit_once_the_gates_are_satisfied(monkeypatch, git_repo):
+    state = ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L6", detail="APPROVED", root=git_repo)
+    assert state.run_id
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 0
 
 
 def test_guard_refuses_an_unparseable_state(monkeypatch, tmp_path):
@@ -118,7 +120,7 @@ def test_guard_reads_a_bare_command_from_stdin(monkeypatch, tmp_path):
 def test_guard_names_the_missing_layers_on_stderr(monkeypatch, capsys, tmp_path):
     repo = _repo(tmp_path)
     ps.start("DEEP", root=repo)
-    ps.record("L1", detail="8 auditors", root=repo)
+    ps.record("L1", detail="8 auditors", output=write_output(repo), root=repo)
     assert _run(monkeypatch, repo, "git commit -m x") == 2
     err = capsys.readouterr().err
     assert "L2.5" in err and "L6" in err
@@ -155,3 +157,136 @@ def test_guard_agrees_with_pipeline_state_across_a_matrix(tmp_path, tier, no_fix
     from_guard = guard.evaluate(state)
     from_module = ps.verify_commit_allowed(ps.PipelineState.from_json(state)).reasons
     assert from_guard == from_module
+
+
+def _lonely_guard(tmp_path_factory, name):
+    import shutil
+    hooks = tmp_path_factory.mktemp("hooks")
+    shutil.copy(_GUARD_PATH, hooks / "cca_pipeline_guard.py")
+    spec = importlib.util.spec_from_file_location(name, hooks / "cca_pipeline_guard.py")
+    lonely = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lonely)
+    return lonely
+
+
+def test_guard_refuses_when_the_core_is_missing_and_a_run_is_open(
+    monkeypatch, git_repo, tmp_path_factory
+):
+    """A guard copied without its core must not fail open.
+
+    Invariant: with a run open and cca_gate_core.py absent, main() exits 2.
+    Mutation: in main(), the `except (ImportError, OSError, SyntaxError)` branch returns 0
+    instead of refusing.
+
+    Red 2026-10-10: that mutation of main() in cca_pipeline_guard.py; failed at
+        assert lonely.main() == 2   (assert 0 == 2)
+    """
+    lonely = _lonely_guard(tmp_path_factory, "lonely_guard")
+    ps.start("FAST", root=git_repo)
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr("sys.stdin", io.StringIO("git commit -m x"))
+    assert lonely.main() == 2
+
+
+def test_guard_refuses_when_the_core_raises_at_import_and_a_run_is_open(
+    git_repo, tmp_path_factory
+):
+    """A core that raises at import (not only ImportError) must not fail open.
+
+    Invariant: with a run open and a core whose import raises RuntimeError, the guard
+    process exits 2, never 1 (an uncaught exception exits 1, which Claude Code treats as
+    non blocking). Run as a subprocess so an exception escaping main() shows up as the
+    exit code it really produces.
+    Mutation: `_load_core()` guarded by `except (ImportError, OSError, SyntaxError)`
+    instead of `except Exception` (the a8d7445 text).
+
+    Red 2026-10-10: baseline a8d7445; failed at `assert proc.returncode == 2` (1 == 2).
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    hooks = tmp_path_factory.mktemp("hooks_boom")
+    shutil.copy(_GUARD_PATH, hooks / "cca_pipeline_guard.py")
+    core_path = hooks / "cca_gate_core.py"
+    core_path.write_text('raise RuntimeError("boom")' + chr(10), encoding="utf-8")
+    ps.start("FAST", root=git_repo)
+    proc = subprocess.run(
+        [sys.executable, str(hooks / "cca_pipeline_guard.py")],
+        input="git commit -m x", cwd=git_repo, capture_output=True, text=True,
+    )
+    assert proc.returncode == 2, proc.stderr
+    assert "could not be loaded" in proc.stderr
+
+
+def test_guard_without_its_core_is_silent_when_no_run_is_open(
+    monkeypatch, git_repo, tmp_path_factory
+):
+    """No run, no core: nothing to guard, so the commit proceeds (exit 0).
+
+    Mutation: in main(), `if root is None: return 0` becomes `root = Path(os.getcwd())`, so
+    the core is loaded (and refused) even with no run open.
+
+    Red 2026-10-10: that mutation of main() in cca_pipeline_guard.py; failed at
+        assert lonely.main() == 0   (assert 2 == 0)
+    """
+    lonely = _lonely_guard(tmp_path_factory, "lonely_guard2")
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr("sys.stdin", io.StringIO("git commit -m x"))
+    assert lonely.main() == 0
+
+
+def test_guard_refuses_a_malformed_legacy_state_instead_of_crashing(monkeypatch, git_repo):
+    """An exception after a run is found exits 1, which Claude Code treats as non blocking.
+
+    Invariant: any failure to evaluate an open run is a refusal (exit 2).
+    Mutation: remove main()'s `except Exception` around the evaluation.
+
+    Red 2026-10-10: baseline b106c3a; failed at
+        assert _run(monkeypatch, git_repo, "git commit -m x") == 2   (AttributeError raised)
+    """
+    path = ps.state_path(git_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"tier": "FAST", "layers": {"L1": "done"}, "fixes_applied": 0}),
+        encoding="utf-8",
+    )
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+
+
+def test_guard_refuses_when_the_rules_raise(monkeypatch, git_repo):
+    """Same invariant, with the exception coming out of commit_reasons.
+
+    Red 2026-10-10: baseline b106c3a; failed at
+        assert _run(monkeypatch, git_repo, "git commit -m x") == 2   (RuntimeError raised)
+    """
+    ps.start("FAST", root=git_repo)
+    core = guard._load_core()
+
+    def boom(state, tree):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(core, "commit_reasons", boom)
+    monkeypatch.setattr(guard, "_load_core", lambda: core)
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+
+
+def test_guard_refuses_a_commit_while_the_run_is_paused(monkeypatch, capsys, git_repo):
+    """A complete run that is paused may not commit, and the refusal names the pause.
+
+    Red 2026-10-11: mutation `[PAUSED_REASON] if state.get("paused") else []` became `[]` in
+    cca_gate_core.commit_reasons; failed at
+    `assert _run(monkeypatch, git_repo, "git commit -m x") == 2` (0 == 2).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L6", detail="APPROVED", root=git_repo)
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 0
+    ps.pause("end of day", root=git_repo)
+    capsys.readouterr()
+    assert _run(monkeypatch, git_repo, "git commit -m x") == 2
+    assert "the run is paused" in capsys.readouterr().err

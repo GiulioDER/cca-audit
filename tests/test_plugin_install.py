@@ -17,6 +17,7 @@ Two distinct failure classes are covered here, and they fail at different times:
    disagree about whether your customizations survive an upgrade.
 """
 
+import json
 import pathlib
 
 import pytest
@@ -204,6 +205,71 @@ def test_install_warns_when_the_commit_guard_is_not_registered(tmp_path, monkeyp
     settings.write_text(plugin.hook_snippet(tmp_path), encoding="utf-8")
     rearmed = plugin.install(tmp_path)
     assert not any("commit guard" in w for w in rearmed.warnings), rearmed.warnings
+
+    settings.write_text('{"x": "cca_pipeline_guard.py"}', encoding="utf-8")
+    # Red 2026-10-10: `_registered_guards` ignored the stop guard; the next line failed.
+    half = plugin.install(tmp_path)
+    assert any("stop guard" in w for w in half.warnings), half.warnings
+
+
+def test_the_two_guards_may_live_in_different_settings_files(tmp_path, monkeypatch):
+    """Claude Code merges hooks across settings files, so split registration is armed.
+
+    Mutation: require both names in one file (the 2dd581f code). Fails: a false
+    warning about a fully armed pair.
+
+    Red 2026-10-10: that mutation; failed at the
+    `assert not any("guard" in w and "registered" in w ...)` line.
+    """
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        '{"x": "cca_pipeline_guard.py"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: home))
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(
+        '{"x": "cca_stop_guard.py"}', encoding="utf-8"
+    )
+    result = plugin.install(tmp_path)
+    assert not any("guard" in w and "registered" in w for w in result.warnings), result.warnings
+
+
+def test_a_missing_stop_guard_is_named_on_its_own(tmp_path, monkeypatch):
+    """Only the stop guard missing: say so, and say what it costs.
+
+    Red 2026-10-10: the `elif not stop_armed` branch removed; failed at the
+    first `assert any("stop guard is installed but not registered" ...)` line.
+    """
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(
+        '{"x": "cca_pipeline_guard.py"}', encoding="utf-8"
+    )
+    result = plugin.install(tmp_path)
+    assert any("stop guard is installed but not registered" in w for w in result.warnings)
+    assert any("end half done" in w for w in result.warnings), result.warnings
+
+
+def test_hook_snippet_arms_both_hooks(tmp_path):
+    """Red 2026-10-10: the Stop command pointed at the commit guard; failed at the
+    `cca_stop_guard.py in ...` assert."""
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    assert "cca_pipeline_guard.py" in snippet["PreToolUse"][0]["hooks"][0]["command"]
+    assert "cca_stop_guard.py" in snippet["Stop"][0]["hooks"][0]["command"]
+    assert "matcher" not in snippet["Stop"][0]
+
+
+def test_hook_snippet_timeouts_exceed_the_fingerprint_bound(tmp_path):
+    """Review Focus 5. A hook that times out fails open. Baseline d2317de: 15 s. Red there.
+
+    Red 2026-10-10: PreToolUse timeout set back to 15; failed at the
+    `> ps.core.FINGERPRINT_TIMEOUT_S` assert.
+    """
+    from cca_checks import pipeline_state as ps
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    for event in ("PreToolUse", "Stop"):
+        assert snippet[event][0]["hooks"][0]["timeout"] > ps.core.FINGERPRINT_TIMEOUT_S
 
 
 def test_install_creates_the_target_tree_when_absent(tmp_path):

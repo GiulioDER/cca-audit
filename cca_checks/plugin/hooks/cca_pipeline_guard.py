@@ -7,14 +7,14 @@ L2.5 (anti-hallucination) or L6 (architect gate) and produce a commit that looke
 exactly like a verified one. This hook makes that particular commit impossible
 rather than merely discouraged.
 
-WHY IT IS STANDALONE. It runs from the user's global hooks directory, against
-every repository they touch, including ones where `cca_checks` was never
-installed. An `ImportError` in a PreToolUse hook is not a safe failure: it either
-blocks every commit on the machine or, worse, is swallowed and silently stops
-guarding. So the required-layer table is embedded here, and
-`tests/test_pipeline_guard.py` asserts it agrees with `pipeline_state` across a
-matrix of run states. Duplication that is pinned by a test is cheaper than an
-import that may not resolve.
+WHY IT IMPORTS NOTHING FROM `cca_checks`. It runs from the user's global hooks
+directory, against every repository they touch, including ones where
+`cca_checks` was never installed. An `ImportError` in a PreToolUse hook is not a
+safe failure: it either blocks every commit on the machine or, worse, is
+swallowed and silently stops guarding. The rules live in `cca_gate_core.py`,
+installed beside this file and loaded BY PATH, so they exist once and use only
+the stdlib. If that file is missing while a run is open, the guard refuses
+rather than guessing, because failing open there would ship unverified fixes.
 
 BEHAVIOUR
   no state file            -> exit 0 (no audit in flight; this hook has no opinion)
@@ -30,28 +30,30 @@ the model", so the refusal arrives as a correction rather than as a crash.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import pathlib
 import re
 import sys
 
-# Mirrors _CORE_REQUIRED / _FIX_REQUIRED in cca_checks/pipeline_state.py.
-# tests/test_pipeline_guard.py fails if these drift apart.
-CORE_REQUIRED = ("L1", "L2", "L2.5", "L6")
-FIX_REQUIRED = {
-    "FAST": ("L5",),
-    "STANDARD": ("L5", "L5.5", "L5.6"),
-    "DEEP": ("L5", "L5.5", "L5.6"),
-}
-APPROVING_VERDICT = "APPROVED"
-BAD_STATUS = frozenset({"skipped", "failed"})
-
 # Deliberately loose. A false positive costs one state-file read; a false
 # negative lets an unverified fix through, which is the failure this exists to
 # stop. `git -C x commit`, `git commit -am`, and a commit inside a compound
 # command all have to match.
 _COMMIT_RE = re.compile(r"\bgit\b[^\n;|&]*\bcommit\b")
+
+_HERE = pathlib.Path(__file__).resolve().parent
+
+
+def _load_core():
+    path = _HERE / "cca_gate_core.py"
+    spec = importlib.util.spec_from_file_location("cca_gate_core", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def find_root(start: pathlib.Path) -> pathlib.Path | None:
@@ -90,53 +92,9 @@ def read_command(raw: str) -> str:
     return text
 
 
-def evaluate(state: dict) -> list[str]:
+def evaluate(state: dict, tree: str | None = None) -> list[str]:
     """Reasons this run may not commit. Empty list means allowed."""
-    reasons: list[str] = []
-
-    tier = str(state.get("tier", "")).upper()
-    if tier not in FIX_REQUIRED:
-        return [f"run state names an unknown tier {tier!r}"]
-
-    layers = state.get("layers")
-    if not isinstance(layers, dict):
-        return ["run state has no 'layers' object"]
-
-    if state.get("no_fix"):
-        reasons.append(
-            "this run was started with `no-fix`, which forbids editing and committing; "
-            "abort the run first if this commit is unrelated"
-        )
-
-    required = list(CORE_REQUIRED)
-    try:
-        fixes = int(state.get("fixes_applied", 0) or 0)
-    except (TypeError, ValueError):
-        fixes = 0
-    if fixes > 0:
-        required.extend(FIX_REQUIRED[tier])
-
-    for layer in required:
-        entry = layers.get(layer)
-        if not entry:
-            reasons.append(f"{layer} has no recorded verdict (tier {tier})")
-        elif str(entry.get("status", "")).lower() in BAD_STATUS:
-            reasons.append(f"{layer} is recorded as {entry.get('status')}")
-
-    gate = layers.get("L6")
-    if isinstance(gate, dict):
-        verdict = str(gate.get("detail", "")).strip().upper()
-        if not verdict:
-            reasons.append(
-                "L6 was recorded without a verdict; record it as "
-                "--detail APPROVED, REVISE or BLOCKED"
-            )
-        elif verdict != APPROVING_VERDICT:
-            reasons.append(
-                f"the L6 architect gate returned {verdict}, not {APPROVING_VERDICT}"
-            )
-
-    return reasons
+    return _load_core().commit_reasons(state, tree)
 
 
 def refuse(root: pathlib.Path, reasons: list[str]) -> int:
@@ -175,21 +133,34 @@ def main(argv: list[str] | None = None) -> int:
     if root is None:
         return 0
 
-    path = root / ".claude" / "audits" / "run-state.json"
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return refuse(
-            root,
-            [
-                f"the run state at {path} is unreadable ({exc.__class__.__name__}); "
-                "a run was started and cannot be shown to have finished"
-            ],
-        )
-    if not isinstance(state, dict):
-        return refuse(root, [f"the run state at {path} is not a JSON object"])
-
-    reasons = evaluate(state)
+        core = _load_core()
+    except Exception as exc:  # noqa: BLE001
+        # A run is open, so failing open here would ship unverified fixes. Any
+        # exception, not only ImportError: a core that raises RuntimeError at import
+        # would otherwise exit 1, which Claude Code treats as non blocking.
+        return refuse(root, [
+            f"cca_gate_core.py could not be loaded next to this guard ({exc}); reinstall "
+            "with `cca-audit install --target .`"
+        ])
+    try:
+        try:
+            state = core.read_state(root)
+        except ValueError as exc:
+            return refuse(
+                root, [f"{exc}; a run was started and cannot be shown to have finished"]
+            )
+        if state is None:
+            return 0
+        tree = None if core.is_legacy(state) else core.fingerprint(root)
+        reasons = core.commit_reasons(state, tree)
+    except Exception as exc:  # noqa: BLE001
+        # An uncaught exception exits 1, which Claude Code treats as non blocking, so a
+        # run that cannot be evaluated would let the commit through. Refuse instead.
+        return refuse(root, [
+            f"the CCA gate could not evaluate this run ({exc.__class__.__name__}: {exc}); "
+            "a run was started and cannot be shown to have finished"
+        ])
     if reasons:
         return refuse(root, reasons)
     return 0
