@@ -22,20 +22,21 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 | 1 | parallel auditors | `pipeline record L1 --detail "<N> auditors" --output .claude/audits/out/L1.json` |
 | 2 | consolidate | `pipeline record L2 --unique <U> --detail "<raw> raw" --output .claude/audits/out/L2.json` |
 | 2.5 | **verify findings** | `pipeline record L2.5 --confirmed <C> --fp <F> --uncertain <U> --duplicate <D> --unverified <P> --output .claude/audits/out/L2.5.json` |
-| 2.6 | scorecard *(STD/DEEP)* | the scorecard records it: `python "$CCA" --json --record` |
+| 2.6 | scorecard *(STD/DEEP)* | the scorecard records it: `python -m cca_checks scorecard --json --record` |
 | 3 | fix plan | `pipeline record L3 --to-fix <K> --deferred <D> --output .claude/audits/out/L3.json` |
 | 4 | implement | `pipeline record L4 --fixes <N> --detail "<N> fixes" --output .claude/audits/out/L4.json` |
 | 5 | re-verify | `pipeline record L5 --detail "tests green"` |
 | 5.5 | **regression diff** *(STD/DEEP)* | `pipeline record L5.5 --detail "all SAFE"` |
-| 5.6 | **red-state proof** *(STD/DEEP)* | the checker records it: `python "$TC" verify ... --record` |
+| 5.6 | **red-state proof** *(STD/DEEP)* | the checker records it: `python -m cca_checks tautology verify ... --record` |
 | 6 | **architect gate** | `pipeline record L6 --detail APPROVED\|REVISE\|BLOCKED` |
 | 7 | commit | `pipeline close`, then `pipeline deferred` to offer the deferred pass (§ Output Summary) |
 | D | deferred pass *(the `deferred` argument)* | `pipeline deferred --write .claude/audits/out/L1.json`, then `pipeline start --mode DEFERRED --from <run_id> --tier <TIER>`; then layers 1 to 7 as § Second Pass says |
 | any | pause / resume | `pipeline pause --reason "<why>"`, later `pipeline resume` |
 
-Every command above is prefixed `python -m cca_checks `, except the two tool commands, which run the
-tool scripts named in Steps 2.6 and 5.6 (`$CCA` and `$TC`). Recording is not paperwork, and since 0.11
-it is not optional at any step. `record` refuses a layer whose predecessors are missing and names the
+Every command above is prefixed `python -m cca_checks ` (the two tool rows show it in full): the
+scorecard and the red-state proof run from the installed package, never from a project copy that an
+older install may have left behind. Recording is not paperwork, and since 0.11 it is not optional at
+any step. `record` refuses a layer whose predecessors are missing and names the
 section to re-read; the commit guard refuses `git commit`, and `pipeline close` refuses to retire the
 run, until every layer the run owes reads `done`. The gate learns that code changed from the working
 tree itself, so an unrecorded L4 does not switch off L5 to L5.6, and every verdict from L5 onward is
@@ -659,8 +660,7 @@ eyeballed from a JSONL file is not a measurement, and the `n < 10` guard is exac
 that quietly stops being applied when a human (or a model) is doing the arithmetic in its head:
 
 ```bash
-CCA=.claude/tools/cca_scorecard.py; [ -f "$CCA" ] || CCA="$HOME/.claude/tools/cca_scorecard.py"
-python "$CCA" --json --record          # add --routing on to enable routing
+python -m cca_checks scorecard --json --record          # add --routing on to enable routing
 ```
 
 It reads `.claude/audits/AUDITOR_SCORECARD.jsonl` over a trailing 90-day window and returns
@@ -736,8 +736,7 @@ journal (it has no L5.5/L6 mapping loop).
 red-state proof at Step 5.6 needs it, and it becomes unrecoverable the moment the fixes land:
 
 ```bash
-TC=.claude/tools/cca_tautology_check.py; [ -f "$TC" ] || TC="$HOME/.claude/tools/cca_tautology_check.py"
-python "$TC" snapshot <every file you will edit>
+python -m cca_checks tautology snapshot <every file you will edit>
 ```
 
 Per fix: Read current file → apply via Edit → note which finding ID it resolves.
@@ -829,8 +828,7 @@ the cheapest way to turn L5 green is a test that was never red. Do not eyeball t
 against the pre-fix code:
 
 ```bash
-TC=.claude/tools/cca_tautology_check.py; [ -f "$TC" ] || TC="$HOME/.claude/tools/cca_tautology_check.py"
-python "$TC" verify \
+python -m cca_checks tautology verify \
   --proof FIX-002=tests/test_x.py::test_fee \
   --proof FIX-004=tests/test_x.py::test_injection --json --record
 ```
@@ -849,7 +847,7 @@ Deliberately **not** "AssertionError only": a genuine proof can fail pre-fix wit
 (an injection test failing with `OperationalError` *is* the defect manifesting). Only symbol-resolution
 failures mean the test never reached the code under test.
 
-No CONFIRMED P1 in this run? Record that instead: `python "$TC" verify --no-proofs --record`. The
+No CONFIRMED P1 in this run? Record that instead: `python -m cca_checks tautology verify --no-proofs --record`. The
 tool checks the claim against the disposition ledger and refuses while the run has CONFIRMED P1s
 and fixed anything (L3 planned fixes, L4 recorded some, or the tree changed), and refuses when the
 ledger is missing or short of L2.5's confirmed rows on a STANDARD or DEEP run. If every CONFIRMED P1 was
