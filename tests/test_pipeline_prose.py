@@ -227,3 +227,64 @@ def test_the_second_pass_is_a_gated_run():
     assert "--from commit:<sha>" in section
     assert "MODE=DEFERRED" in section and "STALE" in section
     assert "--no-proofs" in section
+
+
+def test_contract_has_the_deferred_run_row():
+    """The Contract is the run's checklist, so the `deferred` argument needs a row of its own,
+    between the commit row and the pause row: load the pool, then open a DEFERRED run.
+
+    Red 2026-10-11: baseline fc2de23 text (no `D` row); failed at
+    `assert "pipeline start --mode DEFERRED --from" in row`.
+    """
+    contract = PIPELINE[PIPELINE.find("## The Contract"):PIPELINE.find("## Arguments")]
+    row = next((ln for ln in contract.splitlines() if ln.startswith("| D |")), "")
+    assert "pipeline start --mode DEFERRED --from" in row
+    assert "pipeline deferred --write .claude/audits/out/L1.json" in row
+    assert 0 <= contract.find("| 7 |") < contract.find("| D |") < contract.find("| any |")
+
+
+def test_step_0_sends_the_deferred_argument_to_the_second_pass():
+    """`deferred` replaces Steps 0 to 1, so Step 0 must branch to it first; otherwise the agent
+    detects an empty diff and stops with "No changed files to audit".
+
+    Red 2026-10-11: baseline fc2de23 text (Step 0 starts at the `hunt` branch); failed at
+    `assert 0 <= deferred_at < hunt_at`. The later assertions were each seen to fail by replacing
+    their phrase in an in-memory copy of the fixed text (branch order, "go to", "replaces", the
+    preamble sentence, the Step 0.5 detection phrase).
+    """
+    step0 = PIPELINE[PIPELINE.find("## Step 0: Detect"):PIPELINE.find("## Step 0.4")]
+    deferred_at = step0.find('IF $ARGUMENTS contains "deferred"')
+    hunt_at = step0.find('contains "hunt"')
+    assert 0 <= deferred_at < hunt_at
+    branch = step0[deferred_at:hunt_at]
+    assert "go to § Second Pass" in branch and "replaces Steps 0 to 1" in branch
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    assert "Steps 0 to 1 are replaced by D.1 and D.2" in second
+    assert "detected exactly as Step 0.5 does" in second
+
+
+def test_stale_is_a_verdict_in_the_l2_5_file_paragraph():
+    """A deferred run records STALE through `--stale`; the L2.5 file paragraph must list it among
+    the verdicts, or the agent writes a file `record` refuses.
+
+    Red 2026-10-11: baseline fc2de23 text (verdict list ends at DEFERRED); failed at
+    `assert "STALE" in paragraph`.
+    """
+    section = PIPELINE[PIPELINE.find("## Step 2.5:"):PIPELINE.find("### Step 2.5b")]
+    paragraph = section[section.find("**The L2.5 file**"):].split("\n\n")[0]
+    assert paragraph.startswith("**The L2.5 file**")
+    assert "STALE" in paragraph
+
+
+def test_stale_is_a_ledger_verdict_in_the_template_and_the_deferred_run():
+    """The 2.5b ledger row lists the verdicts a row may carry; a STALE finding's row says STALE.
+
+    Red 2026-10-11: baseline fc2de23 text (template ends at UNCERTAIN, D.4 silent); failed at
+    `assert "STALE" in template`.
+    """
+    ledger = PIPELINE[PIPELINE.find("### Step 2.5b"):PIPELINE.find("## Step 2.6")]
+    template = next((ln for ln in ledger.splitlines() if '"verdict": "CONFIRMED' in ln), "")
+    assert '"verdict": "CONFIRMED' in template
+    assert "STALE" in template
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    assert '"verdict": "STALE"' in second

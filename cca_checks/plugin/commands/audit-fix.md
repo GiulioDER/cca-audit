@@ -30,6 +30,7 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 | 5.6 | **red-state proof** *(STD/DEEP)* | the checker records it: `python "$TC" verify ... --record` |
 | 6 | **architect gate** | `pipeline record L6 --detail APPROVED\|REVISE\|BLOCKED` |
 | 7 | commit | `pipeline close`, then `pipeline deferred` to offer the deferred pass (§ Output Summary) |
+| D | deferred pass *(the `deferred` argument)* | `pipeline deferred --write .claude/audits/out/L1.json`, then `pipeline start --mode DEFERRED --from <run_id> --tier <TIER>`; then layers 1 to 7 as § Second Pass says |
 | any | pause / resume | `pipeline pause --reason "<why>"`, later `pipeline resume` |
 
 Every command above is prefixed `python -m cca_checks `, except the two tool commands, which run the
@@ -89,7 +90,9 @@ Step 6 runs the architect gate again.
 - `files path1 path2 ...` = audit specific files only
 - `no-fix` = audit only (runs L1 to L2.5, plus L2.6 on STANDARD or DEEP, then closes the run and
   reports findings and verdicts; never edits or commits, do NOT implement fixes)
-- `p1-only` = only fix P1 Critical findings, skip P2/P3
+- `p1-only` = only fix P1 Critical findings. P2 findings are deferred, not skipped: Step 3 records
+  them with `--deferred`, and the deferred pass can take them. P3 findings stay `DEFERRED` from
+  L2.5.
 - `fast` = force FAST tier (3 core auditors, no gates) regardless of diff
 - `deep` = force DEEP tier (all domain auditors + adversarial verify) regardless of diff
 - `hunt path1 [path2 ...]` = **HUNT MODE** — audit the named paths IN FULL for **pre-existing** bugs,
@@ -106,7 +109,9 @@ Step 6 runs the architect gate again.
 ## Step 0: Detect Target Files
 
 ```
-IF $ARGUMENTS contains "hunt":
+IF $ARGUMENTS contains "deferred":
+  go to § Second Pass            # it replaces Steps 0 to 1: its D.1 and D.2 do their work
+ELIF $ARGUMENTS contains "hunt":
   TARGETS = paths after "hunt"   # REQUIRED; if empty, STOP: "hunt needs explicit paths"
   Run the Step 0.4 viability pre-flight. Any REJECT → STOP, and spawn NO auditors.
   FILES = source files under TARGETS, EXCLUDING tests/, examples/, docs/, generated code
@@ -280,11 +285,12 @@ ELSE:                TIER = STANDARD
 not opt-in, so "the user chose speed" is not available as a justification; a P1 reaching Step 4
 straight from raw auditor output would mean the product's central claim — *verifies every finding
 against your real code before it touches a line* — is false on the default path for small diffs.
-A single `fp-check` over the P1s costs one agent on a ≤40-line diff. P2/P3 on FAST are reported
-rather than fixed.
+A single `fp-check` over the P1s costs one agent on a ≤40-line diff. P2 and P3 on FAST are
+recorded `DEFERRED` at L2.5 (unverified, never edited) and offered to the deferred pass.
 
-Whatever the tier, the run summary must state what was NOT verified — e.g. `P2 findings reported
-unverified (FAST tier)`. A gate that was skipped and a gate that passed must never render the same.
+Whatever the tier, the run summary must state what was NOT verified, e.g. `P2 findings recorded
+DEFERRED, unverified (FAST tier)`. A gate that was skipped and a gate that passed must never render
+the same.
 
 Report: `Tier=<T> | MODE=<DIFF|HUNT> | <N> files (<LANGUAGES>) | domains STAKES=<…> NUM=<…> DAT=<…> DEP=<…> DEPLOY=<…> | size=<SIZE>L`
 
@@ -520,9 +526,10 @@ with zero counts (`python -m cca_checks pipeline record L2.5 --confirmed 0 --fp 
 findings, or an empty list). A layer with nothing to do is recorded, never skipped.
 
 **The L2.5 file** is a JSON array with one object per L2 finding,
-`{"id": "<finding id>", "verdict": "CONFIRMED|FALSE_POSITIVE|UNCERTAIN|DUPLICATE|DEFERRED"}`, plus
-any evidence keys you keep. `record` refuses a file whose tally per verdict disagrees with the
-counts, or that names an id L2 did not record.
+`{"id": "<finding id>", "verdict": "CONFIRMED|FALSE_POSITIVE|UNCERTAIN|DUPLICATE|DEFERRED|STALE"}`,
+plus any evidence keys you keep. `STALE` belongs to a deferred run (§ Second Pass) and is refused
+in any other. `record` refuses a file whose tally per verdict disagrees with the counts, or that
+names an id L2 did not record.
 
 **Non-high-stakes P1/P2** — one `fp-check` agent over the list:
 ```
@@ -613,7 +620,7 @@ append one row per verified finding (a `DEFERRED` finding gets none: it received
 
     {"ts": <iso>, "run_id": <run_id>, "auditor": <name>, "category": <slug>, "severity": <S>,
      "high_stakes": <bool>, "priority": "P1|P2|P3", "verify_source": "llm|tool",
-     "verdict": "CONFIRMED|FALSE_POSITIVE|DUPLICATE|UNCERTAIN", "fix_id": <FIX-id or null>}
+     "verdict": "CONFIRMED|FALSE_POSITIVE|DUPLICATE|UNCERTAIN|STALE", "fix_id": <FIX-id or null>}
 
 This is the raw material for the Step 2.6 scorecard. It records only the L2.5 **verdict**; the
 fixed/parked **outcome** is appended as a separate row after Step 6 (kept append-only, joined by
@@ -657,7 +664,7 @@ denominator (neither is a wrong call).
 What the orchestrator does with it:
 - **`route_up`** (emitted only with `--routing on`; default OFF): precision **< 0.50** ⇒ that cell is
   wrong more often than right, so *raise* its findings' verification — e.g. a P2 non-high-stakes finding
-  in that cell gets an `fp-check` even on FAST instead of being reported unverified.
+  in that cell gets an `fp-check` even on FAST instead of being recorded `DEFERRED`.
 - **`review`** (always): precision **< 0.40** ⇒ list under "Auditors to review" in the summary. A
   prompt-tuning signal for a human, not an automated action.
 - **`yield_flags`** (always): an auditor with ≥15 disposed findings and **zero** CONFIRMED is a possible
@@ -943,8 +950,13 @@ python -m cca_checks pipeline deferred
 ```
 
 It prints the pool of the run just closed (`pool`, `counts`), whether a second pass is `offered`,
-the `recommendation` (`RUN` or `SKIP`) and its `reasons`. When `offered` is false, report the
-first reason in one line and stop. When it is true, end with one question and nothing after it:
+the `recommendation` (`RUN` or `SKIP`) and its `reasons`, the older runs whose pool is still
+untaken (`other_pools`) and any summary files it could not read (`unreadable`). When `other_pools`
+is non-empty, the report names those older runs: each can be taken with
+`pipeline deferred --run <id>`. When `unreadable` is non-empty, the report names those summary
+files. When `offered` is false, report the first reason in one line, then those names, and stop.
+When it is true, put those names before the question, and end with one question and nothing after
+it:
 
 > N findings were deferred (P2: a, P3: b). Recommendation: RUN (or SKIP), because <reasons[0]>.
 > Run the deferred pass now?
@@ -966,6 +978,10 @@ is where its findings come from and how they are verified.
 If `no-fix` was passed, run `python -m cca_checks pipeline deferred`, report what it prints, and
 stop. Never edit or commit.
 
+Steps 0 to 1 are replaced by D.1 and D.2. FILES are the files the pool names. LANGUAGES, TEST_CMD,
+LINT_CMD and the domain flags are detected exactly as Step 0.5 does, on those FILES. Step 0.6's
+tier rule is replaced by D.1's.
+
 **D.1 Load the pool and open the run.**
 
 ```bash
@@ -973,19 +989,30 @@ python -m cca_checks pipeline deferred --write .claude/audits/out/L1.json   # --
 python -m cca_checks pipeline start --mode DEFERRED --from <run_id> --tier <TIER>
 ```
 
-`<run_id>` is the `run_id` the first command printed. `<TIER>` is DEEP when that run was DEEP, or
-when any pool finding has `high_stakes: true` or sits on a high-stakes path by Step 0.5;
-otherwise STANDARD. FAST is refused, because it verifies P1 only and every deferred finding must
-be verified. The run takes its scope (`base_commit`) from the parent. `start` refuses a parent
-that is itself a deferred run, a hunt or a `no-fix` run, whose pool is empty, or whose pool a
-completed deferred run already took. An aborted deferred run takes nothing.
+`<run_id>` is the `run_id` the first command printed. `<TIER>` is DEEP when that run was DEEP (its
+`tier` in `.claude/audits/runs/<run_id>/summary.json`), or when any pool finding has
+`high_stakes: true` or sits on a high-stakes path by Step 0.5; otherwise STANDARD. FAST is
+refused, because it verifies P1 only and every deferred finding must be verified. The run takes its
+scope (`base_commit`) from the parent. `start` refuses a parent that is itself a deferred run, a
+hunt or a `no-fix` run, whose pool is empty, or whose pool a completed deferred run already took.
+An aborted deferred run takes nothing.
 
-**No summary to read** (the first command exits 2 because the checkout that ran the audit is
-gone, or the run predates 0.11): find the last commit whose subject contains "audit fixes from
-CCA" (`git log -5 --format='%H %s'`), parse its `Deferred:` section (`P3:` before 0.11) into
-`.claude/audits/out/L1.json` as Findings Schema objects carrying `"source": "commit-message"` and
-a `priority` (P3 unless the line says P2), and start with `--from commit:<sha>`. The scope check
-of D.4 cannot run then; say so in the report and in the commit message.
+**When the first command refuses (exit 2),** read its `reason`:
+
+- It says no summary exists (the checkout that ran the audit is gone, or the run predates 0.11):
+  take the commit-message fallback below. Only this refusal takes it.
+- It says the newest run's pool is empty, consumed (already taken) or not offered: run
+  `python -m cca_checks pipeline deferred` (no `--write`). If it lists `other_pools`, take one of
+  those runs with `--run <id>`. Otherwise report the reason and stop.
+- Any other refusal: report its reason and stop.
+
+**Commit-message fallback.** Find the last commit whose subject contains "audit fixes from CCA"
+(`git log -5 --format='%H %s'`) and parse its `Deferred:` section (`P3:` before 0.11) into
+`.claude/audits/out/L1.json` as Findings Schema objects. Each item carries
+`"source": "commit-message"`, a unique id `DEF-<n>`, `auditor` and `category` set to `"unknown"`
+when the line does not give them, and a `priority` (P3 unless the line says P2). Start with
+`--from commit:<sha>`. The scope check of D.4 cannot run then; say so in the report and in the
+commit message (the `Source:` line of D.8).
 
 **D.2 Step 1 (L1).** No auditors. Record the file D.1 wrote:
 
@@ -1018,8 +1045,8 @@ Verdict per finding: CONFIRMED | FALSE_POSITIVE | STALE | UNCERTAIN.
 
 Append one ledger row per finding (Step 2.5b), carrying this run's `run_id` and the ORIGINAL
 finding's `auditor` and `category`, so a deferred finding confirmed now credits the auditor that
-raised it. Record with `--stale <S>` and no `--deferred`: a deferred run cannot defer, and
-`record` refuses it.
+raised it. A STALE finding's row carries `"verdict": "STALE"`, never FALSE_POSITIVE. Record with
+`--stale <S>` and no `--deferred`: a deferred run cannot defer, and `record` refuses it.
 
 **D.5 Steps 2.6 to 5.5** run as written above. At Step 3 every CONFIRMED finding is planned;
 UNCERTAIN goes to a human.
@@ -1039,9 +1066,12 @@ fix(<scope>): N deferred fixes from CCA (<TIER> tier, parent <run_id>)
 
 Audit: deferred pass over <P> findings of run <run_id> → V confirmed → Z fixed. Regression diff:
 clean. Architect: APPROVED.
+Source: commit message <sha> (scope check not run)
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 ```
+
+The `Source:` line is used only on the commit-message fallback path of D.1; leave it out otherwise.
 
 `pipeline close` records the parent, which takes its pool: it is never offered again. A deferred
 run offers no further pass.
