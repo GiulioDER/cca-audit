@@ -315,6 +315,10 @@ def main(argv=None) -> int:
                        help="which claim types can be settled about a file, here")
     k.add_argument("--file", required=True)
 
+    bg = sub.add_parser("bugs", add_help=False,
+                        help="cross-project ledger of the bugs CCA fixed (see: bugs backfill -h)")
+    bg.add_argument("bugs_args", nargs=argparse.REMAINDER)
+
     # The pipeline's own bookkeeping. Not a checker and never a Verdict: it
     # records which LAYERS of /audit-fix were reached, so the commit gate in
     # cca_checks/plugin/hooks/cca_pipeline_guard.py can refuse a commit from a
@@ -387,6 +391,10 @@ def main(argv=None) -> int:
     pl_close.add_argument("--root", default=".")
 
     a = p.parse_args(argv)
+    if a.cmd == "bugs":
+        from .bugs.__main__ import main as bugs_main
+
+        return bugs_main(a.bugs_args)
     if a.cmd == "pipeline":
         return _pipeline(a)
     if a.cmd == "capabilities":
