@@ -24,6 +24,15 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline status --require-complete` for Codex, which has no hooks.
 - `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
 
+- `pipeline record` and `pipeline status` fingerprint the working tree once per call. Each fingerprint is a `git add -A` over a copy of the index; `record` ran two and `status` ran three. `pipeline_state.required_layers`, `outstanding`, `verify_commit_allowed` and `record` accept a precomputed `tree=` from the new `current_tree()`.
+- The `pipeline` subcommand moved from `cca_checks/__main__.py` to `cca_checks/pipeline_cli.py`. The command line is unchanged.
+
+### Removed
+- `Claim.predicted_impact`, which nothing read or wrote.
+- `pyright_check.verdict_for_definedness`; call `verdict_for_claim(claim, diags, DEFINEDNESS_RULES)`.
+- `semgrep_check.SINKS_RULES` and `TAINT_RULES`; the CI packaging job checks every backend's `semgrep_catalog`, and the comment claiming it read these was stale.
+- `cca_pipeline_guard.evaluate`, which only a test called.
+
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.
 

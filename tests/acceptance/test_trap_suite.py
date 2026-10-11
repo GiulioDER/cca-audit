@@ -5,11 +5,11 @@ import pytest
 
 from cca_checks.claim import Claim
 from cca_checks.pyright_check import (
+    DEFINEDNESS_RULES,
     NULLABILITY_RULES,
     TYPE_RULES,
     run_pyright,
     verdict_for_claim,
-    verdict_for_definedness,
 )
 from cca_checks.repro_runner import run_repro
 
@@ -19,7 +19,7 @@ pyright_missing = shutil.which("pyright") is None
 def test_defined_symbol_is_dropped_by_pyright():
     path = "examples/bps-sizing/definedness_trap/service.py"
     claim = Claim("ENV-1", path, 1, "definedness", "RISK_CAP_USD undefined")
-    v = verdict_for_definedness(claim, run_pyright(path))
+    v = verdict_for_claim(claim, run_pyright(path), DEFINEDNESS_RULES)
     assert v.verdict == "FALSE_POSITIVE" and "pyright" in v.source
 
 def test_guarded_div_by_zero_is_escalated_not_refuted():

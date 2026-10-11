@@ -154,7 +154,7 @@ def test_guard_agrees_with_pipeline_state_across_a_matrix(tmp_path, tier, no_fix
         "fixes_applied": fixes,
         "layers": {k: {"status": "done", "detail": v} for k, v in layers.items()},
     }
-    from_guard = guard.evaluate(state)
+    from_guard = guard._load_core().commit_reasons(state, None)
     from_module = ps.verify_commit_allowed(ps.PipelineState.from_json(state)).reasons
     assert from_guard == from_module
 
