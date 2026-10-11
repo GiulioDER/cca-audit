@@ -84,3 +84,25 @@ Eighteen answerable questions are added (40 answerable, 27 unanswerable), chosen
 before and before any new score. Predictions: certifies; separability between 0.93 and 0.98 with
 the interval's lower bound at least 0.90; threshold between 0.33 and 0.46, the band attempts 1
 and 2 suggest rather than the existing tenants'.
+
+## Result, attempt 3 (2026-10-11)
+**Status:** measured. All three attempt-3 predictions held.
+
+| Predicted | Measured |
+|---|---|
+| certifies | **certified** (`cal_632f4eb4a9c343a6a532cf0ebc8710ff`), generation promoted |
+| separability 0.93 to 0.98, lower bound at least 0.90 | **0.973**, interval [0.936, 1.000], 40/27 samples |
+| threshold 0.33 to 0.46 | **0.412** |
+
+Against the original prediction (threshold 0.45 to 0.70, from the existing tenants), the threshold
+was wrong in direction: this corpus sits lower than every existing tenant (0.509 to 0.662).
+
+Smoke checks on the served generation, after promotion: a question about a bug whose fix never
+landed abstained ("probable corpus gap", top cosine 0.382); a question about the one proved bug,
+worded unlike its memo, returned that memo first at confidence 0.97.
+
+**What the apparatus taught.** It took three attempts because the query set was sized by my plan
+rather than by RE-call's certification rule (at least 20 per class, and an interval that must clear
+0.9). Every addition was chosen and phrased before its scores were seen, and each attempt's
+prediction was committed before it ran, but the stopping rule ("label until it certifies") is still
+a choice made while watching the outcome, and should be read as such.
