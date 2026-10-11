@@ -170,3 +170,16 @@ def test_record_writes_l2_6_as_a_tool_layer(git_repo, monkeypatch, capsys):
     assert state is not None
     entry = state.layers["L2.6"]
     assert entry["source"] == "tool" and entry["status"] == "done"
+
+
+def test_stale_rows_never_count_toward_a_yield_flag(tmp_path):
+    """A STALE row says the code moved on after a run deferred the finding, not that the
+    auditor was wrong, so it must not count as disposed.
+
+    Red 2026-10-11: baseline (every verdict row increments `disposed`) in cca_scorecard.build;
+    failed at `assert rep.yield_flags == []` (got ["bug-auditor"]).
+    """
+    led = write(tmp_path, [row("STALE") for _ in range(15)])
+    rep = sc.build(led, now=NOW)
+    assert rep.yield_flags == []
+    assert rep.cells == []

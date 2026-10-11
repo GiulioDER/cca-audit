@@ -156,7 +156,10 @@ def build(ledger: Path = DEFAULT_LEDGER, now: datetime | None = None,
             continue
         rep.rows_scored += 1
         verdict = row["verdict"]
-        per_auditor[row["auditor"]]["disposed"] += 1
+        if verdict != "STALE":
+            # STALE: the code moved on after a run deferred the finding; that says nothing
+            # about whether the auditor was right, so it is not a disposition.
+            per_auditor[row["auditor"]]["disposed"] += 1
         if verdict == "CONFIRMED":
             per_auditor[row["auditor"]]["confirmed"] += 1
         if verdict in _SCORED:
