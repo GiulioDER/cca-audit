@@ -251,9 +251,12 @@ def test_step_0_sends_the_deferred_argument_to_the_second_pass():
     `assert 0 <= deferred_at < hunt_at`. The later assertions were each seen to fail by replacing
     their phrase in an in-memory copy of the fixed text (branch order, "go to", "replaces", the
     preamble sentence, the Step 0.5 detection phrase).
+
+    Anchor changed 2026-10-11 (Task 10): the branch now reads `IF "deferred" is one of the words in
+    $ARGUMENTS`, so `deferred_at` is found by that phrase. The ordering check is unchanged.
     """
     step0 = PIPELINE[PIPELINE.find("## Step 0: Detect"):PIPELINE.find("## Step 0.4")]
-    deferred_at = step0.find('IF $ARGUMENTS contains "deferred"')
+    deferred_at = step0.find('IF "deferred" is one of the words')
     hunt_at = step0.find('contains "hunt"')
     assert 0 <= deferred_at < hunt_at
     branch = step0[deferred_at:hunt_at]
@@ -288,3 +291,44 @@ def test_stale_is_a_ledger_verdict_in_the_template_and_the_deferred_run():
     assert "STALE" in template
     second = PIPELINE[PIPELINE.find("## Second Pass"):]
     assert '"verdict": "STALE"' in second
+
+
+FP_CHECK = (ROOT / "cca_checks/plugin/agents/cca-fp-check.md").read_text(encoding="utf-8")
+
+
+def test_codex_offers_the_deferred_pass_after_close():
+    """The Codex skill has no hooks, so it must be told to offer the deferred pass itself, and to
+    wait for a yes.
+
+    Red 2026-10-11: baseline ec5e2f9 text (no such section, so `section` is empty); failed at
+    `assert section.startswith("## Offer the deferred pass")`.
+    """
+    section = CODEX[CODEX.find("## Offer the deferred pass"):CODEX.find("## Report completion")]
+    assert section.startswith("## Offer the deferred pass")
+    assert "pipeline deferred" in section and "Never start it without that yes" in section
+
+
+def test_fp_check_knows_mode_deferred():
+    """fp-check is dispatched with MODE=DEFERRED by § Second Pass D.4, so its own prompt must
+    define that mode and the STALE verdict, and must no longer say P3 findings are never verified.
+
+    Red 2026-10-11: baseline ec5e2f9 text (modes are DIFF and HUNT only); failed at
+    `assert "MODE=DEFERRED" in FP_CHECK and "STALE" in FP_CHECK`.
+    """
+    assert "MODE=DEFERRED" in FP_CHECK and "STALE" in FP_CHECK
+    assert "P3 findings are not verified — they are\ndeferred regardless." not in FP_CHECK
+
+
+def test_step_0_matches_deferred_only_as_a_whole_argument():
+    """`/audit-fix files cca_checks/deferred.py` names a path, not the pass. A substring test on
+    $ARGUMENTS would send it to the deferred pass, so Step 0 must match the word as a whole
+    argument.
+
+    Red 2026-10-11: baseline ec5e2f9 text (`IF $ARGUMENTS contains "deferred":`); failed at
+    `assert '$ARGUMENTS contains "deferred"' not in step0`. The two later assertions were each seen
+    to fail by removing their phrase from an in-memory copy of the fixed text.
+    """
+    step0 = PIPELINE[PIPELINE.find("## Step 0: Detect"):PIPELINE.find("## Step 0.4")]
+    assert '$ARGUMENTS contains "deferred"' not in step0
+    assert 'IF "deferred" is one of the words in $ARGUMENTS' in step0
+    assert "a whole argument, never part of a path" in step0

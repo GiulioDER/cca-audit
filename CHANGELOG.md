@@ -18,11 +18,19 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - A second `pipeline start` is refused (exit 2, `{"refused": "start"}`) while a run is open, instead of replacing it. Replacing re-baselined the tree over the run's edits, dropped L0.4, and left no trail. Retire a run with `pipeline close` or `pipeline abort --reason`.
 - `pipeline record` of L1, L2, L2.5, L3 and L4 requires `--output <file>` on a schema 2 run: a JSON file under `.claude/audits/` (a file elsewhere would change the tree fingerprint, so it is refused) holding that layer's work, copied to `.claude/audits/runs/<run_id>/<layer>.json` and named in the layer entry. Any other layer given `--output` is refused rather than ignored.
 - The red-state proof (`cca_tautology_check.py verify`) runs pytest with `PYTHONDONTWRITEBYTECODE=1`. It used to leave `.pyc` files compiled from the pre-fix source, which changed the tree fingerprint after verify and left L5 stale in repositories that do not ignore `__pycache__`.
+- L2.5 counts findings passed on unverified (P3, and P2 on FAST) with `--deferred`, and its file must give every L2 finding exactly one verdict, `DEFERRED` included. They used to be filed under a verdict they never received. A `DEFERRED` finding gets no ledger row.
+- L3 must plan or defer every confirmed finding (`--to-fix` plus `--deferred` equals L2.5's confirmed); `--deferred` replaces the free text `--detail "<D> deferred"`.
+- `record` checks the L2, L2.5 and L3 files against their counts and against each other, and refuses a file that disagrees.
+- `pipeline start --base <rev>` stores the commit the audited diff is taken against (default `HEAD`); `--mode` is validated.
+- The scorecard no longer counts `STALE` rows as disposed.
 
 ### Added
 - `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
 - `pipeline status --require-complete` for Codex, which has no hooks.
 - `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
+- `pipeline close` writes `.claude/audits/runs/<run_id>/summary.json`: tier, mode, base and final commit, and the deferred pool.
+- `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input.
+- `pipeline start --mode DEFERRED --from <run_id>` (or `--from commit:<sha>`): a deferred pass that owes every layer, refuses FAST, and cannot defer again. `/audit-fix` offers it after a run closes.
 
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.

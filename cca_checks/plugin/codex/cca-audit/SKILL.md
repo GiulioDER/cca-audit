@@ -139,6 +139,15 @@ is the instruction to close the run, every layer is done: run `python -m cca_che
 then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
 same check without relying on the orchestrator to call it.
 
+## Offer the deferred pass
+
+After `pipeline close` succeeds, run `python -m cca_checks pipeline deferred`. When it prints
+`"offered": true`, end the report with one question: how many findings were deferred, by
+priority; the `recommendation` (RUN or SKIP) and its first reason; and whether to run the
+deferred pass now. On yes, run `audit+fix deferred` as the canonical § Second Pass describes,
+in this task. Never start it without that yes. When it prints `"offered": false`, report the
+reason in one line.
+
 ## Report completion
 
 Return the canonical summary with tier, scope, domains, deterministic coverage and blindness,

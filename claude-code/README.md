@@ -61,7 +61,7 @@ risk — you only pass a tier to override it.
 /audit-fix commit 3           # Audit the last 3 commits
 /audit-fix files src/app.py   # Audit specific files
 /audit-fix hunt src/          # HUNT MODE: audit code you did NOT write for pre-existing bugs
-/audit-fix deferred           # Second pass for deferred P3 items
+/audit-fix deferred           # Gated second pass over what the last run deferred
 ```
 
 **Tiers:**

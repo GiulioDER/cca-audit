@@ -35,8 +35,9 @@ errors: []
 ## Input
 
 A consolidated list of P1/P2 findings (ID, description, file:line, claimed impact) plus the
-diff command used by the audit (e.g. `git diff HEAD`). P3 findings are not verified — they are
-deferred regardless.
+diff command used by the audit (e.g. `git diff HEAD`). In MODE=DIFF and MODE=HUNT you are never
+sent P3 findings: the run records them `DEFERRED`. In MODE=DEFERRED you receive the deferred
+findings themselves, P2 and P3 alike, and verify every one.
 
 ## Verdict per Finding
 
@@ -57,6 +58,12 @@ For each finding, check against the ACTUAL code with Read/Grep:
      in the same place** — a keyword collision is not a duplicate. If the search errors, is
      unauthenticated, is rate-limited, or you cannot reach the tracker, that is **not** a duplicate:
      say so and keep the finding.
+   - **MODE=DEFERRED** (a deferred pass over findings an earlier run deferred): is the cited
+     code inside `git diff <base_commit>`, the code that run audited or fixed? Outside it is
+     FALSE_POSITIVE, reason "out of scope". When no `base_commit` is given, say this check
+     could not run. A fifth verdict exists in this mode only: **STALE**, when the issue is
+     present at that run's commit (`git show <commit>:<file>`) and absent now because later
+     work moved, rewrote or fixed it. FALSE_POSITIVE means it was never there.
 3. **Impact** — Is the stated impact real, or already mitigated elsewhere (config in another
    module, guard upstream, value validated before this point)?
 

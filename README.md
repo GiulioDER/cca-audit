@@ -389,7 +389,7 @@ In Claude Code, use the command form:
 
 ```
 /audit-fix                 # audit + fix uncommitted changes (tier auto-selected)
-/audit-fix deferred        # second pass: fix P3 items deferred by the previous round
+/audit-fix deferred        # the deferred pass: a gated run over what the last run deferred
 /audit-fix no-fix          # audit + verify only
 /audit-fix p1-only         # fix only P1 Critical findings
 /audit-fix fast | deep     # override the auto-selected tier
@@ -410,10 +410,14 @@ You normally do not pick a tier — the pipeline does.
 |----------|----------|--------|
 | **P1 Critical** | Security, data corruption, auth bypass, injection, unsafe money/irreversible handling | Fix before deploy, with a red→green test |
 | **P2 High** | DRY divergence, stale misleading comments, config inconsistencies, unit mismatches | Fix now |
-| **P3** | Cosmetic, style, naming, unused params | Deferred to round 2 |
+| **P3** | Cosmetic, style, naming, unused params | Deferred; offered as a gated second pass |
 
-Round 2 (`/audit-fix deferred`) reads the deferred list from the previous commit, re-checks each item
-is still relevant, fixes what remains and marks the rest stale — so no audit leaves a tail.
+When a fixing run closes, `pipeline deferred` lists what it deferred (its P3 findings, and the P2
+findings it left unfixed under `p1-only` or on FAST) with a RUN or SKIP recommendation, and the
+run asks whether to start the deferred pass. `/audit-fix deferred` is a full gated run over that
+pool: `fp-check` verifies every finding before it is edited, findings whose code has moved on
+are marked STALE, and the run owes the regression diff and the architect gate like any other. It
+cannot defer again, so no audit leaves a tail.
 
 ## Engineering
 

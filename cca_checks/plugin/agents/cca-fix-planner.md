@@ -112,7 +112,7 @@ From each audit file, extract:
 - DRY violations creating divergence risk
 - Config inconsistencies
 
-**P3 — Nice-to-have** (Defer or skip)
+**P3 — Nice-to-have** (Deferred: recorded DEFERRED at L2.5, offered to the deferred pass after the run closes)
 - Code quality cosmetics
 - Documentation gaps on simple functions
 - Low severity findings
@@ -170,7 +170,7 @@ From each audit file, extract:
 ---
 
 ## P3 — Deferred
-...
+List each with its id, file:line and claim; these become the pool of `/audit-fix deferred`.
 
 ---
 

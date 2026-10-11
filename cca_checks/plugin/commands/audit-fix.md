@@ -109,7 +109,7 @@ Step 6 runs the architect gate again.
 ## Step 0: Detect Target Files
 
 ```
-IF $ARGUMENTS contains "deferred":
+IF "deferred" is one of the words in $ARGUMENTS (a whole argument, never part of a path):
   go to § Second Pass            # it replaces Steps 0 to 1: its D.1 and D.2 do their work
 ELIF $ARGUMENTS contains "hunt":
   TARGETS = paths after "hunt"   # REQUIRED; if empty, STOP: "hunt needs explicit paths"
@@ -688,8 +688,9 @@ Print the checker's `Scorecard: …` summary line in the run output.
 
 (Reachable only when `no-fix` is absent.) From CONFIRMED findings only: always fix P1; fix P2 unless
 `p1-only`, in which case defer it. Every CONFIRMED finding is either planned or deferred: `record`
-refuses an L3 whose `--to-fix` and `--deferred` do not add up to L2.5's `--confirmed`. (P3 findings
-never reach this step as CONFIRMED: L2.5 recorded them `DEFERRED`.)
+refuses an L3 whose `--to-fix` and `--deferred` do not add up to L2.5's `--confirmed`. (In a normal
+run, P3 findings never reach this step as CONFIRMED: L2.5 recorded them `DEFERRED`. In a deferred
+run, D.5 plans every CONFIRMED finding.)
 
 **→ Record.** The file is `{"to_fix": [<ids>], "deferred": [<ids>]}`, every id CONFIRMED at L2.5.
 
@@ -952,11 +953,12 @@ python -m cca_checks pipeline deferred
 It prints the pool of the run just closed (`pool`, `counts`), whether a second pass is `offered`,
 the `recommendation` (`RUN` or `SKIP`) and its `reasons`, the older runs whose pool is still
 untaken (`other_pools`) and any summary files it could not read (`unreadable`). When `other_pools`
-is non-empty, the report names those older runs: each can be taken with
-`pipeline deferred --run <id>`. When `unreadable` is non-empty, the report names those summary
-files. When `offered` is false, report the first reason in one line, then those names, and stop.
-When it is true, put those names before the question, and end with one question and nothing after
-it:
+is non-empty, the report names those older runs: the user can take one with `/audit-fix deferred`,
+which then runs D.1 with that run's id on both the `pipeline deferred --write` command (`--run <id>`)
+and the `pipeline start` command (`--from <id>`). When `unreadable` is non-empty, the report names
+those summary files. When `offered` is false, report the first reason in one line, then those
+names, and stop. When it is true, put those names before the question, and end with one question
+and nothing after it:
 
 > N findings were deferred (P2: a, P3: b). Recommendation: RUN (or SKIP), because <reasons[0]>.
 > Run the deferred pass now?
@@ -1002,8 +1004,9 @@ An aborted deferred run takes nothing.
 - It says no summary exists (the checkout that ran the audit is gone, or the run predates 0.11):
   take the commit-message fallback below. Only this refusal takes it.
 - It says the newest run's pool is empty, consumed (already taken) or not offered: run
-  `python -m cca_checks pipeline deferred` (no `--write`). If it lists `other_pools`, take one of
-  those runs with `--run <id>`. Otherwise report the reason and stop.
+  `python -m cca_checks pipeline deferred` (no `--write`). If it lists `other_pools`, ask the user
+  which of those runs to take, then repeat D.1 with `--run <id>` on the first command. Otherwise
+  report the reason and stop.
 - Any other refusal: report its reason and stop.
 
 **Commit-message fallback.** Find the last commit whose subject contains "audit fixes from CCA"
@@ -1042,6 +1045,10 @@ STALE: the issue is present at the first run's commit (`git show <commit>:<file>
 now, because later work moved, rewrote or fixed it. FALSE_POSITIVE means it was never there.
 Verdict per finding: CONFIRMED | FALSE_POSITIVE | STALE | UNCERTAIN.
 ```
+
+On the commit-message fallback there is no `summary.json`. The parent's commit for the STALE check
+is the `<sha>` named in `--from commit:<sha>`, and the scope check (b″) is not run: give `fp-check`
+no `base_commit`, so it reports that the check could not run.
 
 Append one ledger row per finding (Step 2.5b), carrying this run's `run_id` and the ORIGINAL
 finding's `auditor` and `category`, so a deferred finding confirmed now credits the auditor that
