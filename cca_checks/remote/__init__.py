@@ -24,7 +24,9 @@ from ..toolpath import PROBE_TIMEOUT_S, resolve_tool
 from .runner import MAX_BYTES, PROTOCOL, TARGET_EXTS
 
 ENV = "CCA_REMOTE_SEMGREP"
-_DEST = re.compile(r"[A-Za-z0-9._-]+(@[A-Za-z0-9._-]+)?")
+# Neither part may start with "-": "-F<file>" would make ssh read a config from the cwd,
+# which in hunt mode is the audited repository.
+_DEST = re.compile(r"[A-Za-z0-9_.][A-Za-z0-9._-]*(@[A-Za-z0-9_.][A-Za-z0-9._-]*)?")
 _MARGIN_S = 30
 
 
@@ -53,7 +55,7 @@ def _ssh_argv(dest: str) -> list[str] | None:
     ssh = resolve_tool("ssh")
     if ssh is None:
         return None
-    return [ssh, "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", dest]
+    return [ssh, "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", dest]
 
 
 def _call(dest: str, payload: bytes, timeout: float) -> tuple[dict | None, str | None]:

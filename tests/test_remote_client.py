@@ -44,7 +44,7 @@ def test_ssh_never_prompts(monkeypatch):
     monkeypatch.setattr(remote, "resolve_tool", lambda name: "/usr/bin/ssh")
     argv = remote._ssh_argv("cca-analyzer")
     assert argv == ["/usr/bin/ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-                    "cca-analyzer"]
+                    "--", "cca-analyzer"]
 
 
 def test_a_round_trip_returns_semgrep_json(via_local_runner):
@@ -114,3 +114,21 @@ def test_the_suite_runs_without_a_remote_by_default():
     """Review Focus 5. Red proof: remove the autouse fixture from conftest.py -> fails when the developer exported CCA_REMOTE_SEMGREP."""
     import os
     assert os.environ.get(remote.ENV) is None or os.environ.get("CCA_TESTS_USE_REMOTE") == "1"
+
+
+@pytest.mark.parametrize("value", ["-Fx", "-v", "-Jevil.example", "_x@-host"])
+def test_a_leading_dash_is_never_a_destination(monkeypatch, value):
+    """Review M2 (re-graded). Red proof: _DEST starts [A-Za-z0-9._-] again -> '-Fx' is accepted.
+
+    `-F<file>` would make ssh read a config file relative to the cwd, which in hunt mode is
+    the audited repository.
+    """
+    monkeypatch.setenv(remote.ENV, value)
+    assert remote.destination()[0] is None
+
+
+def test_the_destination_follows_an_end_of_options_marker(monkeypatch):
+    """Review M2. Red proof: drop "--" from _ssh_argv -> the destination is not after it."""
+    monkeypatch.setattr(remote, "resolve_tool", lambda name: "/usr/bin/ssh")
+    argv = remote._ssh_argv("cca-analyzer")
+    assert argv[-2:] == ["--", "cca-analyzer"]

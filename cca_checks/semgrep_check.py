@@ -97,7 +97,13 @@ def run_semgrep(config: str, path: str) -> list[dict] | None:
     REMOTE. When semgrep cannot run on this machine and CCA_REMOTE_SEMGREP names a host,
     the scan runs there instead (cca_checks.remote). Local first: with local semgrep
     runnable, nothing leaves the machine. The remote JSON goes through the same
-    validation as a local run.
+    validation as a local run, and must be a scan of the one file sent.
+
+    TRUST. A remote scan puts that host in the trust base for refutations: the audited
+    repo still cannot influence the scan, but a compromised host, or anyone holding its
+    host key, could return a clean result for a file with a real sink. The verdict's
+    evidence names the host, and docs/remote-semgrep.md tells the operator to verify the
+    host key out of band.
     """
     global _last_remote
     _last_remote = None
@@ -162,6 +168,11 @@ def _run_remote(config: str, path: str, dest: str) -> list[dict] | None:
     if results is None:
         _last_remote = {"dest": dest, "version": None,
                         "error": "semgrep reported errors or scanned nothing"}
+        return None
+    sent = f"target.{ext}"
+    if data["paths"]["scanned"] != [sent]:
+        _last_remote = {"dest": dest, "version": None,
+                        "error": f"the answer is not a scan of {sent} alone"}
         return None
     _last_remote = {"dest": dest, "version": str(data.get("version") or "unknown"),
                     "error": None}

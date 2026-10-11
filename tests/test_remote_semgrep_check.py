@@ -73,3 +73,16 @@ def test_a_remote_failure_is_uncertain_with_its_reason(monkeypatch, tmp_path):
     v = sc.verdict_for_taint(_claim(tmp_path))
     assert v.verdict == "UNCERTAIN" and v.source == "llm"
     assert "cca-analyzer" in v.evidence and "host key verification failed" in v.evidence
+
+
+def test_a_remote_result_must_have_scanned_the_file_sent(monkeypatch, tmp_path):
+    """Review I5. Red proof: _run_remote skips the scanned-path check -> the foreign result is accepted.
+
+    A refutation rests on the remote's silence, so the answer must at least be about the
+    one file sent, under its fixed name.
+    """
+    target = tmp_path / "a.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    _remote_only(monkeypatch, ({**PAYLOAD, "paths": {"scanned": ["other.py"]}}, None))
+    assert sc.run_semgrep(sc.rules_path("python_sinks.yaml"), str(target)) is None
+    assert "target.py" in sc._last_remote["error"]
