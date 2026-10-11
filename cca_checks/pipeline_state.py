@@ -324,44 +324,92 @@ def _read_output(layer: str, output, root) -> bytes:
     return data
 
 
-def _stored_json(state: PipelineState, layer: str, root):
-    """The work file `layer` stored in this run, parsed; None when absent or unreadable."""
+def _stored_json(state: PipelineState, layer: str, root) -> object | None:
+    """The work file `layer` stored in this run, parsed; None when absent or unreadable.
+
+    Parsed from bytes, as `_read_output` parsed it: `json.loads` on bytes accepts a UTF-8 BOM
+    (Windows PowerShell 5.1 writes one) and on text it does not, so reading the stored copy
+    as text would refuse a file `record` had accepted.
+    """
     entry = state.layers.get(layer)
     rel = entry.get("output") if isinstance(entry, dict) else None
     if not rel:
         return None
     try:
-        return json.loads((pathlib.Path(root) / rel).read_text(encoding="utf-8"))
+        return json.loads((pathlib.Path(root) / rel).read_bytes())
     except (OSError, ValueError):
         return None
 
 
+def _stored_l2(state: PipelineState, root) -> list:
+    """L2's stored findings, held to the shape L2 is now recorded in.
+
+    A run recorded by an earlier version stored whatever it was given, and a later layer
+    reads these ids and priorities back, so the refusal names the stored file.
+    """
+    l2 = _stored_json(state, "L2", root)
+    if not isinstance(l2, list):
+        raise layer_outputs.ShapeError("L2's stored file is missing or unreadable; record L2 again")
+    try:
+        return layer_outputs.l2_findings(l2, len(l2))
+    except layer_outputs.ShapeError as exc:
+        raise layer_outputs.ShapeError(
+            f"L2's stored file does not have the finding shape ({exc}); record L2 again"
+        ) from exc
+
+
+def _stored_l25(state: PipelineState, root, l2_ids: list) -> dict[str, str]:
+    """L2.5's stored verdicts (id to verdict), held to the shape and counts it was recorded with."""
+    l25 = _stored_json(state, "L2.5", root)
+    if not isinstance(l25, list):
+        raise layer_outputs.ShapeError(
+            "L2.5's stored file is missing or unreadable; record L2.5 again"
+        )
+    entry = state.layers.get("L2.5")
+    recorded = entry.get("counts") if isinstance(entry, dict) else None
+    try:
+        return layer_outputs.l25_verdicts(l25, recorded or {}, l2_ids)
+    except layer_outputs.ShapeError as exc:
+        raise layer_outputs.ShapeError(
+            f"L2.5's stored file does not have the verdict shape ({exc}); record L2.5 again"
+        ) from exc
+
+
 def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, root) -> None:
-    """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files."""
+    """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files.
+
+    Also the one place a deferral is held to its priority: a P1 is never passed on
+    unverified (L2.5) or left unfixed (L3), and a P2 may only be DEFERRED on FAST, the tier
+    that does not verify its P2s.
+    """
     value = json.loads(data)
     try:
         if layer == "L2":
             layer_outputs.l2_findings(value, counts["unique"])
         elif layer == "L2.5":
-            l2 = _stored_json(state, "L2", root)
-            if not isinstance(l2, list):
+            l2 = _stored_l2(state, root)
+            verdicts = layer_outputs.l25_verdicts(value, counts, [r["id"] for r in l2])
+            priority = {r["id"]: r["priority"] for r in l2}
+            allowed = ("P2", "P3") if state.tier == "FAST" else ("P3",)
+            barred = [
+                f"{i} ({priority[i]})" for i, v in verdicts.items()
+                if v == "DEFERRED" and priority[i] not in allowed
+            ]
+            if barred:
                 raise layer_outputs.ShapeError(
-                    "L2's stored file is missing or unreadable; record L2 again"
+                    f"L2.5 defers {', '.join(barred)}; only P3 findings (P2 too on FAST) may "
+                    "be passed on unverified"
                 )
-            ids = [r.get("id") for r in l2 if isinstance(r, dict)]
-            layer_outputs.l25_verdicts(value, counts, ids)
         elif layer == "L3":
-            l25 = _stored_json(state, "L2.5", root)
-            if not isinstance(l25, list):
+            l2 = _stored_l2(state, root)
+            l25 = _stored_l25(state, root, [r["id"] for r in l2])
+            plan = layer_outputs.l3_plan(value, counts["to_fix"], counts.get("deferred", 0), l25)
+            priority = {r["id"]: r["priority"] for r in l2}
+            barred = [i for i in plan["deferred"] if priority[i] == "P1"]
+            if barred:
                 raise layer_outputs.ShapeError(
-                    "L2.5's stored file is missing or unreadable; record L2.5 again"
+                    f"L3 defers {', '.join(barred)} (P1); a confirmed P1 is always fixed"
                 )
-            verdicts = {
-                r["id"]: r["verdict"] for r in l25
-                if isinstance(r, dict) and isinstance(r.get("id"), str)
-                and isinstance(r.get("verdict"), str)
-            }
-            layer_outputs.l3_plan(value, counts["to_fix"], counts.get("deferred", 0), verdicts)
     except layer_outputs.ShapeError as exc:
         raise RecordRefused(str(exc)) from exc
 
@@ -396,7 +444,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
 
     Raises RecordRefused when the run is paused, the layer is out of order, is a tool
     layer recorded by hand, carries counts that do not agree with the run, or (schema 2)
-    is one of OUTPUT_LAYERS without a readable JSON `output` file. A layer outside
+    is one of OUTPUT_LAYERS without a readable JSON `output` file, or is an L2, L2.5 or L3 file
+    that disagrees with its counts or with the earlier files (see `_check_shape`). A layer outside
     OUTPUT_LAYERS given an `output` is refused too, so the prose cannot drift from the
     code by passing a flag that would be silently ignored.
     """

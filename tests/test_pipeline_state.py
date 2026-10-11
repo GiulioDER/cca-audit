@@ -673,12 +673,33 @@ def test_a_deferred_finding_gets_no_ledger_row(git_repo):
     Red 2026-10-11: mutation `if rows != judged:` became `if rows != total:` in _check_counts;
     failed at the L2.5 record (uncaught RecordRefused from the ledger check: 1 row against
     the 3 findings of `total`).
+    Red 2026-10-11 (closing assertion): mutation `entry["counts"] = counts` became
+    `entry["counts"] = {k: v for k, v in counts.items() if k != "deferred"}` in record; failed
+    at the closing `assert ... == {..., "deferred": 2}` (the stored counts lack "deferred").
     """
-    _to_l2(git_repo, "STANDARD", 3)
+    _to_l2(git_repo, "STANDARD", 3, priorities={"F-2": "P3", "F-3": "P3"})
     append_ledger(git_repo, "r1", 1)
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                               "deferred": 2},
               output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"] == {
+        "confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0, "deferred": 2,
+    }
+
+
+def test_a_ledger_row_for_a_deferred_finding_is_refused(git_repo):
+    """Three ledger rows for one judged finding and two deferred ones is a surplus, refused.
+
+    Red 2026-10-11: mutation `if rows != judged:` became `if rows != total:` in _check_counts;
+    failed at pytest.raises (DID NOT RAISE RecordRefused: 3 rows equal the 3 findings of
+    `total`).
+    """
+    _to_l2(git_repo, "STANDARD", 3, priorities={"F-2": "P3", "F-3": "P3"})
+    append_ledger(git_repo, "r1", 3)
+    with pytest.raises(ps.RecordRefused, match="ledger holds 3"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                                  "deferred": 2},
+                  output=verdicts_output(git_repo, confirmed=1, deferred=2), root=git_repo)
 
 
 def test_stale_is_refused_outside_a_deferred_run(git_repo):
@@ -747,3 +768,151 @@ def test_l3_refuses_an_id_l2_5_did_not_confirm(git_repo):
     plan = write_output(git_repo, {"to_fix": [finding_id(2)], "deferred": []})
     with pytest.raises(ps.RecordRefused, match="did not confirm"):
         ps.record("L3", counts={"to_fix": 1}, output=plan, root=git_repo)
+
+
+# --- fix round 1: what a later layer reads back is held to the same shapes --------------
+
+def _bom(path) -> str:
+    """Prefix the JSON file at `path` with a UTF-8 BOM, as Windows PowerShell 5.1 writes it."""
+    target = pathlib.Path(path)
+    target.write_bytes(b"\xef\xbb\xbf" + target.read_bytes())
+    return str(target)
+
+
+def _stored(repo, layer, run_id="r1") -> pathlib.Path:
+    return repo / ".claude" / "audits" / "runs" / run_id / f"{layer}.json"
+
+
+_TWO_CONFIRMED = {"confirmed": 2, "fp": 0, "uncertain": 0, "duplicate": 0}
+
+
+def test_a_bom_prefixed_work_file_does_not_lock_out_the_next_layer(git_repo):
+    """A work file a UTF-8 BOM precedes is stored as written and must stay readable.
+
+    Without this, `record` accepted the file (bytes parse) and the next layer then refused it
+    for ever ("record L2 again" loops), because the stored copy was re-read as text.
+
+    Red 2026-10-11: mutation `.read_bytes()` became `.read_text(encoding="utf-8")` in
+    _stored_json; failed at the L2.5 record (uncaught RecordRefused: L2's stored file is
+    missing or unreadable).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 2}, output=_bom(findings_output(git_repo, 2)),
+              root=git_repo)
+    ps.record("L2.5", counts=_TWO_CONFIRMED,
+              output=_bom(verdicts_output(git_repo, confirmed=2)), root=git_repo)
+    ps.record("L3", counts={"to_fix": 2}, output=plan_output(git_repo, to_fix=2), root=git_repo)
+    assert "L3" in ps.load(git_repo).layers
+
+
+def test_an_old_shape_stored_l2_is_refused_naming_l2(git_repo):
+    """A run whose stored L2 predates the finding shape is refused at L2.5, naming L2.
+
+    Without the check the refusal blamed the L2.5 ids ("which L2 did not record").
+
+    Red 2026-10-11: baseline 6531408 (no stored-L2 validation); failed at pytest.raises
+    (regex did not match; the reason read "L2.5 gives a verdict for F-1, which L2 did not
+    record"). Mutation `return layer_outputs.l2_findings(l2, len(l2))` became `return l2` in
+    _stored_l2 (try block removed); failed at the L2.5 record (uncaught TypeError).
+    """
+    _to_l2(git_repo, "FAST", 2)
+    _stored(git_repo, "L2").write_text('["a", "b"]', encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="L2's stored file does not have the finding"):
+        ps.record("L2.5", counts=_TWO_CONFIRMED,
+                  output=verdicts_output(git_repo, confirmed=2), root=git_repo)
+
+
+def test_a_stored_l2_with_a_list_valued_id_is_refused_not_a_crash(git_repo):
+    """Unhashable ids in a stored L2 are a refusal, not an escaping TypeError.
+
+    Red 2026-10-11: baseline 6531408 (no stored-L2 validation); failed at the L2.5 record
+    (uncaught TypeError: cannot use 'list' as a set element). Mutation `return
+    layer_outputs.l2_findings(l2, len(l2))` became `return l2` in _stored_l2; the same
+    uncaught TypeError.
+    """
+    _to_l2(git_repo, "FAST", 2)
+    _stored(git_repo, "L2").write_text(
+        '[{"id": ["a"], "priority": "P2"}, {"id": ["b"], "priority": "P2"}]', encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="L2's stored file"):
+        ps.record("L2.5", counts=_TWO_CONFIRMED,
+                  output=verdicts_output(git_repo, confirmed=2), root=git_repo)
+
+
+def test_an_old_shape_stored_l2_5_is_refused_naming_l2_5(git_repo):
+    """A run whose stored L2.5 predates the verdict shape is refused at L3, naming L2.5.
+
+    Without the check the refusal blamed the plan ("which L2.5 did not confirm").
+
+    Red 2026-10-11: mutation `layer_outputs.l25_verdicts(l25, recorded or {}, l2_ids)` became
+    the id-to-verdict comprehension over the raw rows in _stored_l25; failed at pytest.raises
+    (regex did not match; the reason read "L3 plans F-1, F-2, which L2.5 did not confirm").
+    """
+    _to_l2(git_repo, "FAST", 2)
+    ps.record("L2.5", counts=_TWO_CONFIRMED, output=verdicts_output(git_repo, confirmed=2),
+              root=git_repo)
+    _stored(git_repo, "L2.5").write_text('["a", "b"]', encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="L2.5's stored file does not have the verdict"):
+        ps.record("L3", counts={"to_fix": 2}, output=plan_output(git_repo, to_fix=2),
+                  root=git_repo)
+
+
+def test_a_p1_cannot_be_passed_on_unverified(git_repo):
+    """A P1 is never DEFERRED at L2.5: it would skip the fp-check, the ledger and the fix.
+
+    Red 2026-10-11: mutation `allowed = ("P2", "P3") if state.tier == "FAST" else ("P3",)`
+    became `allowed = ("P1", "P2", "P3")` in _check_shape; failed at pytest.raises (DID NOT
+    RAISE RecordRefused).
+    """
+    _to_l2(git_repo, "FAST", 2, priorities={"F-2": "P1"})
+    with pytest.raises(ps.RecordRefused, match=r"L2\.5 defers F-2 \(P1\)"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                                  "deferred": 1},
+                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+
+
+def test_a_p2_cannot_be_passed_on_unverified_on_standard(git_repo):
+    """Only P3 findings may be DEFERRED on a tier that verifies its P2s.
+
+    Red 2026-10-11: mutation `allowed = ("P2", "P3") if state.tier == "FAST" else ("P3",)`
+    became `allowed = ("P2", "P3")` in _check_shape; failed at pytest.raises (DID NOT RAISE
+    RecordRefused).
+    """
+    _to_l2(git_repo, "STANDARD", 2)
+    append_ledger(git_repo, "r1", 1)
+    with pytest.raises(ps.RecordRefused, match=r"L2\.5 defers F-2 \(P2\)"):
+        ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                                  "deferred": 1},
+                  output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+
+
+def test_a_p2_may_be_passed_on_unverified_on_fast(git_repo):
+    """FAST has no fp-check for a P2, so a P2 may be DEFERRED there.
+
+    Red 2026-10-11: mutation `allowed = ("P2", "P3") if state.tier == "FAST" else ("P3",)`
+    became `allowed = ("P3",)` in _check_shape; failed at the L2.5 record (uncaught
+    RecordRefused: L2.5 defers F-2 (P2)).
+    """
+    _to_l2(git_repo, "FAST", 2)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                              "deferred": 1},
+              output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+    assert ps.load(git_repo).layers["L2.5"]["counts"]["deferred"] == 1
+
+
+def test_l3_defers_a_confirmed_p2_but_never_a_p1(git_repo):
+    """A confirmed P1 is always fixed: L3 may defer the P2 beside it, not the P1.
+
+    Red 2026-10-11: mutation `barred = [i for i in plan["deferred"] if priority[i] == "P1"]`
+    became `barred = []` in _check_shape; failed at pytest.raises (DID NOT RAISE
+    RecordRefused).
+    """
+    _to_l2(git_repo, "FAST", 2, priorities={"F-1": "P1"})
+    ps.record("L2.5", counts=_TWO_CONFIRMED, output=verdicts_output(git_repo, confirmed=2),
+              root=git_repo)
+    swapped = write_output(git_repo, {"to_fix": [finding_id(2)], "deferred": [finding_id(1)]})
+    with pytest.raises(ps.RecordRefused, match=r"L3 defers F-1 \(P1\)"):
+        ps.record("L3", counts={"to_fix": 1, "deferred": 1}, output=swapped, root=git_repo)
+    ps.record("L3", counts={"to_fix": 1, "deferred": 1},
+              output=plan_output(git_repo, to_fix=1, deferred=1), root=git_repo)
+    assert "L3" in ps.load(git_repo).layers

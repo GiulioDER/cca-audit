@@ -247,11 +247,20 @@ def test_deferred_and_stale_flags_reach_the_counts(capsys, git_repo):
 
     Red 2026-10-11: mutation `"deferred": a.deferred` became `"deferred": None` in _pipeline;
     failed at `assert code == 0` (2 == 0: accounts for 1 findings but L2 recorded 2 unique).
+    --stale reaches it too: a first run refuses it, and the reason says so.
+    Red 2026-10-11: mutation `"stale": a.stale` became `"stale": None` in _pipeline; failed at
+    `assert "--stale is for a DEFERRED run only" in err["reason"]` (the reason instead read
+    "accounts for 1 findings but L2 recorded 2 unique").
     """
     r = str(git_repo)
     _cli(capsys, "start", "--tier", "FAST", "--root", r)
     _cli(capsys, "record", "L1", "--output", write_output(r), "--root", r)
     _cli(capsys, "record", "L2", "--unique", "2", "--output", findings_output(r, 2), "--root", r)
+    code, _, err = _cli(capsys, "record", "L2.5", "--confirmed", "1", "--fp", "0",
+                        "--uncertain", "0", "--duplicate", "0", "--stale", "1",
+                        "--output", verdicts_output(r, confirmed=1, stale=1), "--root", r)
+    assert code == 2
+    assert "--stale is for a DEFERRED run only" in err["reason"]
     code, _, _ = _cli(capsys, "record", "L2.5", "--confirmed", "1", "--fp", "0",
                       "--uncertain", "0", "--duplicate", "0", "--deferred", "1",
                       "--output", verdicts_output(r, confirmed=1, deferred=1), "--root", r)
