@@ -69,3 +69,48 @@ Nothing is written: no `--write` until the user approves the dry run.
   outside the known set, the parsed share drops for a reason that is the allowlist, not the parser.
 * Squash merges whose PR title lacks the CCA phrase are not selected at all, so they cannot show up
   as unparsed either: the parsed share is over selected commits only.
+
+## Result (2026-10-11)
+**Status:** measured. Prediction falsified on the parsed share and on the known answer.
+
+Measured on `feat/cca-bug-ledger` at `4a71737`, read-only, 19 repositories (one clone per remote,
+the one whose default branch had the newest commit; no fetch), 14 scorecard ledger files. Private
+repositories are reported as one total, since this file is public.
+
+| # | Predicted | Measured | Held? |
+|---|---|---|---|
+| 1 | parsed share at least 75% | **21 of 117 selected commits, 17.9%**; 96 unparsed (51 in the private repository, 41 in RE-call, 4 elsewhere) | **no** |
+| 2 | `6aa7ff5bd` yields exactly 17 rows | **0 rows**: the commit is not on RE-call's default branch | **no**, wrong premise |
+| 3 | 0 proved without bindings | 0 of 187 rows | yes |
+| 4 | 1 to 8 candidates, including `pr805a` | 1 candidate: RE-call `0cfa7219954d` with run `pr805a` | yes |
+| 5 | exactly 1 proved after binding it | 1: `RE-call:0cfa7219954d:FIX-1`, sources two ledger lines and `redproof-fix1.json` | yes |
+| 6 | 150 to 900 rows | 187 (RE-call 99, cca-audit 21, private 67) | yes, near the floor |
+
+Spot check (seed 11, five rows): all five summaries are the commit's own bullet text.
+Unknown IDs reported, not counted: 78 (prefix `F` 75, `EVAL` 2, `FIN` 1). Reverted 0,
+cross-repository duplicates 0, ambiguous 0. The secondary measure (subject-only selection against
+whole-message `--grep`) was not run.
+
+**Gap, and what it means.** The 17.9% is not a parser defect in the sense of a broken rule: the
+rules read exactly the shape the spec described (Step 7 of `audit-fix.md`), and real history mostly
+does not have that shape. Reading the unparsed commits by structure only, three formats account
+for them:
+
+1. severity headings without a trailing colon and with text after the level ("P1 Critical
+   (high-stakes ...)"), which the heading rule does not accept;
+2. bullets labelled by a bare letter (`- A`, `- B`) or by `F-n`, with no auditor-style finding ID
+   at all, in the private repository;
+3. "second pass" commits whose sections are thematic ("Shipped library and install:") rather than
+   P1/P2, above bullets that do carry real IDs.
+
+So the 187 is a lower bound on landed CCA fixes whose message names a finding ID under a P1/P2
+heading, not a count of CCA fixes. What I believed was that the Step 7 template had been followed;
+it was followed in the repositories CCA was developed in (cca-audit, much of RE-call) and much less
+in the others.
+
+The known-answer premise was wrong for an informative reason: I chose `6aa7ff5bd` from a
+`git log --all` listing, and "fixed means landed" excludes exactly that kind of commit.
+
+**Apparatus checks that passed:** no row is `proved` without an explicit binding; the one binding
+produces one `proved` row traced to its artifacts; summaries are verbatim. The sentiment-agent
+clone's remote refs end on 2026-09-10, so that repository is undercounted after that date.
