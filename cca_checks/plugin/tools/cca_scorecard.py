@@ -109,7 +109,9 @@ def load_rows(ledger: Path, now: datetime, window_days: int = WINDOW_DAYS):
     if not ledger.exists():
         return
     cutoff = now - timedelta(days=window_days)
-    for line in ledger.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig, like the pipeline's own ledger reader: a ledger created by Windows PowerShell
+    # 5.1 starts with a BOM, which would make its first row malformed here only.
+    for line in ledger.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue

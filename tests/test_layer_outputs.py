@@ -121,6 +121,28 @@ def test_l3_refuses_a_list_length_that_disagrees_with_its_count():
         lo.l3_plan({"to_fix": [], "deferred": ["F-1"]}, 0, 2, {"F-1": "CONFIRMED"})
 
 
+def test_l3_refuses_an_id_named_twice_in_one_list():
+    """Two CONFIRMED findings and `--to-fix 2`, but the list names F-1 twice: the count and the
+    confirmation checks both pass, so only the in-list duplicate check can refuse it.
+
+    Red 2026-10-11: mutation `if len(set(ids)) != len(ids):` became `if False:` in l3_plan;
+    failed at pytest.raises (DID NOT RAISE ShapeError: the plan was returned with F-2 never
+    planned).
+    """
+    l25 = {"F-1": "CONFIRMED", "F-2": "CONFIRMED"}
+    with pytest.raises(lo.ShapeError, match="names an id more than once"):
+        lo.l3_plan({"to_fix": ["F-1", "F-1"], "deferred": []}, 2, 0, l25)
+
+
+def test_l3_refuses_an_id_that_is_not_a_string():
+    """Red 2026-10-11: mutation `if not all(isinstance(i, str) for i in ids):` became `if False:`
+    in l3_plan; failed with the uncaught `TypeError: sequence item 0: expected str instance, int
+    found` (from the `unconfirmed` join) escaping pytest.raises(ShapeError), which is how this
+    mutation manifests."""
+    with pytest.raises(lo.ShapeError, match="must hold finding id strings"):
+        lo.l3_plan({"to_fix": [1], "deferred": []}, 1, 0, {"F-1": "CONFIRMED"})
+
+
 def test_l3_refuses_a_file_that_is_not_the_plan_object():
     """Red 2026-10-11: mutation the `isinstance(data, dict)` check deleted in l3_plan; failed
     with the uncaught `TypeError: list indices must be integers or slices, not str` escaping

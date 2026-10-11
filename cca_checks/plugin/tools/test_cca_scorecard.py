@@ -93,6 +93,22 @@ def test_malformed_rows_are_counted_not_silently_dropped(tmp_path):
     assert "malformed" in sc.render(rep)                # and it is SURFACED, not hidden
 
 
+def test_a_bom_prefixed_ledger_scores_its_first_row(tmp_path):
+    """A ledger created by Windows PowerShell 5.1 starts with a BOM. L2.5 counts its first row
+    (the pipeline reads the ledger as utf-8-sig), so the scorecard must score it too, not call
+    it malformed.
+
+    Red 2026-10-11: mutation `encoding="utf-8-sig"` became `encoding="utf-8"` in load_rows;
+    failed at `assert rep.rows_scored == 2 and rep.rows_skipped_malformed == 0` (1 scored, 1
+    malformed).
+    """
+    p = tmp_path / "ledger.jsonl"
+    body = json.dumps(row("CONFIRMED")) + "\n" + json.dumps(row("FALSE_POSITIVE")) + "\n"
+    p.write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8"))
+    rep = sc.build(p, now=NOW)
+    assert rep.rows_scored == 2 and rep.rows_skipped_malformed == 0
+
+
 def test_yield_flag_for_high_volume_zero_confirmed_auditor(tmp_path):
     led = write(tmp_path, [row("FALSE_POSITIVE", category=f"c{i}") for i in range(15)])
     rep = sc.build(led, now=NOW)

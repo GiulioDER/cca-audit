@@ -208,8 +208,9 @@ _NO_DEFERRAL = (
 )
 #: What `--from commit:<sha>` may hold: an abbreviated or full object name, never a revision
 #: expression. `HEAD`, `-x`, `main~2` and `a..b` are all things `git rev-parse` would accept
-#: or read as an option, so the form is checked before git sees it.
-_COMMIT_SHA = re.compile(r"[0-9A-Fa-f]{7,40}")
+#: or read as an option, so the form is checked before git sees it. Up to 64 characters: a
+#: SHA-256 repository names its objects with 64.
+_COMMIT_SHA = re.compile(r"[0-9A-Fa-f]{7,64}")
 
 
 def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, str | None]:
@@ -248,7 +249,7 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
         rev = parent.removeprefix("commit:")
         if not _COMMIT_SHA.fullmatch(rev):
             raise RecordRefused(
-                f"--from {parent} is not of the form commit:<sha>, where <sha> is 7 to 40 "
+                f"--from {parent} is not of the form commit:<sha>, where <sha> is 7 to 64 "
                 "hexadecimal characters"
             )
         sha = _commit_of(root, rev)

@@ -94,15 +94,19 @@ def consumed_by(parent: str, summaries) -> str | None:
 
 
 def why_not_offered(summary: dict, summaries) -> str | None:
-    """Why this run's pool may not be taken by a deferred run; None when it may."""
-    if not summary.get("pool"):
-        return "nothing was deferred"
+    """Why this run's pool may not be taken by a deferred run; None when it may.
+
+    What the run was (no-fix, deferred, hunt) is checked before its pool: a deferred run's pool
+    is always empty, and "nothing was deferred" would hide that it never offers a pass at all.
+    """
     if summary.get("no_fix"):
         return "the run was started with no-fix, which forbids editing"
     if summary.get("mode") == "DEFERRED":
         return "a deferred run never offers a third pass"
     if summary.get("mode") == "HUNT":
         return "deferred passes over hunt runs are out of scope; the pool is listed, not offered"
+    if not summary.get("pool"):
+        return "nothing was deferred"
     child = consumed_by(summary["run_id"], summaries)
     if child:
         return f"deferred run {child} already took this pool"
@@ -125,8 +129,9 @@ def findings_for(root, summary: dict) -> list[dict]:
             f"({exc.__class__.__name__}); its run directory is incomplete, so its pool "
             "cannot be loaded"
         ) from exc
-    by_id = {r.get("id"): r for r in rows if isinstance(r, dict)} if isinstance(rows, list) \
-        else {}
+    # Only string ids: a hand-edited row whose id is a list would make the dict raise TypeError.
+    by_id = {r["id"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)} \
+        if isinstance(rows, list) else {}
     missing = [i for i in summary["pool"] if i not in by_id]
     if missing:
         raise LookupError(f"run {summary['run_id']}'s L2 file lacks pool ids {', '.join(missing)}")

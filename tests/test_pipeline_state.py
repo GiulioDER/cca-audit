@@ -1280,24 +1280,39 @@ def test_is_ancestor_never_hands_git_a_value_that_reads_as_an_option(git_repo, m
 
 
 @pytest.mark.parametrize("rev", [
-    "HEAD", "-x", "HEAD~0", "{head6}", "{head}0",
+    "HEAD", "-x", "HEAD~0", "{head6}", "{head}" + "0" * 25,
 ])
 def test_the_commit_fallback_takes_only_a_hexadecimal_object_name(git_repo, rev):
-    """`commit:<x>` takes 7 to 40 hexadecimal characters and nothing git would read otherwise.
+    """`commit:<x>` takes 7 to 64 hexadecimal characters and nothing git would read otherwise.
 
     A revision expression (`HEAD`, `HEAD~0`), an option (`-x`), a prefix too short to be
-    safe and a name one character too long are all refused before git sees them, whatever
-    git would make of them.
+    safe and a name one character longer than a SHA-256 object name (65) are all refused
+    before git sees them, whatever git would make of them.
 
     Red 2026-10-11: mutation `if not _COMMIT_SHA.fullmatch(rev):` became `if False:` in
-    _deferred_parent; every case failed at pytest.raises. HEAD, HEAD~0, {head6} and {head}0:
-    DID NOT RAISE RecordRefused (git resolved each to the HEAD commit). -x: the regex did not
-    match (the reason was "does not name a commit that is an ancestor of HEAD").
+    _deferred_parent; every case failed at pytest.raises. HEAD, HEAD~0 and {head6}: DID NOT
+    RAISE RecordRefused (git resolved each to the HEAD commit). -x and the 65 character name:
+    the regex did not match (the reason was "does not name a commit that is an ancestor of
+    HEAD"). Re-run after the 64 character limit (M6): the same mutation, the same failures,
+    the 65 character case replacing the old 41 character one.
     """
     head = _head(git_repo)
     parent = "commit:" + rev.format(head=head, head6=head[:6])
-    with pytest.raises(ps.RecordRefused, match="7 to 40 hexadecimal characters"):
+    with pytest.raises(ps.RecordRefused, match="7 to 64 hexadecimal characters"):
         ps.start("STANDARD", mode="DEFERRED", parent=parent, root=git_repo)
+    assert ps.load(git_repo) is None
+
+
+def test_the_commit_fallback_takes_a_sha_256_object_name(git_repo):
+    """A SHA-256 repository names a commit with 64 hexadecimal characters, so such a name gets
+    past the form check to git, which here (a SHA-1 repository) finds no such commit.
+
+    Red 2026-10-11: mutation `{7,64}` became `{7,40}` in _COMMIT_SHA; failed at
+    pytest.raises(match="does not name a commit that is an ancestor") (Regex pattern did not
+    match: the reason was the form refusal, "is not of the form commit:<sha>").
+    """
+    with pytest.raises(ps.RecordRefused, match="does not name a commit that is an ancestor"):
+        ps.start("STANDARD", mode="DEFERRED", parent="commit:" + "a" * 64, root=git_repo)
     assert ps.load(git_repo) is None
 
 

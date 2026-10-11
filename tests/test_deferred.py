@@ -37,6 +37,19 @@ def test_these_runs_are_never_offered_a_pass(over, reason):
     assert reason in offer.reasons[0]
 
 
+def test_a_closed_deferred_run_says_it_never_offers_a_pass_not_that_its_pool_is_empty():
+    """A deferred run cannot defer, so its own pool is always empty; the reason must name what the
+    run was, not the empty pool.
+
+    Red 2026-10-11: the order before the fix (the empty-pool check first in why_not_offered);
+    failed at `assert "third pass" in offer.reasons[0]` (the reason was "nothing was deferred").
+    """
+    s = _s("c", mode="DEFERRED", parent="p", pool=[])
+    offer = deferred.assess(s, [s], [], commit_reachable=True)
+    assert offer.offered is False
+    assert "third pass" in offer.reasons[0]
+
+
 def test_a_pool_a_completed_deferred_run_took_is_not_offered_again():
     """Red 2026-10-11: mutation the loop of consumed_by replaced by `return None`; failed at
     `assert not offer.offered`."""
@@ -147,6 +160,24 @@ def test_findings_for_names_a_missing_l2_file(tmp_path):
     (tmp_path / ".claude/audits/runs/r1").mkdir(parents=True)
     with pytest.raises(LookupError, match="L2.json"):
         deferred.findings_for(tmp_path, _s())
+
+
+def test_findings_for_skips_a_row_whose_id_is_not_a_string(tmp_path):
+    """A hand-edited L2 row whose id is a list is skipped, not a TypeError: the pool still loads,
+    and a pool id that only such a row could have supplied is named as missing.
+
+    Red 2026-10-11: mutation `and isinstance(r.get("id"), str)` removed from the by_id filter
+    (and the key read back as `r.get("id")`) in findings_for; failed at the first findings_for
+    call with the uncaught `TypeError: cannot use 'list' as a dict key (unhashable type:
+    'list')`, which is how this mutation manifests.
+    """
+    run = tmp_path / ".claude/audits/runs/r1"
+    run.mkdir(parents=True)
+    (run / "L2.json").write_text(json.dumps([{"id": ["F-1"], "priority": "P3"}, _f(2)]),
+                                 encoding="utf-8")
+    assert [f["id"] for f in deferred.findings_for(tmp_path, _s(pool=["F-2"]))] == ["F-2"]
+    with pytest.raises(LookupError, match="lacks pool ids F-1"):
+        deferred.findings_for(tmp_path, _s(pool=["F-1", "F-2"]))
 
 
 def test_findings_for_names_pool_ids_the_l2_file_lacks(tmp_path):
