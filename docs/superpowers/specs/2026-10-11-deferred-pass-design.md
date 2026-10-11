@@ -110,11 +110,11 @@ writes none either.
 A new read-only command:
 
 ```bash
-python -m cca_checks pipeline deferred [--run <run_id>] [--json] [--write <file>]
+python -m cca_checks pipeline deferred [--run <run_id>] [--write <file>]
 ```
 
 Without `--run` it reads the newest summary by `completed_utc`. It prints the pool (id, priority,
-file, line, title, taken from the stored L2 file), the counts by priority, `human_pending`, whether
+file, line, claim, taken from the stored L2 file), the counts by priority, `human_pending`, whether
 the pass is offered, the recommendation, and the reasons. It also lists older summaries whose pool
 is non-empty and not yet consumed, so a later run with an empty pool cannot hide an earlier one.
 
@@ -145,7 +145,7 @@ file, as a JSON array: the L1 input of the deferred run. It refuses a file outsi
 `.claude/audits/` (the rule `record` already applies) and refuses when the pass is not offered.
 
 **Where the offer happens.** The new last step of the Output Summary: after `pipeline close`
-succeeds, the orchestrator runs `pipeline deferred --json`. When the pass is offered it asks one
+succeeds, the orchestrator runs `pipeline deferred`. When the pass is offered it asks one
 question carrying the recommendation and its reasons. Yes starts § 4 in the same session. No ends
 the turn, and `/audit-fix deferred` still works later, until a completed deferred run consumes the
 pool. The run is already closed when the question is asked, so the Stop hook does not interfere.
@@ -193,7 +193,7 @@ In `cca_gate_core.py` and `pipeline_state.py`:
 
 - `start --mode DEFERRED` is refused when `--from` is missing; when the parent has no summary and
   is not a `commit:<sha>` ancestor of HEAD; when the parent's `mode` is `DEFERRED` or `HUNT` or its
-  `no_fix` is true; when the parent's pool is empty or consumed; and when `--tier` is FAST. A
+  `no_fix` is true; when the parent's pool is empty or consumed; when `--tier` is FAST; and when `--no-fix` is passed. A
   `commit:<sha>` parent has no summary, so only the ancestor, consumed and FAST checks apply to it.
 - `--from` is refused outside `--mode DEFERRED`.
 - L2.5 and L3 refuse `--deferred > 0` in a `DEFERRED` run. L2.5 refuses `--stale > 0` outside one.
@@ -257,3 +257,12 @@ before pytest).
 - Verifying P3 findings inside the first run (it would raise the cost of every run, including the
   ones whose user skips the pass).
 - A third pass, or deferral inside a deferred run.
+
+## Corrections made while planning (2026-10-11)
+
+Three lines changed after approval, each to match the code it describes:
+
+- `pipeline deferred` lost `--json`: every `pipeline` subcommand already prints one JSON object.
+- The pool lists `claim`, not `title`: the Findings Schema has no `title` key.
+- `start --mode DEFERRED` also refuses `--no-fix`: a deferred run exists to fix, and
+  `/audit-fix deferred no-fix` runs `pipeline deferred` and stops instead.
