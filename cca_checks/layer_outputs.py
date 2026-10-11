@@ -56,7 +56,7 @@ def l25_verdicts(data, counts: dict, l2_ids) -> dict[str, str]:
     verdicts: dict[str, str] = {}
     for row in data:
         verdict = row.get("verdict")
-        if verdict not in COUNT_OF:
+        if not isinstance(verdict, str) or verdict not in COUNT_OF:
             raise ShapeError(
                 f"L2.5 entry {row['id']} has verdict {verdict!r}; expected one of "
                 f"{', '.join(VERDICTS)}"

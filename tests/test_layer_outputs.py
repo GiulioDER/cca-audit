@@ -17,6 +17,8 @@ def _f(i, priority="P2"):
 
 
 def test_l2_accepts_findings_that_match_unique():
+    """Red 2026-10-11: mutation `return data` became `return []` in l2_findings; failed at the
+    assert (`assert [] == [{'id': 'F-1', ...}, ...]`)."""
     assert lo.l2_findings([_f(1), _f(2, "P3")], 2) == [_f(1), _f(2, "P3")]
 
 
@@ -42,11 +44,16 @@ def test_l2_refuses_an_id_named_twice():
 
 
 def test_l2_refuses_a_file_that_is_not_an_array():
+    """Red 2026-10-11: mutation the `isinstance(data, list)` check deleted in l2_findings;
+    failed at pytest.raises(match="JSON array"): the ShapeError raised was 'L2 entry 0 needs a
+    non-empty string "id"', so the regex did not match."""
     with pytest.raises(lo.ShapeError, match="JSON array"):
         lo.l2_findings({"F-1": {}}, 1)
 
 
 def test_l2_5_maps_ids_to_verdicts_when_the_tally_matches():
+    """Red 2026-10-11: mutation `return verdicts` became `return {}` in l25_verdicts; failed at
+    the assert (`assert {} == {'F-1': 'CONFIRMED', 'F-2': 'DEFERRED'}`)."""
     data = [{"id": "F-1", "verdict": "CONFIRMED"}, {"id": "F-2", "verdict": "DEFERRED"}]
     got = lo.l25_verdicts(data, {"confirmed": 1, "deferred": 1}, ["F-1", "F-2"])
     assert got == {"F-1": "CONFIRMED", "F-2": "DEFERRED"}
@@ -68,11 +75,25 @@ def test_l2_5_refuses_an_id_l2_did_not_record():
 
 
 def test_l2_5_refuses_an_unknown_verdict():
+    """Red 2026-10-11: mutation the verdict-membership check deleted in l25_verdicts; failed
+    with the uncaught `KeyError: 'MAYBE'` (from `tally[verdict] += 1`) escaping
+    pytest.raises(ShapeError), which is how this mutation manifests."""
     with pytest.raises(lo.ShapeError, match="expected one of"):
         lo.l25_verdicts([{"id": "F-1", "verdict": "MAYBE"}], {}, ["F-1"])
 
 
+def test_l2_5_refuses_a_verdict_that_is_not_a_string():
+    """Red 2026-10-11: mutation `if not isinstance(verdict, str) or verdict not in COUNT_OF:`
+    reverted to `if verdict not in COUNT_OF:` in l25_verdicts; failed with the uncaught
+    `TypeError: cannot use 'list' as a dict key (unhashable type: 'list')` escaping
+    pytest.raises(ShapeError), which is how this mutation manifests."""
+    with pytest.raises(lo.ShapeError, match="expected one of"):
+        lo.l25_verdicts([{"id": "F-1", "verdict": ["CONFIRMED"]}], {}, ["F-1"])
+
+
 def test_l3_accepts_a_plan_over_confirmed_ids():
+    """Red 2026-10-11: mutation `return plan` became `return {}` in l3_plan; failed at the
+    assert (`assert {} == {'to_fix': ['F-1'], 'deferred': ['F-2']}`)."""
     l25 = {"F-1": "CONFIRMED", "F-2": "CONFIRMED", "F-3": "DEFERRED"}
     plan = lo.l3_plan({"to_fix": ["F-1"], "deferred": ["F-2"]}, 1, 1, l25)
     assert plan == {"to_fix": ["F-1"], "deferred": ["F-2"]}
@@ -101,5 +122,8 @@ def test_l3_refuses_a_list_length_that_disagrees_with_its_count():
 
 
 def test_l3_refuses_a_file_that_is_not_the_plan_object():
+    """Red 2026-10-11: mutation the `isinstance(data, dict)` check deleted in l3_plan; failed
+    with the uncaught `TypeError: list indices must be integers or slices, not str` escaping
+    pytest.raises(ShapeError), which is how this mutation manifests."""
     with pytest.raises(lo.ShapeError, match='"to_fix" and "deferred"'):
         lo.l3_plan([], 0, 0, {})
