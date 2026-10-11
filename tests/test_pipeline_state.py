@@ -551,3 +551,90 @@ def test_an_output_outside_claude_audits_is_refused_and_one_inside_is_kept(git_r
     inside.write_text("[]", encoding="utf-8")
     ps.record("L1", output=inside, root=git_repo)
     assert ps.load(git_repo).layers["L1"]["output"].endswith("/L1.json")
+
+
+# --- fix round 2026-10-11 --------------------------------------------------------------
+
+def _through_l3_fast(repo, to_fix):
+    ps.start("FAST", root=repo)
+    ps.record("L1", output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": 1}, output=write_output(repo), root=repo)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
+              output=write_output(repo), root=repo)
+    ps.record("L3", counts={"to_fix": to_fix}, output=write_output(repo), root=repo)
+
+
+def test_resume_after_l3_planned_fixes_names_l4_not_l6(git_repo):
+    """Paused between L3 and L4, a run that planned fixes resumes at Step 4.
+
+    The gate requires L4 only once the tree changes, so without this the next owed layer
+    after L3 was L6 and a resumed run skipped every planned fix.
+    Red 2026-10-11: baseline bacf6f0 (next_owed has no planned fix rule); failed at
+    `assert result["next"] == "L4" and result["heading"] == "Step 4"` (L6 == L4).
+    """
+    _through_l3_fast(git_repo, to_fix=1)
+    ps.pause("end of day", root=git_repo)
+    result = ps.resume(root=git_repo)
+    assert result["next"] == "L4" and result["heading"] == "Step 4"
+
+
+def test_resume_after_l3_planned_no_fixes_names_l6(git_repo):
+    """Control: an L3 with nothing to fix goes straight to the architect gate.
+
+    Control, not a red proof: it passes at bacf6f0 and after. It guards the planned fix rule
+    against over reaching; checked 2026-10-11 with the mutation `_fixes_planned` returning
+    True, which failed at `assert result["next"] == "L6" and ...` (L4 == L6).
+    """
+    _through_l3_fast(git_repo, to_fix=0)
+    ps.pause("end of day", root=git_repo)
+    result = ps.resume(root=git_repo)
+    assert result["next"] == "L6" and result["heading"] == "Step 6"
+
+
+def test_a_run_id_with_characters_a_filesystem_forbids_is_refused_at_start(git_repo):
+    """The run id names a directory; `:` crashed `record` with WinError 123 at L1.
+
+    Red 2026-10-11: baseline bacf6f0 (start accepts any run id); failed at
+    `pytest.raises(ps.RecordRefused, match="letters, digits")` (DID NOT RAISE).
+    """
+    for bad in ("run:1", "../escape", "a/b", ".."):
+        with pytest.raises(ps.RecordRefused, match="letters, digits"):
+            ps.start("FAST", run_id=bad, root=git_repo)
+        assert ps.load(git_repo) is None
+    assert ps.start("FAST", run_id="run-1_a.b", root=git_repo).run_id == "run-1_a.b"
+
+
+def test_resume_gives_the_stop_hook_its_refusals_back(git_repo):
+    """A resumed session is protected by the Stop hook again.
+
+    Red 2026-10-11: baseline bacf6f0 (resume keeps the spent counter); failed at
+    `assert state.stop_refusals == 0 and state.stop_logged is False` (3 == 0).
+    """
+    ps.start("FAST", root=git_repo)
+    path = ps.state_path(git_repo)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw.update({"stop_refusals": 3, "stop_logged": True})
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    ps.pause("end of day", root=git_repo)
+    ps.resume(root=git_repo)
+    state = ps.load(git_repo)
+    assert state.stop_refusals == 0 and state.stop_logged is False
+
+
+def test_dot_dot_inside_claude_audits_is_accepted_and_escaping_it_is_refused(git_repo):
+    """Containment is judged on the resolved path, not on the spelling.
+
+    Red 2026-10-11: mutation the containment test `core._inside(str(path), str(audits))`
+    became `str(path).startswith(str(audits))` (a string prefix); failed at
+    `pytest.raises(ps.RecordRefused, match="outside .claude/audits/")` (DID NOT RAISE).
+    """
+    ps.start("FAST", root=git_repo)
+    audits = git_repo / ".claude" / "audits"
+    (audits / "out").mkdir(parents=True, exist_ok=True)
+    (audits / "kept.json").write_text("[]", encoding="utf-8")
+    (git_repo / "escaped.json").write_text("[]", encoding="utf-8")
+    ps.record("L1", output=audits / "out" / ".." / "kept.json", root=git_repo)
+    assert "L1" in ps.load(git_repo).layers
+    with pytest.raises(ps.RecordRefused, match="outside .claude/audits/"):
+        ps.record("L2", counts={"unique": 0},
+                  output=audits / "out" / ".." / ".." / ".." / "escaped.json", root=git_repo)

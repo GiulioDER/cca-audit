@@ -206,3 +206,34 @@ def test_record_output_outside_claude_audits_exits_2(capsys, git_repo):
     code, _, err = _cli(capsys, "record", "L1", "--output", str(outside), "--root", r)
     assert code == 2 and err["refused"] == "L1"
     assert "outside .claude/audits/" in err["reason"]
+
+
+def test_a_relative_output_is_read_from_the_root_not_the_cwd(capsys, git_repo, monkeypatch,
+                                                              tmp_path_factory):
+    """`--output .claude/audits/out/l1.json` means the one under `--root`, whatever the cwd.
+
+    Red 2026-10-11: baseline bacf6f0 (resolved against the cwd, so refused as outside);
+    failed at `assert code == 0 and out["recorded"] == "L1"` (2 == 0).
+    """
+    r = str(git_repo)
+    target = git_repo / ".claude" / "audits" / "out" / "l1.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('[["finding"]]', encoding="utf-8")
+    monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
+    _cli(capsys, "start", "--tier", "FAST", "--run-id", "rel", "--root", r)
+    code, out, _ = _cli(capsys, "record", "L1", "--output", ".claude/audits/out/l1.json",
+                        "--root", r)
+    assert code == 0 and out["recorded"] == "L1"
+    copied = git_repo / ".claude" / "audits" / "runs" / "rel" / "L1.json"
+    assert copied.read_text(encoding="utf-8") == '[["finding"]]'
+
+
+def test_start_with_a_bad_run_id_exits_2(capsys, git_repo):
+    """`pipeline start --run-id` with a forbidden character is {"refused": "start"}, exit 2.
+
+    Red 2026-10-11: baseline bacf6f0 (start accepts it, exit 0); failed at
+    `assert code == 2 and err["refused"] == "start"` (0 == 2).
+    """
+    code, _, err = _cli(capsys, "start", "--tier", "FAST", "--run-id", "run:1",
+                        "--root", str(git_repo))
+    assert code == 2 and err["refused"] == "start"

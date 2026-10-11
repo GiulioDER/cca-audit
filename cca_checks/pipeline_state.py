@@ -38,6 +38,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 from dataclasses import dataclass, field
 
 __all__ = [
@@ -64,6 +65,8 @@ core = _load_core()
 LAYERS = core.LAYERS
 TIERS = core.TIERS
 OUTPUT_LAYERS = core.OUTPUT_LAYERS
+#: A run id names a directory, so only characters every filesystem accepts.
+_RUN_ID = re.compile(r"[A-Za-z0-9._-]+")
 
 _PAUSED = (
     "the run is paused; run `pipeline resume` (`python -m cca_checks pipeline resume`) "
@@ -162,6 +165,11 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError(f"unknown tier {tier!r} (expected one of {', '.join(TIERS)})")
+    if run_id and (not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")):
+        raise RecordRefused(
+            f"run id {run_id!r} is refused: it names the directory "
+            ".claude/audits/runs/<run_id>/, so use only letters, digits, `.`, `_` and `-`"
+        )
     if state_path(root).exists():
         raise RecordRefused(
             "a CCA run is already open in this checkout; starting another would replace it "
@@ -265,6 +273,9 @@ def _read_output(layer: str, output, root) -> bytes:
             f".claude/audits/ (for example {where}), then record again"
         )
     path = pathlib.Path(output)
+    if not path.is_absolute():
+        # Relative to the run root, like every other path the run names, not to the cwd.
+        path = pathlib.Path(root) / path
     audits = pathlib.Path(root) / core.EXCLUDED
     if not core._inside(str(path), str(audits)):
         raise RecordRefused(
@@ -298,10 +309,16 @@ def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
         )
     rel = f".claude/audits/runs/{run_dir}/{layer}.json"
     dest = pathlib.Path(root) / rel
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_name(dest.name + ".tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, dest)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, dest)
+    except OSError as exc:
+        raise RecordRefused(
+            f"{layer} output could not be stored at {rel} ({exc.__class__.__name__}: {exc}); "
+            "abort this run and start one with a plain --run-id"
+        ) from exc
     return rel
 
 
@@ -486,6 +503,9 @@ def resume(root: str | pathlib.Path = ".") -> dict:
     stored = state.paused.get("tree")
     tree = _tree(state, root)
     state.paused = None
+    # A resumed session is a new session: it gets the Stop hook's three refusals again.
+    state.stop_refusals = 0
+    state.stop_logged = False
     raw = state.to_json()
     nxt = None if state.legacy else core.next_owed(raw, tree)
     result = {

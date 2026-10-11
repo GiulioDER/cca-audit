@@ -369,12 +369,30 @@ def next_owed(state: dict, tree: str | None) -> str | None:
 
     A run can still be incomplete when this is None: a `no-fix` run whose tree changed owes
     no layer, only an abort, and `outstanding` says so.
+
+    One addition to the required layers: L3 planning fixes (`to_fix > 0`) with no L4 recorded
+    after it makes L4 next, although the gate does not require L4 until the tree changes.
+    Without it a run paused between L3 and L4 would resume at Step 6 and skip the fixes.
     """
     owed = fixes_owed(state, tree)
     for layer in required_layers(state, owed):
         if _layer_reasons(layer, state, owed, tree):
             return layer
+        if layer == "L3" and not owed and _fixes_planned(state):
+            return "L4"
     return None
+
+
+def _fixes_planned(state: dict) -> bool:
+    """L3 planned at least one fix and no L4 was recorded after it."""
+    layers = _layers(state)
+    plan, done = layers.get("L3"), layers.get("L4")
+    if not isinstance(plan, dict):
+        return False
+    counts = plan.get("counts")
+    if _int(counts.get("to_fix") if isinstance(counts, dict) else 0) <= 0:
+        return False
+    return not isinstance(done, dict) or _int(done.get("seq")) < _int(plan.get("seq"))
 
 
 def legacy_commit_reasons(state: dict) -> list[str]:
