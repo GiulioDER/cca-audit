@@ -11,6 +11,7 @@ from cca_checks.bugs.ledgers import (
     load_ledger,
     match_key,
     match_run,
+    merge_runs,
 )
 
 
@@ -124,3 +125,14 @@ def test_an_ambiguous_match_upgrades_nothing(tmp_path):
     hit, problem = match_run(runs, "acme/widgets", date(2026, 10, 1), {"FIX-1"})
     assert hit is None
     assert problem.startswith("ambiguous:")
+
+
+def test_runs_split_across_ledger_copies_merge_into_one(tmp_path):
+    """Review I6. Red proof: merge_runs returns its input unchanged -> two r1 runs."""
+    a = load_ledger(_write(tmp_path / "a" / "L.jsonl", [DISP]), "acme/widgets", LoadReport())
+    b = load_ledger(_write(tmp_path / "b" / "L.jsonl", [DISP, OUT, {**DISP, "run_id": "r2"}]),
+                    "acme/widgets", LoadReport())
+    runs = merge_runs(a + b)
+    assert sorted(r.key for r in runs) == ["acme/widgets:r1", "acme/widgets:r2"]
+    [r1] = [r for r in runs if r.run_id == "r1"]
+    assert r1.outcomes[1]["architect_verdict"] == "APPROVED"

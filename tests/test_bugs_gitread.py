@@ -5,7 +5,9 @@ from cca_checks.bugs.gitread import (
     default_ref,
     fix_commits,
     group_clones,
+    is_undone,
     normalize_remote,
+    revert_map,
 )
 
 FIX = "fix(store): 1 audit fix from CCA (STANDARD tier)\n\nP1:\n- BUG-001: a. +test\n"
@@ -64,3 +66,31 @@ def test_a_message_that_is_not_utf8_does_not_crash(tmp_path):
     publish(repo)
     [only] = fix_commits(repo, default_ref(repo))
     assert "\ufffd" in only.body
+
+
+def test_a_remote_name_cannot_carry_a_path():
+    """Review (Minor, re-graded). Red proof: _GITHUB name class [^/\\s] -> the backslash path is accepted."""
+    assert normalize_remote(r"https://github.com/acme/x\..\..\evil") is None
+    assert normalize_remote("https://github.com/acme/re-call.v2_x") == "acme/re-call.v2_x"
+
+
+def test_a_line_separator_in_a_subject_does_not_break_the_log(tmp_path):
+    """Review (Minor, re-graded). Red proof: fix_commits uses splitlines() -> ValueError in the call."""
+    repo = make_repo(tmp_path / "r")
+    sha = commit(repo, "a.py", "a\n", FIX.replace("(STANDARD tier)", "(STANDARD tier)\u2028x"))
+    publish(repo)
+    assert [c.sha for c in fix_commits(repo, default_ref(repo))] == [sha]
+
+
+def test_reverted_fixes_are_undone_and_a_revert_of_the_revert_restores_them(tmp_path):
+    """Review I4. Red proof: is_undone always returns False -> the reverted fix reads as live."""
+    repo = make_repo(tmp_path / "r")
+    fix = commit(repo, "a.py", "a\n", FIX)
+    run_git(repo, "revert", "--no-edit", "HEAD")
+    reverts = revert_map(repo, "HEAD")
+    assert is_undone(fix, reverts)
+    publish(repo)
+    assert fix_commits(repo, default_ref(repo))[0].sha == fix  # the 'Revert "..."' commit is not selected
+    assert len(fix_commits(repo, default_ref(repo))) == 1
+    run_git(repo, "revert", "--no-edit", "HEAD")
+    assert not is_undone(fix, revert_map(repo, "HEAD"))

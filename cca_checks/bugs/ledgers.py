@@ -148,3 +148,33 @@ def match_run(runs: list[LedgerRun], repo: str, day: date,
     if len(hits) > 1:
         return None, "ambiguous: " + ", ".join(sorted(r.key for r in hits))
     return None, None
+
+
+def merge_runs(runs: list[LedgerRun]) -> list[LedgerRun]:
+    """One run per key, however many ledger files held a copy of it.
+
+    A worktree's copy of a ledger diverges once it gains a later run, so a run is merged
+    by key rather than by file: otherwise the same run loads twice and every lookup of
+    it is ambiguous. A non-RED proof stays sticky across copies, as within one file.
+    """
+    merged: dict[str, LedgerRun] = {}
+    for run in runs:
+        kept = merged.get(run.key)
+        if kept is None:
+            merged[run.key] = run
+            continue
+        if run.day and (kept.day is None or run.day < kept.day):
+            kept.day = run.day
+        for n, row in run.dispositions.items():
+            kept.dispositions.setdefault(n, row)
+        for n, row in run.outcomes.items():
+            kept.outcomes.setdefault(n, row)
+        for fid, row in run.findings.items():
+            kept.findings.setdefault(fid, row)
+        for n, verdict in run.redproof.items():
+            if verdict != "RED":
+                kept.redproof[n] = verdict
+            else:
+                kept.redproof.setdefault(n, "RED")
+        kept.proof_source = kept.proof_source or run.proof_source
+    return list(merged.values())

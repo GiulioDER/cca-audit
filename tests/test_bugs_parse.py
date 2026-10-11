@@ -109,3 +109,52 @@ def test_bold_and_markdown_headings_open_a_section():
     """Review Focus 1. Red proof: _heading_severity without .strip('*') -> the bold heading opens nothing."""
     body = "fix: 2 audit fixes from CCA\n\n**P1:**\n- BUG-001: a.\n\n## P2\n- BUG-002: b.\n"
     assert _ids(parse_message(body)) == [("BUG-001", "P1"), ("BUG-002", "P2")]
+
+
+SQUASH = """R2-1 forget: audit fixes (#830)
+
+* R2-1 forget: bound the detector
+
+P1:
+- FIX-1, regex backtracking: the pattern was exponential.
+
+* R2-2 forget: audit fixes for the review round
+
+P1:
+- FIX-1: the ledger keeps a bounded copy.
+"""
+
+
+def test_a_squash_subject_line_is_not_a_finding():
+    """Review C2. Red proof: is_finding = bool(m) -> the subject is read as ID R2-2.
+
+    The prefix filter alone would drop R2-2, so the assertion that matters is that the
+    subject closes the section: it is not reported as an unknown ID, and a bullet after
+    it with no heading of its own is not counted under the previous commit's P1.
+    """
+    rejected = []
+    assert _ids(parse_message(SQUASH, rejected)) == [("FIX-1", "P1"), ("FIX-1", "P1")]
+    assert rejected == []
+    tail = "P1:\n- FIX-1: a.\n\n* R2-2 forget: second commit\n\n- FIX-2: no heading of its own.\n"
+    assert _ids(parse_message(tail)) == [("FIX-1", "P1")]
+
+
+def test_a_severity_heading_that_says_deferred_opens_nothing():
+    """Review I2. Red proof: _heading_severity without the skip-word check -> BUG-001 counted."""
+    body = "P2 (deferred to follow-up):\n- BUG-001: a.\nP2, not fixed here:\n- BUG-002: b.\n"
+    assert parse_message(body) == []
+
+
+def test_a_number_after_a_comma_is_text_not_an_id():
+    """Review I3. Red proof: _BULLET_RE accepts a bare number after ',' -> a phantom FIX-3."""
+    [only] = parse_message("P1:\n- FIX-1, 3 call sites now hold the lock.\n")
+    assert only.finding_id == "FIX-1"
+    assert only.summary == "3 call sites now hold the lock."
+
+
+def test_an_unknown_prefix_is_reported_not_counted():
+    """Review I3. Red proof: flush without the KNOWN_PREFIXES check -> UTF-8 counted as a finding."""
+    rejected = []
+    body = "P1:\n- UTF-8 decoding is strict now.\n- SHA-256 digests match.\n- BUG-001: real.\n"
+    assert _ids(parse_message(body, rejected)) == [("BUG-001", "P1")]
+    assert rejected == ["UTF-8", "SHA-256"]

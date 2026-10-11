@@ -80,3 +80,27 @@ def test_the_top_level_cli_forwards_bugs(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CCA_BUGS_DIR", str(tmp_path / "ledger"))
     assert top(["bugs", "backfill", "--repo", str(_published(tmp_path)), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["rows"] == 1
+
+
+def test_a_cli_binding_reaches_the_backfill(tmp_path, monkeypatch, capsys):
+    """Red proof: main passes {} instead of dict(a.bind) -> the bug stays historical."""
+    from bugs_testkit import run_git
+
+    repo = _published(tmp_path)
+    audits = tmp_path / "audits"
+    audits.mkdir()
+    rows = [{"ts": "2026-09-01T09:00:00Z", "run_id": "r1", "verdict": "CONFIRMED", "fix_id": "FIX-1"},
+            {"run_id": "r1", "fix_id": "FIX-1", "result": "fixed", "architect_verdict": "APPROVED"}]
+    (audits / "AUDITOR_SCORECARD.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+    (audits / "redproof-r1.json").write_text(
+        json.dumps([{"finding": "FIX-1", "verdict": "RED"}]), encoding="utf-8")
+    monkeypatch.setenv("CCA_BUGS_DIR", str(tmp_path / "ledger"))
+    msg = "fix(store): 1 audit fix from CCA (FAST tier)\n\nP1:\n- FIX-1: a real defect. +test\n"
+    run_git(repo, "commit", "-q", "--amend", "-m", msg)
+    sha = run_git(repo, "rev-parse", "HEAD").strip()[:12]
+    run_git(repo, "update-ref", "refs/remotes/origin/master", "HEAD")
+    argv = ["backfill", "--repo", str(repo), "--json",
+            "--ledger", f"{audits / 'AUDITOR_SCORECARD.jsonl'}=acme/widgets", "--bind", f"{sha}=r1"]
+    assert main(argv) == 0
+    assert json.loads(capsys.readouterr().out)["tiers"] == {"proved": 1}

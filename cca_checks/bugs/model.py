@@ -34,10 +34,14 @@ class BugRow:
     evidence: dict[str, str] = field(default_factory=dict)
     sources: list[str] = field(default_factory=list)
     supersedes: str | None = None
+    # A squash of two CCA commits can carry FIX-1 twice: finding IDs restart in every
+    # run. The second one in the same commit is ordinal 2, and its bug_id says so.
+    ordinal: int = 1
 
     @property
     def bug_id(self) -> str:
-        return f"{self.project}:{self.fix_commit[:SHA_LEN]}:{self.finding_id}"
+        base = f"{self.project}:{self.fix_commit[:SHA_LEN]}:{self.finding_id}"
+        return base if self.ordinal == 1 else f"{base}~{self.ordinal}"
 
     @property
     def tier(self) -> str:
@@ -63,6 +67,7 @@ class BugRow:
             "sources": list(self.sources),
             "summary": self.summary,
             "supersedes": self.supersedes,
+            "ordinal": self.ordinal,
         }
 
 

@@ -21,13 +21,23 @@ SUBJECT_RE = re.compile(
     r"audit fixes? (?:from|for) |from CCA|CCA (?:audit|self-audit)", re.IGNORECASE
 )
 _ID = r"[A-Z][A-Z0-9]*-\d+"
+# After '/', a bare number continues the previous prefix (CODE-001/002); after ',', only a
+# full ID does, so "- FIX-1, 3 call sites" is FIX-1 followed by text.
 _BULLET_RE = re.compile(
-    rf"^[-*]\s+(?P<ids>{_ID}(?:\s*[/,]\s*(?:[A-Z][A-Z0-9]*-)?\d+)*)(?P<rest>(?:[:,\s].*)?)$"
+    rf"^[-*]\s+(?P<ids>{_ID}(?:\s*/\s*(?:[A-Z][A-Z0-9]*-)?\d+|\s*,\s*{_ID})*)"
+    r"(?P<rest>(?:[:,\s].*)?)$"
 )
 _ONE_ID = re.compile(r"([A-Z][A-Z0-9]*)-(\d+)")
 _SEVERITY = re.compile(r"(P[123])\b")
 _SKIP_TEXT = ("deferred", "(deferred", "not fixed", "owner decision")
+_SKIP_HEADING = ("deferred", "not fixed", "owner decision", "won't fix", "wontfix")
 _FIXED_SEVERITIES = ("P1", "P2")
+# The finding prefixes the pipeline's auditors emit, plus FIX. Anything else that looks
+# like an ID (UTF-8, SHA-256) is reported by the caller, never counted.
+KNOWN_PREFIXES = frozenset({
+    "FIX", "SEC", "BUG", "CODE", "PERF", "DOC", "ENV", "DEP", "DEPLOY",
+    "STAKES", "NUM", "DAT", "DIFF", "ARCH",
+})
 
 
 @dataclass(frozen=True)
@@ -61,11 +71,14 @@ def _heading_severity(line: str) -> str | None:
     if not m:
         return None
     if text.endswith(":") or is_markdown or text == m.group(1):
+        if any(word in text.lower() for word in _SKIP_HEADING):
+            return None  # "P2 (deferred to follow-up):" opens nothing
         return m.group(1)
     return None
 
 
-def parse_message(body: str) -> list[Bullet]:
+def parse_message(body: str, rejected: list[str] | None = None) -> list[Bullet]:
+    """Bullets for the fixed findings in `body`; IDs with an unknown prefix go to `rejected`."""
     bullets: list[Bullet] = []
     section: str | None = None
     current: list | None = None  # [ids, severity, parts]
@@ -77,7 +90,11 @@ def parse_message(body: str) -> list[Bullet]:
             text = " ".join(" ".join(parts).split())
             if (severity in _FIXED_SEVERITIES and text
                     and not text.lower().startswith(_SKIP_TEXT)):
-                bullets.extend(Bullet(i, severity, text) for i in ids)
+                for i in ids:
+                    if i.split("-", 1)[0] in KNOWN_PREFIXES:
+                        bullets.append(Bullet(i, severity, text))
+                    elif rejected is not None:
+                        rejected.append(i)
         current = None
 
     for raw in body.splitlines():
@@ -90,7 +107,10 @@ def parse_message(body: str) -> list[Bullet]:
                 current[2].append(line.strip())
             continue
         m = _BULLET_RE.match(line)
-        if m and section:
+        # A '*' line whose leading ID runs straight into words ("* R2-2 forget: ...") is a
+        # commit subject inside a GitHub squash body, not a finding.
+        is_finding = bool(m) and (line[0] == "-" or m.group("rest")[:1] in (":", ","))
+        if is_finding and section:
             flush()
             current = [expand_ids(m.group("ids")), section, [m.group("rest").lstrip(" :,\t")]]
             continue
@@ -98,9 +118,9 @@ def parse_message(body: str) -> list[Bullet]:
         severity = _heading_severity(line)
         if severity:
             section = severity
-        elif line.startswith(("-", "*")):
+        elif line[0] == "-":
             continue  # a bullet naming no finding ID leaves the section as it is
         else:
-            section = None
+            section = None  # prose, a skipped heading, or a squash body's "* subject" line
     flush()
     return bullets

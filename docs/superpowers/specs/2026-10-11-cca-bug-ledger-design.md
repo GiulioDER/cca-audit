@@ -249,3 +249,22 @@ Also settled while planning, where the spec was silent:
   date wins.
 * `red_proof` starts as `claimed` only when the bullet mentions a test (`+test`, `test_name`,
   "red"); otherwise it starts `absent`.
+
+### Further corrections from the whole-branch review (2026-10-11)
+
+5. **Correction 1 was still unsafe, and is replaced.** FIX numbers restart in every run, and so
+   do auditor IDs (most runs have a SEC-001), so a run that shares IDs with a commit inside the
+   window can be about other fixes entirely: the reviewer showed a commit whose own ledger was
+   lost picking up `proved` from a neighbouring run's artifacts. No automatic match upgrades
+   anything now. Matches are reported as **candidates**, each with the binding that would confirm
+   it, and ledger evidence applies only through an explicit `--bind SHA=RUN` that the author
+   types after checking. A binding that matches no commit is reported.
+6. **§4 identity gains an ordinal.** A squash of two CCA commits can carry the same finding ID
+   twice with different text; the second in one commit is `project:sha:ID~2`.
+7. **§3 reverted fixes are enforced**: a fix commit undone by a revert that is itself still in
+   effect gets no row, and `Revert "..."` commits are not selected. One commit reachable from two
+   repositories (a fork or a lab copy) is counted once and the duplicate is reported.
+8. **Parsing is narrower**: a heading such as `P2 (deferred):` opens nothing; after a comma only
+   a full ID continues the ID list; a `*` line whose ID runs straight into words is a squash
+   commit subject and closes the section; an ID whose prefix is not one the pipeline's auditors
+   emit (or `FIX`) is reported, never counted.

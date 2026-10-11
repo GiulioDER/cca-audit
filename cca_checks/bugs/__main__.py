@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,13 @@ def _ledger_arg(spec: str) -> tuple[Path, str | None]:
     return Path(path), (repo or None)
 
 
+def _bind_arg(spec: str) -> tuple[str, str]:
+    sha, _, run = spec.partition("=")
+    if not re.fullmatch(r"[0-9a-fA-F]{7,40}", sha) or not run:
+        raise argparse.ArgumentTypeError(f"expected SHA=RUN with a 7 to 40 digit sha, got {spec!r}")
+    return sha.lower(), run
+
+
 def _render(summary: dict) -> str:
     lines = [
         f"bugs: {summary['rows']}  tiers: {summary['tiers']}",
@@ -28,7 +36,8 @@ def _render(summary: dict) -> str:
         f"by repository: {summary['by_repo']}",
     ]
     lines += [f"  {c}: {v}" for c, v in summary["evidence"].items()]
-    for label in ("unparsed_commits", "skipped", "ambiguous", "ignored_proofs"):
+    for label in ("unparsed_commits", "skipped", "ambiguous", "candidates", "unused_bindings",
+                  "unknown_ids", "reverted", "cross_repo", "ignored_proofs"):
         lines += [f"{label}: {item}" for item in summary[label]]
     if summary["malformed_ledger_lines"]:
         lines.append(f"malformed ledger lines skipped: {summary['malformed_ledger_lines']}")
@@ -45,12 +54,15 @@ def main(argv: list[str] | None = None) -> int:
                    help="a clone to read; clones of one GitHub repository count once")
     b.add_argument("--ledger", action="append", default=[], metavar="PATH[=OWNER/NAME]",
                    help="a scorecard ledger; name its repository if it is not inside a clone")
+    b.add_argument("--bind", action="append", default=[], type=_bind_arg, metavar="SHA=RUN",
+                   help="confirm that ledger run RUN produced fix commit SHA; ledger evidence "
+                        "applies only through a binding (the dry run lists candidates)")
     b.add_argument("--write", action="store_true", help="append to the ledger and write memos")
     b.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
     try:
-        result = backfill(a.repo, [_ledger_arg(s) for s in a.ledger])
+        result = backfill(a.repo, [_ledger_arg(s) for s in a.ledger], dict(a.bind))
     except GitError as exc:
         print(f"backfill stopped: {exc}", file=sys.stderr)
         return 1
