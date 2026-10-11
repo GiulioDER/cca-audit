@@ -26,6 +26,17 @@ BEHAVIOUR
 
 Exit 2 is the Claude Code convention for "block this tool call and show stderr to
 the model", so the refusal arrives as a correction rather than as a crash.
+
+WHICH RUN. The run is looked for from the directory the commit runs in, not from
+the session's: the payload's `cwd` (else this process's), moved by every leading
+`cd <dir>` joined by `&&`, `;`, `||` or a newline, and by `git -C <dir>` on the commit
+itself (`commit_directories`). Until 0.11 the guard looked only from its own cwd,
+so `cd <worktree> && git commit` was allowed through against a run open in that
+worktree. From that directory the walk up stops at the repository root
+(`find_root`), so a run in any other checkout, including a checkout that merely
+contains this one (the main checkout above `.claude/worktrees/<x>`), stays out of
+scope. That is also why the open run registry is not consulted here: a registered
+run that the walk does not reach lies in another checkout by construction.
 """
 
 from __future__ import annotations
@@ -35,6 +46,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import sys
 
 # Deliberately loose. A false positive costs one state-file read; a false
@@ -175,6 +187,135 @@ def chained_with(command: str) -> str | None:
     return "unterminated quote" if quote else None
 
 
+def read_cwd(raw: str) -> str | None:
+    """The payload's `cwd`, when the JSON envelope carries one."""
+    text = raw.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    return cwd if isinstance(cwd, str) and cwd else None
+
+
+#: Joins after which a `cd` is still in effect for what follows. `||` is one: in
+#: `cd x || exit 1; git commit` the cd succeeded whenever the commit runs. A pipe or
+#: `&` runs the cd in a subshell, so it moves nothing.
+_CD_PERSISTS = frozenset({"&&", ";", "\n", "||"})
+#: Every operator that ends a simple command.
+_ENDS_COMMAND = _CD_PERSISTS | {"|", "&", "|&"}
+#: git global options that take their value as the next word.
+_GIT_VALUE_OPTIONS = frozenset({
+    "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env",
+})
+_POSIX_DRIVE = re.compile(r"^/([A-Za-z])(?=/|$)")
+
+
+_PUNCTUATION = "();<>|&\n"
+#: Longest first: shlex returns a run of punctuation as ONE token (`;\n`, `)&&`), and
+#: this splits it back into the operators the shell sees.
+_OPERATORS = ("&&", "||", "|&", ";;", ">>", "<<", ">&", "<&", ";", "|", "&", "(", ")", "<",
+              ">", "\n")
+
+
+def _split_operators(run: str) -> list[str]:
+    out: list[str] = []
+    while run:
+        op = next((o for o in _OPERATORS if run.startswith(o)), run[0])
+        out.append(op)
+        run = run[len(op):]
+    return out
+
+
+def _tokens(command: str) -> list[str]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=_PUNCTUATION)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    tokens: list[str] = []
+    for token in lexer:
+        if token and all(ch in _PUNCTUATION for ch in token):
+            tokens += _split_operators(token)
+        else:
+            tokens.append(token)
+    return tokens
+
+
+def _change_dir(current: pathlib.Path, target: str) -> pathlib.Path:
+    """`current` after `cd target`; relative targets resolve against `current`."""
+    target = os.path.expanduser(target)
+    if os.name == "nt":
+        # Git Bash spells C:\x as /c/x; pathlib would read it as a path on the current drive.
+        match = _POSIX_DRIVE.match(target)
+        if match:
+            target = f"{match.group(1)}:" + (target[2:] or "/")
+    path = pathlib.Path(target)
+    return path if path.is_absolute() else current / path
+
+
+def commit_directories(command: str, base: pathlib.Path) -> list[pathlib.Path]:
+    """The directory each `git commit` in `command` runs in.
+
+    Starting from `base`, every `cd <dir>` joined to what follows by `&&`, `;`, `||`
+    or a newline moves the directory, and `git -C <dir>` moves it for that git command
+    only. A command shlex cannot parse is cut back a line at a time to its longest
+    parsable prefix (a heredoc commit message is not shell syntax); when no prefix
+    parses the answer is `[base]`, as it also is when no git commit is found.
+    """
+    tokens = None
+    lines = command.split("\n")
+    for keep in range(len(lines), 0, -1):
+        try:
+            tokens = _tokens("\n".join(lines[:keep]))
+            break
+        except ValueError:
+            continue
+    if tokens is None:
+        return [base]
+    found: list[pathlib.Path] = []
+    current = base
+    segment: list[str] = []
+    for token in [*tokens, "\n"]:
+        if token not in _ENDS_COMMAND:
+            segment.append(token)
+            continue
+        words = [w for w in segment if w not in ("(", ")")]
+        segment = []
+        if not words:
+            continue
+        if words[0] == "cd":
+            if token in _CD_PERSISTS and len(words) == 2 and words[1] != "-":
+                current = _change_dir(current, words[1])
+            elif token in _CD_PERSISTS and len(words) == 1:
+                current = pathlib.Path.home()
+            continue
+        directory = _git_commit_directory(words, current)
+        if directory is not None and directory not in found:
+            found.append(directory)
+    return found or [base]
+
+
+def _git_commit_directory(words: list[str], current: pathlib.Path) -> pathlib.Path | None:
+    """Where this simple command commits, or None when it is not a git commit."""
+    for index, word in enumerate(words):
+        if os.path.basename(word).lower() not in ("git", "git.exe"):
+            continue
+        directory = current
+        i = index + 1
+        while i < len(words) and words[i].startswith("-"):
+            if words[i] == "-C" and i + 1 < len(words):
+                directory = _change_dir(directory, words[i + 1])
+                i += 2
+            elif words[i] in _GIT_VALUE_OPTIONS:
+                i += 2
+            else:
+                i += 1
+        if i < len(words) and words[i] == "commit":
+            return directory
+    return None
+
+
 
 def refuse(root: pathlib.Path, reasons: list[str]) -> int:
     print("CCA pipeline gate: this commit is blocked.\n", file=sys.stderr)
@@ -209,10 +350,28 @@ def main(argv: list[str] | None = None) -> int:
     if not command or not _COMMIT_RE.search(command):
         return 0
 
-    root = find_root(pathlib.Path(os.getcwd()).resolve())
-    if root is None:
-        return 0
+    base = pathlib.Path(read_cwd(raw) or os.getcwd())
+    try:
+        directories = commit_directories(command, base)
+    except Exception:  # noqa: BLE001 - an unforeseen parse failure keeps the base directory
+        directories = [base]
+    roots: list[pathlib.Path] = []
+    for directory in directories:
+        try:
+            root = find_root(directory.resolve())
+        except (OSError, ValueError, RuntimeError):
+            root = find_root(base.resolve())
+        if root is not None and root not in roots:
+            roots.append(root)
+    for root in roots:
+        refused = _judge(root, command)
+        if refused:
+            return refused
+    return 0
 
+
+def _judge(root: pathlib.Path, command: str) -> int:
+    """Exit code for a commit against the run open at `root`: 0, or 2 with the reasons."""
     try:
         core = _load_core()
     except Exception as exc:  # noqa: BLE001
