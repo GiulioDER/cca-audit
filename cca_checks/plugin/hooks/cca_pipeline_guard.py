@@ -92,11 +92,6 @@ def read_command(raw: str) -> str:
     return text
 
 
-def evaluate(state: dict, tree: str | None = None) -> list[str]:
-    """Reasons this run may not commit. Empty list means allowed."""
-    return _load_core().commit_reasons(state, tree)
-
-
 def refuse(root: pathlib.Path, reasons: list[str]) -> int:
     print("CCA pipeline gate: this commit is blocked.\n", file=sys.stderr)
     for reason in reasons:

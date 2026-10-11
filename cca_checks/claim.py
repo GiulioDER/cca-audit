@@ -8,7 +8,6 @@ class Claim:
     line: int  # 1-indexed
     claim_type: str
     proposition: str = ""
-    predicted_impact: str = ""
     sink_class: str = ""
 
 @dataclass(frozen=True)
