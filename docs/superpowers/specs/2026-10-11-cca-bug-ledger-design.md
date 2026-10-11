@@ -215,3 +215,37 @@ text enters this repository.
 * Requiring L5.6 proofs for P2 fixes.
 * An MCP server for the `cca` tenant.
 * Any change to gates or to what the commit guard enforces.
+
+## 11. Corrections found while planning (2026-10-11)
+
+These were found by reading the real data while writing the plan, after the sections above were
+approved. The text above is left as approved; where it disagrees with this section, this section
+wins.
+
+1. **§5.6, the ledger join, cannot work as written.** Ledger rows key findings by a run-local
+   `fix_id` (`FIX-1`, `FIX-01`, `FIX-001`), not by the auditor-style ID a commit bullet names
+   (`STAKES-001`); only one ledger also carries a `finding` key. A run is therefore matched on the
+   keys both sides actually share: `FIX-n` IDs named in commit bullets (normalised, so `FIX-01` and
+   `FIX-1` are equal), and `finding` values where a ledger has them. The window is from 3 days
+   before the commit to 1 day after it (timestamps mix time zones). A bullet such as `STAKES-001`
+   in a run whose ledger has no `finding` key gets no per-bug upgrade and stays `claimed`, because
+   nothing on record says which `FIX-n` it was. Measured: recall `0cfa72199` names FIX-1 to FIX-6
+   of run `pr805a`, the one run that saved its proofs.
+2. **§7.2, the embedder.** The `memory` tenant's pipeline defaults to
+   `voyage-context:voyage-context-4` (provider `voyage-context`), not `voyage:voyage-4`. The `cca`
+   tenant uses whatever that pipeline uses, read from it at build time rather than restated.
+3. **§7.4, the first calibration.** The existing scripts only carry a calibration forward or refit
+   it on a stored set, and a new tenant has neither. The first one is `recall calibration calibrate
+   --generation <gen> --queries <file> --publish`; later rebuilds use `calibration auto`.
+4. **§4, the memo.** It lists files, not a diffstat: the row holds no diffstat, and §4 says a memo
+   adds no text the row does not hold.
+
+Also settled while planning, where the spec was silent:
+
+* Only clones whose `origin` is a GitHub URL are read; a clone of a local bundle would otherwise
+  count the same bugs under a second name. Skipped clones are listed in the report.
+* Bullets of the form `- FIX-1, text` (comma after the ID) are parsed, as found in real history.
+* When two reachable commits carry the same finding with the same summary, the earlier committer
+  date wins.
+* `red_proof` starts as `claimed` only when the bullet mentions a test (`+test`, `test_name`,
+  "red"); otherwise it starts `absent`.
