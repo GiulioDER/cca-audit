@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import json
 
-from conftest import load_hook
+from conftest import load_hook, write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -35,7 +35,7 @@ def test_an_incomplete_run_blocks_with_the_next_owed_layer(monkeypatch, capsys, 
     `assert out is not None and out["decision"] == "block" ...`.
     """
     ps.start("FAST", root=git_repo)
-    ps.record("L1", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
     out = _stop(monkeypatch, capsys, git_repo)
     assert out is not None and out["decision"] == "block" and "L2" in out["reason"]
 
@@ -71,11 +71,11 @@ def test_an_architect_block_lets_the_turn_end(monkeypatch, capsys, git_repo):
     `assert _stop(...) is None`.
     """
     ps.start("FAST", root=git_repo)
-    ps.record("L1", root=git_repo)
-    ps.record("L2", counts={"unique": 0}, root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, root=git_repo)
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L6", detail="BLOCKED", root=git_repo)
     assert _stop(monkeypatch, capsys, git_repo) is None
 
@@ -87,11 +87,11 @@ def test_a_complete_run_that_is_still_open_asks_for_close(monkeypatch, capsys, g
     failed at `assert out is not None and "pipeline close" in out["reason"]`.
     """
     ps.start("FAST", root=git_repo)
-    ps.record("L1", root=git_repo)
-    ps.record("L2", counts={"unique": 0}, root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, root=git_repo)
+              output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     out = _stop(monkeypatch, capsys, git_repo)
     assert out is not None and "pipeline close" in out["reason"]
@@ -161,3 +161,19 @@ def test_an_unreadable_state_blocks_once_then_lets_go(monkeypatch, capsys, git_r
     assert "pipeline abort" in first["reason"]
     second = _stop(monkeypatch, capsys, git_repo, stop_hook_active=True)
     assert second is None
+
+
+def test_a_paused_run_lets_the_turn_end_without_spending_a_refusal(monkeypatch, capsys, git_repo):
+    """A paused run allows the stop silently, before the refusal counter is touched.
+
+    Red 2026-10-11: mutation the `if state.get("paused"): return 0` branch removed from
+    `_decide`; failed at `assert _stop(monkeypatch, capsys, git_repo) is None` (a block was
+    printed and a refusal spent).
+    """
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.pause("machine restart", root=git_repo)
+    for _ in range(4):
+        assert _stop(monkeypatch, capsys, git_repo) is None
+    state = ps.load(git_repo)
+    assert state.stop_refusals == 0 and not state.stop_logged
