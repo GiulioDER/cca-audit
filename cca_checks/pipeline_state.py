@@ -42,7 +42,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 
-from cca_checks import layer_outputs
+from cca_checks import deferred, layer_outputs
 
 __all__ = [
     "CommitDecision", "LAYERS", "MODES", "OUTPUT_LAYERS", "PipelineState", "RecordRefused",
@@ -196,7 +196,9 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     re-baseline `base_tree` over its edits (so a run with no fixes recorded would stop
     owing L4 onward), drop an L0.4 recorded by a hunt, reset `stop_refusals`, and leave
     no trail. Retiring a run is `abort()`, which is explicit and logged. `base` is the
-    revision the audited diff is taken against; its sha is stored as `base_commit`.
+    revision the audited diff is taken against; its sha is stored as `base_commit`. A run id
+    that already names a completed run (one holding a `summary.json`) is refused, so the
+    stored work a later deferred pass reads is never overwritten.
     """
     tier = tier.upper()
     if tier not in TIERS:
@@ -216,15 +218,21 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
             "close`, or retire it with `python -m cca_checks pipeline abort --reason "
             '"<why>"`'
         )
+    stamp = core.now()
+    new_id = run_id or stamp.replace(":", "").replace("-", "")
+    if (deferred.runs_dir(root) / new_id / "summary.json").exists():
+        raise RecordRefused(
+            f"run id {new_id!r} already names a completed run under .claude/audits/runs/; "
+            "pick another --run-id, so that run's stored work is not overwritten"
+        )
     base_commit = _commit_of(root, base)
     if base_commit is None and base != "HEAD":
         raise RecordRefused(
             f"--base {base} does not name a commit; pass the revision the audited diff is "
             "taken against (HEAD, or HEAD~N for `commit N`)"
         )
-    stamp = core.now()
     state = PipelineState(
-        run_id=run_id or stamp.replace(":", "").replace("-", ""), tier=tier,
+        run_id=new_id, tier=tier,
         mode=mode, no_fix=no_fix, started_utc=stamp,
         schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
     )
@@ -599,8 +607,38 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
     return log
 
 
+def _write_summary(state: PipelineState, root) -> None:
+    """Write runs/<run_id>/summary.json: what a later deferred pass reads about this run."""
+    summary = {
+        "schema": deferred.SUMMARY_SCHEMA, "run_id": state.run_id, "tier": state.tier,
+        "mode": state.mode, "no_fix": state.no_fix, "base_commit": state.base_commit,
+        "commit": _commit_of(root, "HEAD"), "parent": state.parent,
+        "completed_utc": core.now(),
+        "pool": deferred.pool_ids(_stored_json(state, "L2.5", root),
+                                  _stored_json(state, "L3", root)),
+        "human_pending": (_layer_count(state, "L2.5", "uncertain") or 0)
+        + deferred.parked_count(root, state.run_id),
+    }
+    path = deferred.runs_dir(root) / state.run_id / "summary.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        raise RecordRefused(
+            f"the run summary could not be written to {path.as_posix()} "
+            f"({exc.__class__.__name__}: {exc}); without it no deferred pass can find this "
+            "run. Fix the cause and close again"
+        ) from exc
+
+
 def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
-    """Retire a run that is complete. An incomplete or paused run is refused, not logged."""
+    """Retire a run that is complete. An incomplete or paused run is refused, not logged.
+
+    A schema 2 run first writes its summary (see `_write_summary`); `abort` writes none, and
+    neither does a 0.10.x run.
+    """
     path = state_path(root)
     if not path.exists():
         return None
@@ -615,6 +653,8 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
             "this run is not complete: " + "; ".join(missing)
             + ". Finish it, or retire it with `python -m cca_checks pipeline abort --reason`."
         )
+    if not state.legacy:
+        _write_summary(state, root)
     recorded = ", ".join(sorted(state.layers))
     log = core.append_log(
         root,

@@ -114,6 +114,41 @@ def append_ledger(repo, run_id, n, *, outcome_rows=0, outcome_result="fixed") ->
                                  "architect_verdict": "APPROVED"}) + "\n")
 
 
+def closed_parent(repo, *, run_id="parent", p2_deferred=0, p3=3, human=0, parked=0) -> str:
+    """A closed STANDARD run: fixes F-1, defers `p2_deferred` CONFIRMED P2s at L3 and `p3` P3s
+    at L2.5, leaves `human` UNCERTAIN, and logs `parked` parked outcomes. Returns its run id."""
+    # Imported here, not at the top: this module's docstring promises that the hole tests run
+    # unchanged against a baseline where `cca_checks.pipeline_state` does not exist.
+    from cca_checks import pipeline_state as ps
+
+    confirmed = 1 + p2_deferred
+    unique = confirmed + human + p3
+    p3_ids = {finding_id(i): "P3" for i in range(confirmed + human + 1, unique + 1)}
+    ps.start("STANDARD", run_id=run_id, root=repo)
+    ps.record("L1", output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": unique},
+              output=findings_output(repo, unique, priorities=p3_ids), root=repo)
+    append_ledger(repo, run_id, confirmed + human)
+    ps.record("L2.5", counts={"confirmed": confirmed, "fp": 0, "uncertain": human,
+                              "duplicate": 0, "deferred": p3},
+              output=verdicts_output(repo, confirmed=confirmed, uncertain=human, deferred=p3),
+              root=repo)
+    ps.record("L2.6", detail="0 cells", source="tool", root=repo)
+    ps.record("L3", counts={"to_fix": 1, "deferred": p2_deferred},
+              output=plan_output(repo, to_fix=1, deferred=p2_deferred), root=repo)
+    app = pathlib.Path(repo) / "app.py"
+    app.write_text(app.read_text(encoding="utf-8") + f"# fixed by {run_id}\n", encoding="utf-8")
+    ps.record("L4", fixes=1, output=write_output(repo), root=repo)
+    ps.record("L5", detail="green", root=repo)
+    ps.record("L5.5", detail="all SAFE", root=repo)
+    ps.record("L5.6", detail="1 RED", source="tool", root=repo)
+    ps.record("L6", detail="APPROVED", root=repo)
+    _git(repo, "commit", "-qam", f"fix: audit fixes from CCA ({run_id})")
+    append_ledger(repo, run_id, 0, outcome_rows=parked, outcome_result="parked")
+    ps.close(root=repo)
+    return run_id
+
+
 def load_hook(name: str):
     path = _HOOKS / name
     spec = importlib.util.spec_from_file_location(path.stem, path)

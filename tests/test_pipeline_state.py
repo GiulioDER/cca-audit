@@ -17,6 +17,7 @@ import subprocess
 import pytest
 from conftest import (
     append_ledger,
+    closed_parent,
     finding_id,
     findings_output,
     plan_output,
@@ -1030,3 +1031,68 @@ def test_a_bom_prefixed_ledger_is_still_counted(git_repo):
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
               output=verdicts_output(git_repo, confirmed=1), root=git_repo)
     assert ps.load(git_repo).layers["L2.5"]["counts"]["confirmed"] == 1
+
+
+# --- the run summary -----------------------------------------------------------------
+
+def _summary_of(repo, run_id):
+    return json.loads((repo / ".claude/audits/runs" / run_id / "summary.json")
+                      .read_text(encoding="utf-8"))
+
+
+def test_close_writes_a_summary_whose_pool_is_both_deferral_points(git_repo):
+    """Red 2026-10-11: mutation the l25 half deleted in deferred.pool_ids (L3 half only);
+    failed at `assert s["pool"] == ["F-3", "F-4", "F-2"]` (got ['F-2']). Also: mutation
+    `"commit": _commit_of(root, "HEAD")` became `"commit": state.base_commit` in
+    _write_summary; failed at `assert s["base_commit"] == base and s["commit"] == _head(...)`.
+    """
+    base = _head(git_repo)
+    closed_parent(git_repo, p2_deferred=1, p3=2)
+    s = _summary_of(git_repo, "parent")
+    assert s["pool"] == ["F-3", "F-4", "F-2"]
+    assert s["base_commit"] == base and s["commit"] == _head(git_repo)
+    assert s["mode"] == "DIFF" and s["parent"] is None and s["schema"] == 1
+
+
+def test_human_pending_counts_uncertain_and_parked_findings(git_repo):
+    """Red 2026-10-11: mutation `+ deferred.parked_count(...)` removed in _write_summary;
+    failed at `assert _summary_of(git_repo, "parent")["human_pending"] == 2` (1 == 2)."""
+    closed_parent(git_repo, human=1, parked=1)
+    assert _summary_of(git_repo, "parent")["human_pending"] == 2
+
+
+def test_abort_writes_no_summary(git_repo):
+    """Red 2026-10-11: mutation `_write_summary(state, root)` added to abort(); failed at
+    `assert not (git_repo / ".claude/audits/runs/gone/summary.json").exists()`."""
+    ps.start("FAST", run_id="gone", root=git_repo)
+    ps.abort("test", root=git_repo)
+    assert not (git_repo / ".claude/audits/runs/gone/summary.json").exists()
+
+
+def test_a_no_fix_run_summary_pools_what_l2_5_deferred(git_repo):
+    """A run with no L3 (no-fix) still pools what L2.5 deferred.
+
+    Red 2026-10-11: mutation `pool` made `[]` unless "L3" is a recorded layer, in
+    _write_summary; failed at `assert s["no_fix"] is True and s["pool"] == ["F-2"]` ([] against
+    ['F-2']).
+    """
+    ps.start("STANDARD", no_fix=True, run_id="nf", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 2},
+              output=findings_output(git_repo, 2, priorities={"F-2": "P3"}), root=git_repo)
+    append_ledger(git_repo, "nf", 1)
+    ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
+                              "deferred": 1},
+              output=verdicts_output(git_repo, confirmed=1, deferred=1), root=git_repo)
+    ps.record("L2.6", detail="0 cells", source="tool", root=git_repo)
+    ps.close(root=git_repo)
+    s = _summary_of(git_repo, "nf")
+    assert s["no_fix"] is True and s["pool"] == ["F-2"]
+
+
+def test_start_refuses_a_run_id_that_names_a_completed_run(git_repo):
+    """Review Focus 4. Red 2026-10-11: mutation the summary-exists check deleted in start();
+    failed at pytest.raises (DID NOT RAISE RecordRefused)."""
+    closed_parent(git_repo)
+    with pytest.raises(ps.RecordRefused, match="already names a completed run"):
+        ps.start("FAST", run_id="parent", root=git_repo)
