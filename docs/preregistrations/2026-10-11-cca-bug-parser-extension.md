@@ -51,3 +51,36 @@ first run produced, each judged by reading its summary against `git show -s <fix
   would skip a real P1 section and undercount.
 * The judgement in prediction 3 is mine, the author's; a second reader could grade borderline
   rows differently.
+
+## Result (2026-10-11)
+**Status:** measured. Prediction 1 falsified; 2, 3 and 4 held, 3 only at its threshold.
+
+Measured at `674ae53` (parser `a7d07d6`) against the first run's code (`2f42d44`) on the same
+inputs, read-only.
+
+| # | Predicted | Measured | Held? |
+|---|---|---|---|
+| 1 | parsed share 70% to 80% | **69 of 107, 64.5%** as pre-registered; 79 of 117 (67.5%) against the fixed selection | **no** |
+| 2 | 500 to 900 rows | 644 (409 under stand-in IDs, 51 from topic sections with no severity) | yes |
+| 3 | at least 9 of 10 new rows are fixes | **9 of 10**; the miss is a row under a `DECLINED:` heading | yes, at the threshold |
+| 4 | 0 proved unbound, 1 bound | 0 of 644 unbound; 1 bound (`RE-call:0cfa7219954d:FIX-1`) | yes |
+
+**The metric's denominator moved.** The pre-registered share divides by commits that produced a
+row plus unparsed commits. Ten selected commits now produce neither: every row they yield
+collapses into an earlier commit with the same finding and text (a squash or a cherry-pick). The
+selection itself did not change (117), so 79 of 117 is the steadier figure. Both are below 70%.
+
+**Two defects the measurement found, both mine:**
+
+1. **A regression.** Three rows the first run produced are gone: RE-call `c560dd987a99`'s
+   CODE-003, DOC-002 and DOC-003, whose bullet begins "Stale comments: ...". The bullet-level skip
+   list included "stale", which is a heading word ("Stale (already fixed in round 1):"), not a
+   bullet word: there it describes what was fixed.
+2. **A missing skip word.** `DECLINED:` opened a topic section, so a declined finding (CODE-007,
+   "verified correct; restructuring ... is risk without benefit") counted as a fix.
+
+**Gap.** I estimated 88 commits from a structure scan and measured 79 (or 69). The scan counted a
+commit as readable when it had a P1/P2 heading with bullets or a known ID under a topic heading;
+it could not see that some of those collapse into earlier commits, and it counted commits whose
+only bullets sit under headings the skip list now excludes. The 29 prose-only commits stay
+unparsed by design. The sample judgement is mine, as the confounds section said.
