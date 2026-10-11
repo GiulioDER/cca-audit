@@ -68,8 +68,12 @@ def load_summaries(root) -> tuple[list[dict], list[str]]:
         except (OSError, ValueError):
             unreadable.append(path.as_posix())
             continue
+        # A summary that names another run, or a schema this code does not know, is not
+        # loaded: `findings_for` builds a path from its run id, so trusting the file's word
+        # over its directory would let one run's summary read another run's L2 file.
         if not isinstance(raw, dict) or not isinstance(raw.get("run_id"), str) \
-                or not isinstance(raw.get("pool"), list):
+                or not isinstance(raw.get("pool"), list) \
+                or raw["run_id"] != path.parent.name or raw.get("schema") != SUMMARY_SCHEMA:
             unreadable.append(path.as_posix())
             continue
         found.append(raw)
@@ -102,10 +106,15 @@ def why_not_offered(summary: dict, summaries) -> str | None:
 
 
 def findings_for(root, summary: dict) -> list[dict]:
-    """The run's stored L2 objects for exactly its pool ids, in pool order."""
+    """The run's stored L2 objects for exactly its pool ids, in pool order.
+
+    Parsed from bytes, as `record` parsed the file: `json.loads` on bytes accepts a UTF-8
+    BOM (Windows PowerShell 5.1 writes one) and on text it does not, and `_store_output`
+    copies the accepted file verbatim.
+    """
     path = runs_dir(root) / summary["run_id"] / "L2.json"
     try:
-        rows = json.loads(path.read_text(encoding="utf-8"))
+        rows = json.loads(path.read_bytes())
     except (OSError, ValueError) as exc:
         raise LookupError(
             f"run {summary['run_id']} has no readable L2 findings at {path.as_posix()} "

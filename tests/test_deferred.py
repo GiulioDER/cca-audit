@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from conftest import closed_parent
 
 from cca_checks import deferred
 
@@ -110,6 +111,36 @@ def test_findings_for_returns_the_pool_objects_in_pool_order(tmp_path):
         ["F-3", "F-1"]
 
 
+def test_findings_for_loads_an_l2_file_that_starts_with_a_bom(tmp_path):
+    """`record` accepts a BOM-prefixed L2 file (it parses bytes) and stores it verbatim, so a
+    pool built from it must load.
+
+    Red 2026-10-11: mutation `json.loads(path.read_bytes())` became
+    `json.loads(path.read_text(encoding="utf-8"))` in findings_for; failed at the findings_for
+    call (LookupError: no readable L2 findings, json refusing the BOM in text).
+    """
+    run = tmp_path / ".claude/audits/runs/r1"
+    run.mkdir(parents=True)
+    (run / "L2.json").write_bytes(b"\xef\xbb\xbf" + json.dumps([_f(1), _f(2)]).encode("utf-8"))
+    found = deferred.findings_for(tmp_path, _s(pool=["F-2"]))
+    assert [f["id"] for f in found] == ["F-2"]
+
+
+def test_findings_for_reads_the_file_a_closed_run_stored(git_repo):
+    """The path findings_for reads is the one `record` stores and `close` summarises.
+
+    Red 2026-10-11: mutation `"L2.json"` became `"L2.out.json"` in findings_for; failed at
+    the findings_for call (LookupError: no readable L2 findings at .../L2.out.json).
+    """
+    closed_parent(git_repo, p3=2)
+    summaries, unreadable = deferred.load_summaries(git_repo)
+    assert unreadable == [] and [s["run_id"] for s in summaries] == ["parent"]
+    found = deferred.findings_for(git_repo, summaries[0])
+    assert summaries[0]["pool"] == ["F-2", "F-3"]
+    assert [f["id"] for f in found] == summaries[0]["pool"]
+    assert all(f["priority"] == "P3" for f in found)
+
+
 def test_findings_for_names_a_missing_l2_file(tmp_path):
     """Review Focus 1. Red 2026-10-11: mutation the `except` body replaced by `return []` in
     findings_for; failed at pytest.raises (DID NOT RAISE LookupError)."""
@@ -142,6 +173,26 @@ def test_an_unreadable_summary_is_reported_not_skipped(tmp_path):
     summaries, unreadable = deferred.load_summaries(tmp_path)
     assert [s["run_id"] for s in summaries] == ["a"]
     assert len(unreadable) == 1 and unreadable[0].endswith("b/summary.json")
+
+
+def test_a_summary_naming_another_run_or_another_schema_is_unreadable(tmp_path):
+    """findings_for builds a path from the summary's run id, so a summary is trusted only when
+    its run id is its directory's name and its schema is the one this code writes.
+
+    Red 2026-10-11, two mutations in load_summaries: `raw["run_id"] != path.parent.name`
+    removed, which loaded the "liar" summary; `raw.get("schema") != SUMMARY_SCHEMA` removed,
+    which loaded "future" and "bare". Each failed at the `["a"]` assert.
+    """
+    runs = tmp_path / ".claude/audits/runs"
+    bare = _s("bare")
+    del bare["schema"]
+    for name, body in (("a", _s("a")), ("liar", _s("victim")),
+                       ("future", _s("future", schema=2)), ("bare", bare)):
+        (runs / name).mkdir(parents=True)
+        (runs / name / "summary.json").write_text(json.dumps(body), encoding="utf-8")
+    summaries, unreadable = deferred.load_summaries(tmp_path)
+    assert [s["run_id"] for s in summaries] == ["a"]
+    assert sorted(p.split("/")[-2] for p in unreadable) == ["bare", "future", "liar"]
 
 
 def test_a_bom_prefixed_ledger_still_counts_its_parked_rows(tmp_path):

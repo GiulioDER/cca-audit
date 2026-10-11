@@ -1096,3 +1096,43 @@ def test_start_refuses_a_run_id_that_names_a_completed_run(git_repo):
     closed_parent(git_repo)
     with pytest.raises(ps.RecordRefused, match="already names a completed run"):
         ps.start("FAST", run_id="parent", root=git_repo)
+
+
+def test_closing_a_legacy_run_writes_no_summary(git_repo):
+    """A 0.10.x run (no schema 2) closes as before and leaves no summary for a deferred pass.
+
+    Red 2026-10-11: mutation `if not state.legacy:` became `if True:` in close(); failed at
+    `assert not summary.exists()`.
+    """
+    path = ps.state_path(git_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"run_id": "old", "tier": "FAST", "mode": "DIFF",
+                                "no_fix": False, "fixes_applied": 0, "layers": {}}),
+                    encoding="utf-8")
+    assert ps.close(root=git_repo) is not None
+    assert not path.exists()
+    summary = git_repo / ".claude/audits/runs/old/summary.json"
+    assert not summary.exists()
+
+
+def test_a_summary_that_cannot_be_written_keeps_the_run_open(git_repo):
+    """A failed summary write refuses the close, names the path, and leaves the run closable.
+
+    The obstacle is a directory where summary.json must go, so os.replace fails for real
+    (PermissionError on Windows, IsADirectoryError on Linux).
+
+    Red 2026-10-11: mutation `raise RecordRefused(...) from exc` replaced by `pass` in the
+    OSError handler of _write_summary; failed at `pytest.raises(ps.RecordRefused)` (DID NOT
+    RAISE).
+    """
+    state = _through_l3(git_repo, "DEEP", no_fix=True)
+    summary = git_repo / ".claude/audits/runs" / state.run_id / "summary.json"
+    summary.mkdir(parents=True)
+    with pytest.raises(ps.RecordRefused) as refused:
+        ps.close(root=git_repo)
+    assert summary.as_posix() in str(refused.value)
+    assert ps.load(git_repo) is not None
+    summary.rmdir()
+    assert ps.close(root=git_repo) is not None
+    assert ps.load(git_repo) is None
+    assert json.loads(summary.read_text(encoding="utf-8"))["run_id"] == state.run_id
