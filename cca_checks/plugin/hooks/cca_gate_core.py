@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 SCHEMA = 2
 LAYERS = ("L0.4", "L1", "L2", "L2.5", "L2.6", "L3", "L4", "L5", "L5.5", "L5.6", "L6")
 TIERS = ("FAST", "STANDARD", "DEEP")
+MODES = ("DIFF", "HUNT", "DEFERRED")
 APPROVING_VERDICT = "APPROVED"
 TOOL_LAYERS = {
     "L2.6": "python .claude/tools/cca_scorecard.py --json --record",

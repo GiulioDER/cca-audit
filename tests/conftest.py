@@ -61,6 +61,110 @@ def write_output(root, value=None) -> str:
     return str(path)
 
 
+#: The order verdicts_output hands ids out in. CONFIRMED come first, so a plan_output over
+#: the first `to_fix + deferred` ids names only findings L2.5 confirmed.
+_VERDICT_ORDER = (("confirmed", "CONFIRMED"), ("fp", "FALSE_POSITIVE"),
+                  ("uncertain", "UNCERTAIN"), ("duplicate", "DUPLICATE"),
+                  ("unverified", "DEFERRED"), ("stale", "STALE"))
+
+
+def finding_id(i: int) -> str:
+    return f"F-{i}"
+
+
+def findings_output(root, n=0, *, priorities=None) -> str:
+    """An L2 file of `n` consolidated findings, F-1 to F-n, each P2 unless `priorities`
+    (a dict of id to P1, P2 or P3) says otherwise."""
+    priorities = priorities or {}
+    rows = [{"id": finding_id(i), "auditor": "cca-bug-auditor", "category": "x",
+             "priority": priorities.get(finding_id(i), "P2"), "file": "app.py", "line": i,
+             "claim": f"claim {i}", "high_stakes": False} for i in range(1, n + 1)]
+    return write_output(root, rows)
+
+
+def verdicts_output(root, *, ids=None, **counts) -> str:
+    """An L2.5 file whose verdicts match `counts`, keyed like the record flags
+    (confirmed, fp, uncertain, duplicate, unverified, stale); `unverified` ids get DEFERRED.
+    The ids are F-1, F-2, ... in that order, or taken in order from `ids` when given."""
+    rows, i = [], 0
+    for key, verdict in _VERDICT_ORDER:
+        for _ in range(counts.get(key, 0)):
+            rows.append({"id": ids[i] if ids is not None else finding_id(i + 1),
+                         "verdict": verdict})
+            i += 1
+    return write_output(root, rows)
+
+
+def plan_output(root, *, to_fix=0, deferred=0, ids=None) -> str:
+    """An L3 file planning the first `to_fix` CONFIRMED ids and deferring the next `deferred`;
+    the ids are F-1, F-2, ... or, when given, the first ones of `ids`."""
+    count = to_fix + deferred
+    chosen = list(ids)[:count] if ids is not None else [finding_id(i) for i in range(1, count + 1)]
+    return write_output(root, {"to_fix": chosen[:to_fix], "deferred": chosen[to_fix:]})
+
+
+def pool_output(repo, parent="parent") -> tuple[str, list[str]]:
+    """An L2 file holding exactly the pool of the closed run `parent`, its stored L2 objects in
+    pool order, as a DEFERRED run's L2 must; returns (path, pool ids)."""
+    run = pathlib.Path(repo) / ".claude" / "audits" / "runs" / parent
+    pool = json.loads((run / "summary.json").read_text(encoding="utf-8"))["pool"]
+    stored = {f["id"]: f for f in json.loads((run / "L2.json").read_bytes())}
+    return write_output(repo, [stored[i] for i in pool]), list(pool)
+
+
+def append_ledger(repo, run_id, n, *, outcome_rows=0, outcome_result="fixed",
+                  verdict="CONFIRMED") -> None:
+    """`n` verdict rows (each `verdict`) and `outcome_rows` outcome rows for `run_id` in the
+    disposition ledger. L2.5 tallies the rows per verdict, so each must match its count."""
+    path = pathlib.Path(repo) / ".claude" / "audits" / "AUDITOR_SCORECARD.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for i in range(n):
+            fh.write(json.dumps({"run_id": run_id, "auditor": "cca-bug-auditor",
+                                 "category": "x", "verdict": verdict,
+                                 "fix_id": f"FIX-{i}"}) + "\n")
+        for i in range(outcome_rows):
+            fh.write(json.dumps({"run_id": run_id, "fix_id": f"FIX-{i}",
+                                 "result": outcome_result,
+                                 "architect_verdict": "APPROVED"}) + "\n")
+
+
+def closed_parent(repo, *, run_id="parent", p2_deferred=0, p3=3, human=0, parked=0) -> str:
+    """A closed STANDARD run: fixes F-1, defers `p2_deferred` CONFIRMED P2s at L3 and `p3` P3s
+    at L2.5, leaves `human` UNCERTAIN, and logs `parked` parked outcomes. Returns its run id."""
+    # Imported here, not at the top: this module's docstring promises that the hole tests run
+    # unchanged against a baseline where `cca_checks.pipeline_state` does not exist.
+    from cca_checks import pipeline_state as ps
+
+    confirmed = 1 + p2_deferred
+    unique = confirmed + human + p3
+    p3_ids = {finding_id(i): "P3" for i in range(confirmed + human + 1, unique + 1)}
+    ps.start("STANDARD", run_id=run_id, root=repo)
+    ps.record("L1", output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": unique},
+              output=findings_output(repo, unique, priorities=p3_ids), root=repo)
+    append_ledger(repo, run_id, confirmed)
+    append_ledger(repo, run_id, human, verdict="UNCERTAIN")
+    ps.record("L2.5", counts={"confirmed": confirmed, "fp": 0, "uncertain": human,
+                              "duplicate": 0, "unverified": p3},
+              output=verdicts_output(repo, confirmed=confirmed, uncertain=human, unverified=p3),
+              root=repo)
+    ps.record("L2.6", detail="0 cells", source="tool", root=repo)
+    ps.record("L3", counts={"to_fix": 1, "deferred": p2_deferred},
+              output=plan_output(repo, to_fix=1, deferred=p2_deferred), root=repo)
+    app = pathlib.Path(repo) / "app.py"
+    app.write_text(app.read_text(encoding="utf-8") + f"# fixed by {run_id}\n", encoding="utf-8")
+    ps.record("L4", fixes=1, output=write_output(repo), root=repo)
+    ps.record("L5", detail="green", root=repo)
+    ps.record("L5.5", detail="all SAFE", root=repo)
+    ps.record("L5.6", detail="1 RED", source="tool", root=repo)
+    ps.record("L6", detail="APPROVED", root=repo)
+    _git(repo, "commit", "-qam", f"fix: audit fixes from CCA ({run_id})")
+    append_ledger(repo, run_id, 0, outcome_rows=parked, outcome_result="parked")
+    ps.close(root=repo)
+    return run_id
+
+
 def load_hook(name: str):
     path = _HOOKS / name
     spec = importlib.util.spec_from_file_location(path.stem, path)

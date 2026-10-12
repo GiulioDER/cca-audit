@@ -148,6 +148,17 @@ other command, substitution or index override in it, and before committing confi
 `git diff --cached --name-only` and `git diff --name-only` share no path and that no staged deletion
 still has its file on disk. `pipeline status` does not make those checks.
 
+## Offer the deferred pass
+
+After `pipeline close` succeeds, run `python -m cca_checks pipeline deferred`. When it prints
+`"offered": true`, end the report with one question: how many findings were deferred, by
+priority; the `recommendation` (RUN or SKIP) and its first reason; and whether to run the
+deferred pass now. On yes, run `audit+fix deferred` as the canonical § Second Pass describes,
+in this task. Never start it without that yes. When it prints `"offered": false`, report its
+first reason in one line. While any summary is unreadable (`unreadable` is non-empty), `offered`
+is false and that first reason names the files: the deferred start refuses until they are fixed or
+moved aside.
+
 ## Report completion
 
 Return the canonical summary with tier, scope, domains, deterministic coverage and blindness,

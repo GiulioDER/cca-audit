@@ -18,15 +18,24 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - A second `pipeline start` is refused (exit 2, `{"refused": "start"}`) while a run is open, instead of replacing it. Replacing re-baselined the tree over the run's edits, dropped L0.4, and left no trail. Retire a run with `pipeline close` or `pipeline abort --reason`.
 - `pipeline record` of L1, L2, L2.5, L3 and L4 requires `--output <file>` on a schema 2 run: a JSON file under `.claude/audits/` (a file elsewhere would change the tree fingerprint, so it is refused) holding that layer's work, copied to `.claude/audits/runs/<run_id>/<layer>.json` and named in the layer entry. Any other layer given `--output` is refused rather than ignored.
 - The red-state proof (`cca_tautology_check.py verify`) runs pytest with `PYTHONDONTWRITEBYTECODE=1`. It used to leave `.pyc` files compiled from the pre-fix source, which changed the tree fingerprint after verify and left L5 stale in repositories that do not ignore `__pycache__`.
+- The L2.5 file must give every L2 finding exactly one verdict. A finding passed on unverified (P3, and P2 on FAST), counted with `--unverified` (see Fixed in the pre-release audit), is written `DEFERRED` there and gets no ledger row; such findings used to be filed under a verdict they never received.
+- L3 must plan or defer every confirmed finding (`--to-fix` plus `--deferred` equals L2.5's confirmed); `--deferred` replaces the free text `--detail "<D> deferred"`.
+- `record` checks the L2, L2.5 and L3 files against their counts and against each other, and refuses a file that disagrees.
+- `pipeline start --base <rev>` stores the commit the audited diff is taken against (default `HEAD`); `--mode` is validated.
+- The scorecard no longer counts `STALE` rows as disposed.
+- `pipeline record` and `pipeline status` fingerprint the working tree once per call. Each fingerprint is a `git add -A` over a copy of the index; `record` ran two and `status` ran three. `pipeline_state.required_layers`, `outstanding`, `verify_commit_allowed` and `record` accept a precomputed `tree=` from the new `current_tree()`.
+- The `pipeline` subcommand moved from `cca_checks/__main__.py` to `cca_checks/pipeline_cli.py`. The command line is unchanged.
+- The installers moved from `cca_checks/plugin/__init__.py` to `cca_checks/plugin/installer.py`. `cca_checks.plugin` still exports the same public names; code that patched a private helper on the package (`plugin._write`) must patch `cca_checks.plugin.installer` instead.
 
 ### Added
 - `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
 - `pipeline status --require-complete` for Codex, which has no hooks.
 - `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
-
-- `pipeline record` and `pipeline status` fingerprint the working tree once per call. Each fingerprint is a `git add -A` over a copy of the index; `record` ran two and `status` ran three. `pipeline_state.required_layers`, `outstanding`, `verify_commit_allowed` and `record` accept a precomputed `tree=` from the new `current_tree()`.
-- The `pipeline` subcommand moved from `cca_checks/__main__.py` to `cca_checks/pipeline_cli.py`. The command line is unchanged.
-- The installers moved from `cca_checks/plugin/__init__.py` to `cca_checks/plugin/installer.py`. `cca_checks.plugin` still exports the same public names; code that patched a private helper on the package (`plugin._write`) must patch `cca_checks.plugin.installer` instead.
+- `pipeline close` writes `.claude/audits/runs/<run_id>/summary.json`: tier, mode, base and final commit, and the deferred pool.
+- `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input, and writes only under `.claude/audits/out/`. While any summary is unreadable the report says `offered: false`, since the deferred start refuses then.
+- `pipeline start --mode DEFERRED --from <run_id>` (or `--from commit:<sha>`): a deferred pass that owes every layer, refuses FAST, and cannot defer again. `/audit-fix` offers it after a run closes.
+- The `STALE` verdict, for deferred runs only: the issue was present in the tree the parent run audited (its `base_tree`, which `pipeline close` now writes into the summary) and is gone now, because later work moved, rewrote or fixed it. `pipeline record L2.5` takes it as `--stale <S>` (a deferred run can use neither `--unverified` at L2.5 nor `--deferred` at L3), the L2.5 file of any other run refuses it, and its ledger row says `STALE`, never `FALSE_POSITIVE`.
+- `fp-check` has a `MODE=DEFERRED`: it verifies every deferred finding, P2 and P3 alike, checks that the cited code lies inside the diff of the run that deferred it, and returns `STALE` for an issue that later work removed. Its status block gained `mode: DEFERRED` and a `stale:` count.
 
 ### Removed
 - `Claim.predicted_impact`, which nothing read or wrote.
@@ -36,10 +45,11 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.
+- A run already in flight when this version lands, whose L2, L2.5 or L3 file lacks the new shape, is refused at that `record`, and the refusal names the shape. The execution ledger is append-only, so the run cannot be repaired in place: `pipeline abort --reason` it and start again.
 - Upgrading from 0.10.x: run `cca-audit install` first, so `.claude/hooks/` holds `cca_gate_core.py` and `cca_stop_guard.py`, and only then replace BOTH hook entries in settings.json with the output of `cca-audit install --print-hook`. A Stop hook registered before its script is installed exits 2, which refuses every turn end. The commit guard's timeout rose from 15 s to 60 s: it now fingerprints the tree for up to 30 s, and a hook that times out lets the commit through. `install` warns about a guard entry still registered below 60 s, and `--print-hook` warns when the hook files are missing.
 
 ### Fixed in the pre-release audit
-- `record L2.5` takes `--unverified <N>` for findings Step 2.5 passes on without a verdict (P3, and P2 on FAST); verdicts plus unverified must equal L2's `--unique`. Before, any run with a P3 was refused at L2.5. On STANDARD and DEEP the ledger is tallied per verdict, and a row with an unknown verdict is refused.
+- `record L2.5` takes `--unverified <N>` for findings Step 2.5 passes on without a verdict (P3, and P2 on FAST); verdicts plus unverified must equal L2's `--unique`. Before, any run with a P3 was refused at L2.5. On STANDARD and DEEP the ledger is tallied per verdict (`STALE` included, for a deferred run), and a row with an unknown verdict is refused.
 - An L3 that planned fixes owes L4 onward before the tree changes; L6 could follow L3 directly and the run close COMPLETE with its fixes never applied.
 - A fix verdict cannot be shown current when the tree cannot be fingerprinted: `record` refuses L5 to L6 then, and a stored or current unknown fingerprint is stale. An unknown compared equal to an unknown, so every verdict read fresh after any edit.
 - The commit guard refuses a commit chained with other commands (`; && || | &` or a newline outside quotes), since it judges the tree before the command runs, and a commit that stages a file whose content differs from its working tree copy, since the commit ships the index. Both checks share the fingerprint's single 30 s deadline.

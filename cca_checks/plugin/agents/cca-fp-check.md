@@ -1,6 +1,6 @@
 ---
 name: fp-check
-description: Findings verifier (anti-hallucination). Re-checks each P1/P2 finding against the real code and returns CONFIRMED / FALSE_POSITIVE / UNCERTAIN.
+description: Findings verifier (anti-hallucination). Re-checks each P1/P2 finding (every deferred finding, P3 included, in a deferred pass) against the real code and returns CONFIRMED / FALSE_POSITIVE / UNCERTAIN, plus DUPLICATE in a hunt and STALE in a deferred pass.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -22,11 +22,12 @@ agent: fp-check
 status: COMPLETE | PARTIAL | SKIPPED | ERROR
 timestamp: [ISO timestamp]
 duration: [seconds]
-mode: DIFF | HUNT
+mode: DIFF | HUNT | DEFERRED
 findings_checked: [count]
 confirmed: [count]
 false_positives: [count]
 duplicates: [count]        # MODE=HUNT only; 0 otherwise
+stale: [count]             # MODE=DEFERRED only; 0 otherwise
 uncertain: [count]
 errors: []
 ---
@@ -35,14 +36,19 @@ errors: []
 ## Input
 
 A consolidated list of P1/P2 findings (ID, description, file:line, claimed impact) plus the
-diff command used by the audit (e.g. `git diff HEAD`). P3 findings are not verified — they are
-deferred regardless.
+diff command used by the audit (e.g. `git diff HEAD`). In MODE=DIFF and MODE=HUNT you are never
+sent P3 findings: the run records them `DEFERRED`. In MODE=DEFERRED you receive the deferred
+findings themselves, P2 and P3 alike, and verify every one. You are also given `base_tree` and
+`base_commit` of the earlier run that deferred them: the tree its auditors read (before its own
+fixes), and the commit its diff was taken against.
 
 ## Verdict per Finding
 
 For each finding, check against the ACTUAL code with Read/Grep:
 
-1. **Existence** — Does the issue actually exist at the cited `file:line`?
+1. **Existence** — Does the issue actually exist at the cited `file:line`? In MODE=DEFERRED, an
+   issue that is absent now but present in the tree the earlier run audited (its `base_tree`) is
+   **STALE**, not FALSE_POSITIVE.
 2. **In scope** — this criterion depends on the run's MODE, which the invocation states:
    - **MODE=DIFF (default)** — Is it in code that was CHANGED in this diff (use the provided diff
      command), not a pre-existing issue outside the audited change?
@@ -57,6 +63,16 @@ For each finding, check against the ACTUAL code with Read/Grep:
      in the same place** — a keyword collision is not a duplicate. If the search errors, is
      unauthenticated, is rate-limited, or you cannot reach the tracker, that is **not** a duplicate:
      say so and keep the finding.
+   - **MODE=DEFERRED** (a deferred pass over findings an earlier run deferred): is the cited
+     code inside `git diff <base_commit>`, the code that run audited or fixed? Outside it is
+     FALSE_POSITIVE, reason "out of scope". When no `base_commit` is given, say this check
+     could not run. A fifth verdict exists in this mode only: **STALE**, when the issue is
+     present in the tree that run audited (`git show <base_tree>:<file>`) and absent now
+     because later work moved, rewrote or fixed it, that run's own fixes included. If no
+     `base_tree` is given, or git no longer has that tree, read
+     `git show <base_commit>:<file>` and weigh the finding's own evidence: the audited tree
+     may have held uncommitted changes that commit lacks. FALSE_POSITIVE means it was never
+     there.
 3. **Impact** — Is the stated impact real, or already mitigated elsewhere (config in another
    module, guard upstream, value validated before this point)?
 
@@ -67,6 +83,11 @@ Emit exactly one verdict per finding:
   Give the evidence.
 - **DUPLICATE** *(MODE=HUNT only)* — real, but already reported or already fixed on the target's
   default branch. Cite the issue/PR URL you actually read. It is someone else's find, not yours.
+- **STALE** *(MODE=DEFERRED only)*: present in the tree the earlier run audited, absent now
+  because later work moved, rewrote or fixed it. Give `git show <base_tree>:<file>` evidence for
+  the earlier state (or `git show <base_commit>:<file>` and the finding's own evidence, when the
+  tree is gone) and what you read now. Nothing is left to fix, so it is not eligible for the fix
+  plan.
 - **UNCERTAIN** — cannot confirm or refute without runtime or business context. → never fix blind;
   escalate to a human.
 
@@ -80,8 +101,8 @@ UNCERTAIN.
 
 This is *how* you answer Existence / In-scope / Impact: re-derive each against the real code —
 mechanically via `python -m cca_checks` where a tool covers the claim_type, otherwise by
-cited-fact adjudication — rather than by re-reading the finding text. For each P1/P2 finding,
-run TWO phases in order:
+cited-fact adjudication — rather than by re-reading the finding text. For each finding you are
+sent (P1/P2, or every deferred finding in MODE=DEFERRED), run TWO phases in order:
 
 **Phase 0 — ask what can be settled here.** The claim types available depend on the file's
 LANGUAGE and on which tools are installed on THIS machine. Do not infer either from the sections
@@ -288,6 +309,14 @@ that carries a tool artifact — that is, any verdict whose `source` is `pyright
 `clippy`, `ast`, `pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
 `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit `source: llm`.
 
+**One exception, MODE=DEFERRED only: a tool-backed `FALSE_POSITIVE` can be the first half of a
+STALE verdict.** The tool read the code as it is now; a finding fixed after the earlier run audited
+it comes back `FALSE_POSITIVE` for exactly that reason. When `git show <base_tree>:<file>` shows the
+issue present in the audited tree, the verdict is **STALE**, not FALSE_POSITIVE: keep the tool
+artifact verbatim as the evidence for "now", and cite the `git show` read as the evidence for
+"then". This does not overturn the tool, which is right about the code it read; it adds the
+earlier state the tool never saw. A tool-backed `CONFIRMED` is never overturned, in any mode.
+
 **Taint verdicts are asymmetric.** The checker never returns `CONFIRMED` for a `taint` claim.
 A `FALSE_POSITIVE` means no sink of that class exists anywhere in the enclosing scope, so the
 finding's premise does not hold — honour it. An `UNCERTAIN` that names a `taint-*` rule means
@@ -313,7 +342,7 @@ investigate, do not drop.
 you gathered (guard location, caller list, resolved symbol) — never re-read the finding text alone.
 Mark `source: llm` and `evidence:` = the cited facts.
 
-**Artifact-or-UNCERTAIN rule:** a `CONFIRMED`/`FALSE_POSITIVE` verdict MUST carry non-empty
+**Artifact-or-UNCERTAIN rule:** a `CONFIRMED`/`FALSE_POSITIVE`/`STALE` verdict MUST carry non-empty
 `evidence`; otherwise emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you
 couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 
@@ -328,6 +357,7 @@ couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 | SEC-002 | FALSE_POSITIVE | llm | input already validated at router.py:40 (upstream) |
 | ENV-001 | UNCERTAIN | llm | depends on deployment config not in repo |
 | BUG-011 | DUPLICATE | llm | already reported upstream: https://github.com/<owner>/<repo>/issues/412 |
+| DEF-004 | STALE | llm | `git show 1a2b3c4:app/orders.py` line 88 had the bare lookup; now guarded at orders.py:80 |
 
 ## Confirmed
 - <ID>: <one-line reason>
@@ -338,11 +368,15 @@ couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 ## Dropped (duplicates — MODE=HUNT only)
 - <ID>: <issue/PR URL you read> — <why it is the same defect>
 
+## Stale (MODE=DEFERRED only)
+- <ID>: <`git show <base_tree>:<file>` evidence it was there>; <what moved, rewrote or fixed it>
+
 ## Uncertain — needs human
 - <ID>: <what context is missing>
 ```
 
-Omit the duplicates section entirely in MODE=DIFF; it has no meaning there.
+Omit the duplicates section entirely in MODE=DIFF and MODE=DEFERRED; it has no meaning there.
+Omit the stale section outside MODE=DEFERRED.
 
 Every row MUST fill `Evidence` (a tool artifact — the JSON `evidence` field verbatim — or the
 specific cited facts for an `llm`-sourced verdict). Verdicts obey the artifact-or-UNCERTAIN
@@ -360,7 +394,8 @@ After completing, append to `.claude/audits/EXECUTION_LOG.md`:
 Before completing:
 1. Verify `.claude/audits/AUDIT_FPCHECK.md` was created.
 2. Verify every input finding received exactly one verdict.
-3. If there were no P1/P2 findings to check, write "No P1/P2 findings to verify" (not an empty file).
+3. If there were no findings to check (no P1/P2 findings; in MODE=DEFERRED, no deferred findings),
+   write "No P1/P2 findings to verify" (not an empty file).
 
 When the evidence is not clear, the verdict is **UNCERTAIN** — not FALSE_POSITIVE.
 

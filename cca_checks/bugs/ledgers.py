@@ -75,7 +75,9 @@ def _row_day(row: dict) -> date | None:
 
 def load_ledger(path: Path, repo: str, report: LoadReport) -> list[LedgerRun]:
     runs: dict[str, LedgerRun] = {}
-    text = path.read_text(encoding="utf-8", errors="replace")
+    # utf-8-sig, like every reader of this ledger: one created by Windows PowerShell 5.1
+    # starts with a BOM, which would make its first row unparseable.
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue

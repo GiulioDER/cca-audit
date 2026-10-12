@@ -4,6 +4,23 @@ One test per CONFIRMED P1 finding (U01 to U09 in the run's L2.5 output), each dr
 the real API or the real hook against a throwaway git repository, plus the controls
 that keep a fix from over-blocking. The red proof of every test is the pre-fix code
 at 0ec8c47, executed by `cca_tautology_check.py verify` at Step 5.6.
+
+Merged into feat/deferred-pass on 2026-10-11, where `record` holds the L2, L2.5 and L3
+files to their counts and to each other. `_findings`, `_verdicts` and `_plan` now build files
+of that shape; no assertion moved. Each test whose fixture changed was seen red again that
+day, against a mutation of the merged production line, in its own assertion:
+- U01 accept: `total = judged + unverified` became `total = judged` in
+  pipeline_state._check_counts; failed at `pytest.fail` (L2.5 refused).
+- U04: `_fixes_planned` in cca_gate_core returned False; failed at the `outstanding`
+  assertion (only "L6 has no recorded verdict" was owed).
+- U09: `if planned > a.parked:` became `if False:` in cca_tautology_check.main; failed at
+  `assert 0 != 0`.
+- U09 parked control: `planned > a.parked` became `planned > 0`; failed at `assert 2 == 0`.
+- U15: `if unknown or mismatched:` became `if False:` in _check_counts; failed at
+  pytest.raises (DID NOT RAISE). Its L2.5 file now holds three CONFIRMED verdicts: with the
+  empty file it had before, the L2.5 shape check refused it with the same word, so the test
+  stayed green with the ledger tally disabled.
+The U01, U04 and U09 (P2 only) controls are labelled controls against over-blocking.
 """
 
 from __future__ import annotations
@@ -65,15 +82,27 @@ def _complete(tree):
             "L5.6": _d(9, source="tool", tree=tree), "L6": _d(10, "APPROVED", tree=tree)}
 
 
-def _findings(n):
-    return [{"id": f"U{i:02d}"} for i in range(1, n + 1)]
+# Since the deferred-pass merge, `record` holds the L2, L2.5 and L3 files to their counts and
+# to each other (an id and a priority per L2 finding, a verdict per L2 id, a plan of CONFIRMED
+# ids), so these helpers build files of that shape. Fixture support only: no assertion moved.
+def _findings(n, **priority):
+    """L2 findings U01 to U<n>, each P2 unless `priority` (U01="P1", ...) says otherwise."""
+    return [{"id": f"U{i:02d}", "priority": priority.get(f"U{i:02d}", "P2")}
+            for i in range(1, n + 1)]
 
 
 def _verdicts(**tally):
+    """L2.5 verdicts for U01 onward, handed out in the order `tally` names them."""
     out = []
     for verdict, n in tally.items():
-        out += [{"id": f"{verdict}-{i}", "verdict": verdict} for i in range(n)]
+        for _ in range(n):
+            out.append({"id": f"U{len(out) + 1:02d}", "verdict": verdict})
     return out
+
+
+def _plan(to_fix=(), deferred=()):
+    """An L3 file: the ids planned for a fix, and the CONFIRMED ids deferred."""
+    return {"to_fix": list(to_fix), "deferred": list(deferred)}
 
 
 def _ledger(repo, run_id, rows):
@@ -98,13 +127,14 @@ def test_u01_l25_accepts_unverified_findings(git_repo):
     """
     state = ps.start("STANDARD", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 3}, output=write_output(git_repo, _findings(3)),
+    ps.record("L2", counts={"unique": 3},
+              output=write_output(git_repo, _findings(3, U01="P1", U02="P3", U03="P3")),
               root=git_repo)
     _ledger(git_repo, state.run_id, [("P1", "CONFIRMED")])
     try:
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                                   "unverified": 2},
-                  output=write_output(git_repo, _verdicts(CONFIRMED=1, UNVERIFIED=2)),
+                  output=write_output(git_repo, _verdicts(CONFIRMED=1, DEFERRED=2)),
                   root=git_repo)
     except ps.RecordRefused as exc:
         pytest.fail(f"L2.5 with 2 unverified P3s was refused: {exc}")
@@ -121,7 +151,7 @@ def test_u01_control_unverified_cannot_hide_a_missing_verdict(git_repo):
     with pytest.raises(ps.RecordRefused):
         ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0,
                                   "unverified": 1},
-                  output=write_output(git_repo, _verdicts(CONFIRMED=1, UNVERIFIED=1)),
+                  output=write_output(git_repo, _verdicts(CONFIRMED=1, DEFERRED=1)),
                   root=git_repo)
 
 
@@ -173,7 +203,8 @@ def test_u04_l6_refused_after_a_plan_with_fixes_and_no_l4(git_repo):
               root=git_repo)
     ps.record("L2.5", counts={"confirmed": 2, "fp": 0, "uncertain": 0, "duplicate": 0},
               output=write_output(git_repo, _verdicts(CONFIRMED=2)), root=git_repo)
-    ps.record("L3", counts={"to_fix": 2}, output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 2}, output=write_output(git_repo, _plan(["U01", "U02"])),
+              root=git_repo)
     state = ps.load(git_repo)
     assert any(r.startswith("L4 ") for r in ps.outstanding(state, git_repo)), \
         ps.outstanding(state, git_repo)
@@ -188,7 +219,7 @@ def test_u04_control_a_plan_with_no_fixes_goes_straight_to_l6(git_repo):
     ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
               output=write_output(git_repo), root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo, _plan()), root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     assert ps.outstanding(ps.load(git_repo), git_repo) == []
 
@@ -249,12 +280,15 @@ def test_u08_control_a_lone_commit_is_still_allowed(monkeypatch, git_repo, comma
 def _run_to_l5(repo, *, p1_confirmed: bool, to_fix: int):
     state = ps.start("STANDARD", root=repo)
     ps.record("L1", output=write_output(repo), root=repo)
-    ps.record("L2", counts={"unique": 1}, output=write_output(repo, _findings(1)), root=repo)
+    ps.record("L2", counts={"unique": 1},
+              output=write_output(repo, _findings(1, U01="P1" if p1_confirmed else "P2")),
+              root=repo)
     _ledger(repo, state.run_id, [("P1" if p1_confirmed else "P2", "CONFIRMED")])
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
               output=write_output(repo, _verdicts(CONFIRMED=1)), root=repo)
     ps.record("L2.6", source="tool", root=repo)
-    ps.record("L3", counts={"to_fix": to_fix}, output=write_output(repo), root=repo)
+    ps.record("L3", counts={"to_fix": to_fix, "deferred": 1 - to_fix},
+              output=write_output(repo, _plan(["U01"][:to_fix], ["U01"][to_fix:])), root=repo)
     (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(repo), root=repo)
     ps.record("L5", root=repo)
@@ -310,7 +344,7 @@ def test_u15_ledger_breakdown_must_match_the_counts(git_repo):
     _ledger(git_repo, state.run_id, [("P2", "FALSE_POSITIVE")] * 3)
     with pytest.raises(ps.RecordRefused, match="disagrees"):
         ps.record("L2.5", counts={"confirmed": 3, "fp": 0, "uncertain": 0, "duplicate": 0},
-                  output=write_output(git_repo), root=git_repo)
+                  output=write_output(git_repo, _verdicts(CONFIRMED=3)), root=git_repo)
 
 
 def test_u17_install_warns_about_a_short_guard_timeout(tmp_path, monkeypatch):

@@ -24,7 +24,14 @@ def add_parser(sub) -> None:
         "start", help="open a run (call at Step 0.6, once the tier is known)"
     )
     pl_start.add_argument("--tier", required=True, choices=sorted(pipeline_state.TIERS))
-    pl_start.add_argument("--mode", default="DIFF", choices=["DIFF", "HUNT"])
+    pl_start.add_argument("--mode", default="DIFF", choices=list(pipeline_state.MODES))
+    pl_start.add_argument("--base", default="HEAD",
+                          help="the revision the audited diff is taken against (HEAD~N for "
+                               "`commit N`); stored as the run's base_commit. Refused with "
+                               "--mode DEFERRED, which takes its parent's base")
+    pl_start.add_argument("--from", dest="parent", default="",
+                          help="--mode DEFERRED only: the completed run (or commit:<sha>) "
+                               "whose deferred findings this run takes")
     pl_start.add_argument("--no-fix", action="store_true")
     pl_start.add_argument("--run-id", default="")
     pl_start.add_argument("--root", default=".")
@@ -46,8 +53,11 @@ def add_parser(sub) -> None:
         ("--fp", "L2.5: FALSE_POSITIVE verdicts"),
         ("--uncertain", "L2.5: UNCERTAIN verdicts"),
         ("--duplicate", "L2.5: DUPLICATE verdicts"),
-        ("--unverified", "L2.5: findings passed on without a verdict (P3; P2 on FAST)"),
+        ("--unverified", "L2.5: findings passed on without a verdict (P3; P2 on FAST), "
+                         "each marked DEFERRED in the L2.5 file"),
+        ("--stale", "L2.5, DEFERRED run only: findings whose code moved on (STALE)"),
         ("--to-fix", "L3: findings the plan will fix"),
+        ("--deferred", "L3: confirmed findings deferred, not fixed"),
     ):
         pl_record.add_argument(flag, type=int, default=None, help=help_text)
     pl_record.add_argument(
@@ -84,6 +94,17 @@ def add_parser(sub) -> None:
     pl_close = plsub.add_parser("close", help="retire a run that passed its gates")
     pl_close.add_argument("--root", default=".")
 
+    pl_deferred = plsub.add_parser(
+        "deferred", help="after a run closes: what it deferred, and whether a second pass "
+                         "over it is offered (RUN or SKIP, with reasons)"
+    )
+    pl_deferred.add_argument("--run", default="",
+                             help="a completed run id; default the newest completed run")
+    pl_deferred.add_argument("--write", default=None,
+                             help="write the pool's findings to this file under "
+                                  ".claude/audits/out/, as a deferred run's L1 input")
+    pl_deferred.add_argument("--root", default=".")
+
 
 def run(a) -> int:
     """Run the `pipeline` subcommand. Prints JSON; returns a process exit code.
@@ -99,7 +120,8 @@ def run(a) -> int:
         if a.pipeline_cmd == "start":
             try:
                 state = pipeline_state.start(
-                    a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, root=a.root
+                    a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, base=a.base,
+                    parent=a.parent, root=a.root,
                 )
             except pipeline_state.RecordRefused as exc:
                 print(json.dumps({"refused": "start", "reason": str(exc)}), file=sys.stderr)
@@ -110,7 +132,8 @@ def run(a) -> int:
         if a.pipeline_cmd == "record":
             counts = {"unique": a.unique, "confirmed": a.confirmed, "fp": a.fp,
                       "uncertain": a.uncertain, "duplicate": a.duplicate,
-                      "unverified": a.unverified, "to_fix": a.to_fix}
+                      "unverified": a.unverified, "stale": a.stale, "to_fix": a.to_fix,
+                      "deferred": a.deferred}
             # Recording writes only under .claude/audits/, which the fingerprint
             # excludes, so the tree taken before it is the tree after it.
             run_state = pipeline_state.load(a.root)
@@ -171,6 +194,19 @@ def run(a) -> int:
                       file=sys.stderr)
                 return 2
             print(json.dumps(result))
+            return 0
+
+        if a.pipeline_cmd == "deferred":
+            try:
+                if a.write is not None:
+                    offer, path = pipeline_state.write_deferred(a.write, a.run, root=a.root)
+                    print(json.dumps({**offer.to_json(), "written": path}))
+                    return 0
+                offer = pipeline_state.deferred_report(a.run, root=a.root)
+            except pipeline_state.RecordRefused as exc:
+                print(json.dumps({"refused": "deferred", "reason": str(exc)}), file=sys.stderr)
+                return 2
+            print(json.dumps(offer.to_json()))
             return 0
 
         if a.pipeline_cmd == "abort":

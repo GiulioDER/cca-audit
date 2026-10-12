@@ -39,12 +39,16 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 from dataclasses import dataclass, field
 
+from cca_checks import deferred, layer_outputs
+
 __all__ = [
-    "CommitDecision", "LAYERS", "OUTPUT_LAYERS", "PipelineState", "RecordRefused", "TIERS",
-    "abort", "close", "current_tree", "load", "outstanding", "pause", "record",
-    "required_layers", "resume", "start", "state_path", "verify_commit_allowed",
+    "CommitDecision", "LAYERS", "MODES", "OUTPUT_LAYERS", "PipelineState", "RecordRefused",
+    "TIERS", "abort", "close", "current_tree", "deferred_report", "load", "outstanding",
+    "pause", "record", "required_layers", "resume", "start", "state_path",
+    "verify_commit_allowed", "write_deferred",
 ]
 
 
@@ -64,6 +68,7 @@ def _load_core():
 core = _load_core()
 LAYERS = core.LAYERS
 TIERS = core.TIERS
+MODES = core.MODES
 OUTPUT_LAYERS = core.OUTPUT_LAYERS
 #: A run id names a directory, so only characters every filesystem accepts.
 _RUN_ID = re.compile(r"[A-Za-z0-9._-]+")
@@ -107,6 +112,8 @@ class PipelineState:
     stop_refusals: int = 0
     stop_logged: bool = False
     paused: dict | None = None
+    base_commit: str | None = None
+    parent: str | None = None
 
     def to_json(self) -> dict:
         return {
@@ -115,6 +122,7 @@ class PipelineState:
             "fixes_applied": self.fixes_applied, "base_tree": self.base_tree,
             "seq": self.seq, "stop_refusals": self.stop_refusals,
             "stop_logged": self.stop_logged, "paused": self.paused, "layers": self.layers,
+            "base_commit": self.base_commit, "parent": self.parent,
         }
 
     @classmethod
@@ -140,6 +148,8 @@ class PipelineState:
             stop_refusals=int(raw.get("stop_refusals", 0) or 0),
             stop_logged=bool(raw.get("stop_logged", False)),
             paused=raw.get("paused") if isinstance(raw.get("paused"), dict) else None,
+            base_commit=raw.get("base_commit") if isinstance(raw.get("base_commit"), str) else None,
+            parent=raw.get("parent") if isinstance(raw.get("parent"), str) else None,
         )
 
     @property
@@ -163,18 +173,151 @@ def _write(state: PipelineState, root) -> None:
     core.write_state(root, state.to_json())
 
 
+def _git(root, *args: str) -> subprocess.CompletedProcess[bytes] | None:
+    """Run git in `root` with the gate's trusted git; None when it cannot run."""
+    git = core._git_exe(core._top_hint(str(pathlib.Path(root).resolve())))
+    if git is None:
+        return None
+    try:
+        return subprocess.run([git, "-C", str(root), *args], capture_output=True,
+                              timeout=core.FINGERPRINT_TIMEOUT_S, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _commit_of(root, rev: str) -> str | None:
+    """The full sha `rev` names; None when it names no commit."""
+    done = _git(root, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
+    if done is None or done.returncode != 0:
+        return None
+    return done.stdout.decode("utf-8", "replace").strip() or None
+
+
+def _is_ancestor(root, sha: str) -> bool:
+    """True when `sha` is an ancestor of HEAD. A value starting with `-` is never one: the
+    value can come from a summary file, and git would read it as an option."""
+    if sha.startswith("-"):
+        return False
+    done = _git(root, "merge-base", "--is-ancestor", sha, "HEAD")
+    return done is not None and done.returncode == 0
+
+
+_NO_DEFERRAL = (
+    "a DEFERRED run cannot defer: its findings are the deferred ones, so each is verified and "
+    "then fixed, or left UNCERTAIN for a human"
+)
+#: What `--from commit:<sha>` may hold: an abbreviated or full object name, never a revision
+#: expression. `HEAD`, `-x`, `main~2` and `a..b` are all things `git rev-parse` would accept
+#: or read as an option, so the form is checked before git sees it. Up to 64 characters: a
+#: SHA-256 repository names its objects with 64.
+_COMMIT_SHA = re.compile(r"[0-9A-Fa-f]{7,64}")
+
+
+def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, str | None]:
+    """Check the run a DEFERRED run follows; return (parent as stored, base_commit).
+
+    A run id is held to every rule in `deferred.why_not_offered`. `commit:<sha>` is for a run
+    that left no summary, so a sha that is the commit of a run that did leave one is refused:
+    it would otherwise skip those rules (a pool already taken, a hunt, no-fix or deferred
+    parent). The inherited base is resolved here, not copied, because the summary is a file a
+    person can edit. Unreadable summaries refuse the start (fail closed): one of them might be
+    the child that already took the pool.
+    """
+    if not parent:
+        raise RecordRefused(
+            "--mode DEFERRED needs --from <run_id>: the completed run whose deferred findings "
+            "this run takes (`python -m cca_checks pipeline deferred` names it)"
+        )
+    if tier == "FAST":
+        raise RecordRefused(
+            "a DEFERRED run cannot be FAST: FAST verifies P1 findings only, and every "
+            "deferred finding is verified before it is edited; start it STANDARD or DEEP"
+        )
+    if no_fix:
+        raise RecordRefused(
+            "a DEFERRED run exists to fix; to list the deferred findings without edits, run "
+            "`python -m cca_checks pipeline deferred` instead"
+        )
+    summaries, unreadable = deferred.load_summaries(root)
+    if unreadable:
+        raise RecordRefused(
+            f"{len(unreadable)} run summary file(s) under .claude/audits/runs/ cannot be read "
+            f"({', '.join(unreadable)}), so it cannot be known whether a pool was already "
+            "taken; fix or move them, then start again"
+        )
+    if parent.startswith("commit:"):
+        rev = parent.removeprefix("commit:")
+        if not _COMMIT_SHA.fullmatch(rev):
+            raise RecordRefused(
+                f"--from {parent} is not of the form commit:<sha>, where <sha> is 7 to 64 "
+                "hexadecimal characters"
+            )
+        sha = _commit_of(root, rev)
+        if sha is None or not _is_ancestor(root, sha):
+            raise RecordRefused(
+                f"--from {parent} does not name a commit that is an ancestor of HEAD"
+            )
+        owners = [s["run_id"] for s in summaries if s.get("commit") == sha]
+        if owners:
+            raise RecordRefused(
+                f"--from {parent} is the commit of completed run {', '.join(owners)}, which has "
+                f"a summary; use --from {owners[0]} so that run's own rules apply"
+            )
+        stored = f"commit:{sha}"
+        child = deferred.consumed_by(stored, summaries)
+        if child:
+            raise RecordRefused(f"deferred run {child} already took the findings of {stored}")
+        return stored, None
+    summary = next((s for s in summaries if s["run_id"] == parent), None)
+    if summary is None:
+        raise RecordRefused(
+            f"no completed run {parent!r} has a summary under .claude/audits/runs/; "
+            "`pipeline deferred` names the runs that do, and a run that predates summaries "
+            "is taken by the commit-message fallback of audit-fix.md § Second Pass"
+        )
+    why_not = deferred.why_not_offered(summary, summaries)
+    if why_not:
+        raise RecordRefused(f"run {parent} cannot be followed up: {why_not}")
+    inherited = summary.get("base_commit")
+    base_commit = _commit_of(root, inherited) if isinstance(inherited, str) else None
+    return parent, base_commit
+
+
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
+          base: str = "HEAD", parent: str = "",
           root: str | pathlib.Path = ".") -> PipelineState:
     """Open a run: at Step 0.6, or at Step 0.4 for a hunt.
 
     Refused while a state file exists, readable or not. Overwriting an open run would
     re-baseline `base_tree` over its edits (so a run with no fixes recorded would stop
     owing L4 onward), drop an L0.4 recorded by a hunt, reset `stop_refusals`, and leave
-    no trail. Retiring a run is `abort()`, which is explicit and logged.
+    no trail. Retiring a run is `abort()`, which is explicit and logged. `base` is the
+    revision the audited diff is taken against; its sha is stored as `base_commit`. A run id
+    that already names a completed run (one holding a `summary.json`) is refused, so the
+    stored work a later deferred pass reads is never overwritten; so is any id an earlier run
+    left stored outputs or ledger rows under, whose rows would count toward this run's L2.5.
+
+    A DEFERRED run names the run it follows in `parent` (a run id, or `commit:<sha>` for a
+    run that left no summary). `_deferred_parent` checks it; the run then takes that run's
+    `base_commit` (None when it no longer resolves) rather than resolving `base`, and `parent`
+    is stored as given by that check. `parent` is refused in any other mode, and `base` is
+    refused in DEFERRED mode.
     """
     tier = tier.upper()
     if tier not in TIERS:
         raise ValueError(f"unknown tier {tier!r} (expected one of {', '.join(TIERS)})")
+    mode = mode.upper()
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r} (expected one of {', '.join(MODES)})")
+    if parent and mode != "DEFERRED":
+        raise RecordRefused(
+            f"--from names the run a DEFERRED run follows up; it is refused with --mode {mode}"
+        )
+    if mode == "DEFERRED" and base != "HEAD":
+        raise RecordRefused(
+            f"--base {base} is refused with --mode DEFERRED: the run takes its parent's base, "
+            "so there is no diff base to choose"
+        )
     if run_id and (not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")):
         raise RecordRefused(
             f"run id {run_id!r} is refused: it names the directory "
@@ -188,26 +331,44 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
             '"<why>"`'
         )
     stamp = core.now()
-    run_id = run_id or stamp.replace(":", "").replace("-", "")
-    if (pathlib.Path(root) / ".claude" / "audits" / "runs" / run_id).exists() or \
-            _ledger_mentions(root, run_id):
+    new_id = run_id or stamp.replace(":", "").replace("-", "")
+    if (deferred.runs_dir(root) / new_id / "summary.json").exists():
+        raise RecordRefused(
+            f"run id {new_id!r} already names a completed run under .claude/audits/runs/; "
+            "pick another --run-id, so that run's stored work is not overwritten"
+        )
+    if (deferred.runs_dir(root) / new_id).exists() or _ledger_mentions(root, new_id):
         # A reused id would count the earlier run's ledger rows toward this run's L2.5
         # and overwrite its stored outputs.
         raise RecordRefused(
-            f"run id {run_id!r} was used by an earlier run (its outputs or ledger rows "
+            f"run id {new_id!r} was used by an earlier run (its outputs or ledger rows "
             "exist); start with a new --run-id"
         )
+    if mode == "DEFERRED":
+        stored_parent, base_commit = _deferred_parent(tier, no_fix, parent, root)
+    else:
+        stored_parent = None
+        base_commit = _commit_of(root, base)
+        if base_commit is None and base != "HEAD":
+            raise RecordRefused(
+                f"--base {base} does not name a commit; pass the revision the audited diff "
+                "is taken against (HEAD, or HEAD~N for `commit N`)"
+            )
     state = PipelineState(
-        run_id=run_id, tier=tier,
-        mode=mode.upper(), no_fix=no_fix, started_utc=stamp,
-        schema=core.SCHEMA, base_tree=core.fingerprint(root),
+        run_id=new_id, tier=tier,
+        mode=mode, no_fix=no_fix, started_utc=stamp,
+        schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
+        parent=stored_parent,
     )
     _write(state, root)
     return state
 
 
+#: Ledger verdict to the L2.5 count it tallies against. DEFERRED is absent on purpose: a
+#: finding passed on unverified received no verdict, so it gets no ledger row. STALE is
+#: present: a DEFERRED run's verifier gives it, and it gets a row like any other verdict.
 _VERDICT_COUNTS = {"CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp",
-                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate"}
+                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate", "STALE": "stale"}
 
 
 LEDGER = ".claude/audits/AUDITOR_SCORECARD.jsonl"
@@ -223,12 +384,16 @@ def ledger_rows(root: str | pathlib.Path = ".") -> tuple[list[dict], int]:
 
 
 def _ledger(root) -> tuple[list[dict], int]:
-    """(rows of the disposition ledger, malformed lines)."""
+    """(rows of the disposition ledger, malformed lines).
+
+    Read as `utf-8-sig`: a ledger created by Windows PowerShell 5.1 starts with a BOM, which
+    would make its first row malformed and refuse L2.5.
+    """
     path = ledger_path(root)
     rows: list[dict] = []
     malformed = 0
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return [], 0
     for line in lines:
@@ -269,6 +434,15 @@ def _need(counts: dict, key: str, layer: str) -> int:
     return int(value)
 
 
+def _optional(counts: dict, key: str, layer: str) -> int:
+    value = counts.get(key)
+    if value is None:
+        return 0
+    if int(value) < 0:
+        raise RecordRefused(f"{layer} --{key.replace('_', '-')} cannot be negative")
+    return int(value)
+
+
 def _layer_count(state: PipelineState, layer: str, key: str) -> int | None:
     entry = state.layers.get(layer)
     if not isinstance(entry, dict):
@@ -281,36 +455,48 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
     if layer == "L2":
         _need(counts, "unique", layer)
     elif layer == "L2.5":
-        total = sum(
-            _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
-        )
-        # Findings passed on without a verdict (P3, and P2 on FAST): Step 2.5 verifies
-        # only P1/P2, so without this count every run with a P3 was refused here.
-        unverified = _need(counts, "unverified", layer) if "unverified" in counts else 0
-        unique = _layer_count(state, "L2", "unique")
-        if unique is not None and total + unverified != unique:
+        given = {
+            k: _need(counts, k, layer) for k in ("confirmed", "fp", "uncertain", "duplicate")
+        }
+        # Findings passed on without a verdict (P3, and P2 on FAST): Step 2.5 verifies only
+        # P1/P2, so without this count every run with a P3 was refused here. The L2.5 file
+        # marks each of them DEFERRED, and the ledger holds no row for them.
+        unverified = _optional(counts, "unverified", layer)
+        given["stale"] = _optional(counts, "stale", layer)
+        if unverified and state.mode == "DEFERRED":
+            raise RecordRefused(_NO_DEFERRAL)
+        if given["stale"] and state.mode != "DEFERRED":
             raise RecordRefused(
-                f"L2.5 accounts for {total + unverified} findings ({total} verdicts, "
-                f"{unverified} unverified) but L2 recorded {unique} unique; every "
-                "consolidated finding needs exactly one verdict, or is counted with "
-                "--unverified when Step 2.5 passes it on unverified"
+                "--stale is for a DEFERRED run only: STALE means the code moved on since the "
+                "run that deferred the finding, and a first run has no earlier run"
+            )
+        judged = sum(given.values())
+        total = judged + unverified
+        unique = _layer_count(state, "L2", "unique")
+        if unique is not None and total != unique:
+            raise RecordRefused(
+                f"L2.5 accounts for {total} findings ({judged} verdicts, {unverified} "
+                f"unverified) but L2 recorded {unique} unique; every consolidated finding "
+                "needs exactly one verdict, or is counted with --unverified (and marked "
+                "DEFERRED in the L2.5 file) when Step 2.5 passes it on unverified"
             )
         if state.tier != "FAST":
             tally, malformed = _ledger_rows(root, state.run_id)
             rows = sum(tally.values())
             note = f" ({malformed} malformed line(s) skipped)" if malformed else ""
-            if rows != total:
+            if rows != judged:
                 raise RecordRefused(
                     f"the disposition ledger holds {rows} row(s) for run {state.run_id} but "
-                    f"L2.5 recorded {total} verdicts{note}; append one row per verified "
-                    "finding to .claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
+                    f"L2.5 recorded {judged} verdicts{note}; append one row per verified "
+                    "finding (a DEFERRED finding gets none) to "
+                    ".claude/audits/AUDITOR_SCORECARD.jsonl (Step 2.5b) with "
                     f'"run_id": "{state.run_id}"'
                 )
             unknown = sorted(set(tally) - set(_VERDICT_COUNTS))
             mismatched = [
-                f"{verdict}: ledger {tally.get(verdict, 0)}, --{key} {counts[key]}"
+                f"{verdict}: ledger {tally.get(verdict, 0)}, --{key} {given[key]}"
                 for verdict, key in _VERDICT_COUNTS.items()
-                if tally.get(verdict, 0) != int(counts[key])
+                if tally.get(verdict, 0) != given[key]
             ]
             if unknown or mismatched:
                 detail = "; ".join(
@@ -323,10 +509,16 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
                 )
     elif layer == "L3":
         to_fix = _need(counts, "to_fix", layer)
+        # `n_deferred`, not `deferred`: that name is kept free for the deferred-pass module
+        # this file imports.
+        n_deferred = _optional(counts, "deferred", layer)
+        if n_deferred and state.mode == "DEFERRED":
+            raise RecordRefused(_NO_DEFERRAL)
         confirmed = _layer_count(state, "L2.5", "confirmed")
-        if confirmed is not None and to_fix > confirmed:
+        if confirmed is not None and to_fix + n_deferred != confirmed:
             raise RecordRefused(
-                f"L3 --to-fix {to_fix} exceeds the {confirmed} findings L2.5 confirmed"
+                f"L3 plans {to_fix} (--to-fix) and defers {n_deferred} (--deferred) but L2.5 "
+                f"confirmed {confirmed}; every confirmed finding is either planned or deferred"
             )
 
 
@@ -371,6 +563,142 @@ def _read_output(layer: str, output, root) -> bytes:
     return data
 
 
+def _stored_json(state: PipelineState, layer: str, root) -> object | None:
+    """The work file `layer` stored in this run, parsed; None when absent or unreadable.
+
+    Parsed from bytes, as `_read_output` parsed it: `json.loads` on bytes accepts a UTF-8 BOM
+    (Windows PowerShell 5.1 writes one) and on text it does not, so reading the stored copy
+    as text would refuse a file `record` had accepted.
+    """
+    entry = state.layers.get(layer)
+    rel = entry.get("output") if isinstance(entry, dict) else None
+    if not rel:
+        return None
+    try:
+        return json.loads((pathlib.Path(root) / rel).read_bytes())
+    except (OSError, ValueError):
+        return None
+
+
+def _stored_l2(state: PipelineState, root) -> list:
+    """L2's stored findings, held to the shape L2 is now recorded in.
+
+    A run recorded by an earlier version stored whatever it was given, and a later layer
+    reads these ids and priorities back, so the refusal names the stored file.
+    """
+    l2 = _stored_json(state, "L2", root)
+    if not isinstance(l2, list):
+        raise layer_outputs.ShapeError("L2's stored file is missing or unreadable; record L2 again")
+    try:
+        return layer_outputs.l2_findings(l2, len(l2))
+    except layer_outputs.ShapeError as exc:
+        raise layer_outputs.ShapeError(
+            f"L2's stored file does not have the finding shape ({exc}); record L2 again"
+        ) from exc
+
+
+def _stored_l25(state: PipelineState, root, l2_ids: list) -> dict[str, str]:
+    """L2.5's stored verdicts (id to verdict), held to the shape and counts it was recorded with."""
+    l25 = _stored_json(state, "L2.5", root)
+    if not isinstance(l25, list):
+        raise layer_outputs.ShapeError(
+            "L2.5's stored file is missing or unreadable; record L2.5 again"
+        )
+    entry = state.layers.get("L2.5")
+    recorded = entry.get("counts") if isinstance(entry, dict) else None
+    try:
+        return layer_outputs.l25_verdicts(l25, recorded or {}, l2_ids)
+    except layer_outputs.ShapeError as exc:
+        raise layer_outputs.ShapeError(
+            f"L2.5's stored file does not have the verdict shape ({exc}); record L2.5 again"
+        ) from exc
+
+
+def _held_to_pool(state: PipelineState, findings: list, root) -> None:
+    """Refuse a DEFERRED run's L2 unless it holds exactly its parent's pool, at its priorities.
+
+    The parent's pool is consumed when this run closes, so an L2 that dropped a pool finding
+    would lose it for good, and one that added a finding, or lowered a priority, would carry
+    into the run what the parent never deferred. The pool and the priorities are read from the
+    parent's summary and its stored L2 file, not from this run's L1. Duplicates are therefore
+    not merged here: each keeps its id and gets the DUPLICATE verdict at L2.5.
+    """
+    summaries, _ = deferred.load_summaries(root)
+    summary = next((s for s in summaries if s["run_id"] == state.parent), None)
+    if summary is None:
+        raise layer_outputs.ShapeError(
+            f"the parent run {state.parent!r} has no readable summary under "
+            ".claude/audits/runs/, so this deferred run's L2 cannot be checked against its pool; "
+            "restore that summary, or abort this run"
+        )
+    try:
+        pool = {f["id"]: f.get("priority") for f in deferred.findings_for(root, summary)}
+    except LookupError as exc:
+        raise layer_outputs.ShapeError(
+            f"the pool of parent run {state.parent} cannot be loaded ({exc})"
+        ) from exc
+    ids = [f["id"] for f in findings]
+    missing = [i for i in pool if i not in ids]
+    extra = [i for i in ids if i not in pool]
+    if missing or extra:
+        wrong = ([f"lacks {', '.join(missing)}"] if missing else []) + \
+                ([f"adds {', '.join(extra)}"] if extra else [])
+        raise layer_outputs.ShapeError(
+            f"a deferred run's L2 holds exactly the pool of run {state.parent}, but it "
+            f"{' and '.join(wrong)}; re-anchor every pool finding under its own id, merging "
+            "none (a duplicate gets the DUPLICATE verdict at L2.5) and adding none"
+        )
+    changed = [f"{f['id']} ({f['priority']}, the parent's {pool.get(f['id'])})"
+               for f in findings if f["priority"] != pool.get(f["id"])]
+    if changed:
+        raise layer_outputs.ShapeError(
+            "a deferred run's L2 keeps the parent's priorities, but it changes "
+            f"{', '.join(changed)}"
+        )
+
+
+def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, root) -> None:
+    """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files.
+
+    Also the one place a deferral is held to its priority: a P1 is never passed on
+    unverified (L2.5) or left unfixed (L3), and a P2 may only be DEFERRED on FAST, the tier
+    that does not verify its P2s. A DEFERRED run's L2 is held to its parent's pool (see
+    `_held_to_pool`), unless the parent is a `commit:<sha>`, which left no stored pool.
+    """
+    value = json.loads(data)
+    try:
+        if layer == "L2":
+            findings = layer_outputs.l2_findings(value, counts["unique"])
+            if state.mode == "DEFERRED" and not (state.parent or "").startswith("commit:"):
+                _held_to_pool(state, findings, root)
+        elif layer == "L2.5":
+            l2 = _stored_l2(state, root)
+            verdicts = layer_outputs.l25_verdicts(value, counts, [r["id"] for r in l2])
+            priority = {r["id"]: r["priority"] for r in l2}
+            allowed = ("P2", "P3") if state.tier == "FAST" else ("P3",)
+            barred = [
+                f"{i} ({priority[i]})" for i, v in verdicts.items()
+                if v == "DEFERRED" and priority[i] not in allowed
+            ]
+            if barred:
+                raise layer_outputs.ShapeError(
+                    f"L2.5 defers {', '.join(barred)}; only P3 findings (P2 too on FAST) may "
+                    "be passed on unverified"
+                )
+        elif layer == "L3":
+            l2 = _stored_l2(state, root)
+            l25 = _stored_l25(state, root, [r["id"] for r in l2])
+            plan = layer_outputs.l3_plan(value, counts["to_fix"], counts.get("deferred", 0), l25)
+            priority = {r["id"]: r["priority"] for r in l2}
+            barred = [i for i in plan["deferred"] if priority[i] == "P1"]
+            if barred:
+                raise layer_outputs.ShapeError(
+                    f"L3 defers {', '.join(barred)} (P1); a confirmed P1 is always fixed"
+                )
+    except layer_outputs.ShapeError as exc:
+        raise RecordRefused(str(exc)) from exc
+
+
 def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
     """Copy a layer's output into the run's directory; return its posix path under root."""
     run_dir = state.run_id
@@ -402,7 +730,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
 
     Raises RecordRefused when the run is paused, the layer is out of order, is a tool
     layer recorded by hand, carries counts that do not agree with the run, or (schema 2)
-    is one of OUTPUT_LAYERS without a readable JSON `output` file. A layer outside
+    is one of OUTPUT_LAYERS without a readable JSON `output` file, or is an L2, L2.5 or L3 file
+    that disagrees with its counts or with the earlier files (see `_check_shape`). A layer outside
     OUTPUT_LAYERS given an `output` is refused too, so the prose cannot drift from the
     code by passing a flag that would be silently ignored.
 
@@ -459,6 +788,7 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         _check_counts(layer, state, counts, root)
         if layer in OUTPUT_LAYERS:
             data = _read_output(layer, output, root)
+            _check_shape(layer, state, counts, data, root)
         state.seq += 1
         entry.update({"seq": state.seq, "source": source})
         if counts:
@@ -528,8 +858,45 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
     return log
 
 
+def _write_summary(state: PipelineState, root) -> None:
+    """Write runs/<run_id>/summary.json: what a later deferred pass reads about this run.
+
+    `base_tree` is the start fingerprint, the tree this run's auditors read. A deferred pass
+    judges STALE against it: `commit` already holds this run's own fixes, so a finding those
+    fixes removed would read there as never present. Readers use `.get`, so the key is an
+    addition within schema 1.
+    """
+    summary = {
+        "schema": deferred.SUMMARY_SCHEMA, "run_id": state.run_id, "tier": state.tier,
+        "mode": state.mode, "no_fix": state.no_fix, "base_commit": state.base_commit,
+        "base_tree": state.base_tree,
+        "commit": _commit_of(root, "HEAD"), "parent": state.parent,
+        "completed_utc": core.now(),
+        "pool": deferred.pool_ids(_stored_json(state, "L2.5", root),
+                                  _stored_json(state, "L3", root)),
+        "human_pending": (_layer_count(state, "L2.5", "uncertain") or 0)
+        + deferred.parked_count(root, state.run_id),
+    }
+    path = deferred.runs_dir(root) / state.run_id / "summary.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        raise RecordRefused(
+            f"the run summary could not be written to {path.as_posix()} "
+            f"({exc.__class__.__name__}: {exc}); without it no deferred pass can find this "
+            "run. Fix the cause and close again"
+        ) from exc
+
+
 def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
-    """Retire a run that is complete. An incomplete or paused run is refused, not logged."""
+    """Retire a run that is complete. An incomplete or paused run is refused, not logged.
+
+    A schema 2 run first writes its summary (see `_write_summary`); `abort` writes none, and
+    neither does a 0.10.x run.
+    """
     path = state_path(root)
     if not path.exists():
         return None
@@ -544,6 +911,8 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
             "this run is not complete: " + "; ".join(missing)
             + ". Finish it, or retire it with `python -m cca_checks pipeline abort --reason`."
         )
+    if not state.legacy:
+        _write_summary(state, root)
     recorded = ", ".join(sorted(state.layers))
     log = core.append_log(
         root,
@@ -616,3 +985,113 @@ def resume(root: str | pathlib.Path = ".") -> dict:
         root, f"| {core.now()} | run {state.run_id} | RESUMED | next {nxt or 'none'}{changed} |"
     )
     return result
+
+
+def _deferred_context(run_id: str, root) -> tuple[dict, list[dict], deferred.Offer]:
+    """(summary, findings, Offer) for the named run, or for the newest completed one."""
+    summaries, unreadable = deferred.load_summaries(root)
+    if run_id:
+        summary = next((s for s in summaries if s["run_id"] == run_id), None)
+        if summary is None:
+            # Worded apart from the no-summary refusal below: audit-fix.md D.1 takes the
+            # commit-message fallback exactly when a refusal contains `--from commit:<sha>`.
+            known = ", ".join(s["run_id"] for s in summaries) or "none"
+            raise RecordRefused(
+                f"--run {run_id!r} is not a completed run with a readable summary (completed "
+                f"runs: {known}); omit --run for the newest, or name one of those"
+            )
+    elif summaries:
+        summary = summaries[-1]
+    elif unreadable:
+        # No `commit:<sha>` fallback here: `start` refuses while any summary is unreadable, so
+        # offering it would send the caller to a start that refuses.
+        raise RecordRefused(
+            "every run summary under .claude/audits/runs/ is unreadable; "
+            + _unreadable_block(unreadable)
+        )
+    else:
+        raise RecordRefused(
+            "no completed run has a summary under .claude/audits/runs/; for a "
+            "run that predates summaries, parse the Deferred section of its CCA commit into "
+            "the L1 file and start with --from commit:<sha> (audit-fix.md § Second Pass)"
+        )
+    try:
+        findings = deferred.findings_for(root, summary)
+    except LookupError as exc:
+        raise RecordRefused(str(exc)) from exc
+    commit = summary.get("commit")
+    reachable = bool(commit) and _is_ancestor(root, str(commit))
+    offer = deferred.assess(summary, summaries, findings, commit_reachable=reachable,
+                            unreadable=unreadable)
+    return summary, findings, offer
+
+
+def _unreadable_block(unreadable: list[str]) -> str:
+    return (
+        f"{len(unreadable)} run summary file(s) under .claude/audits/runs/ cannot be read "
+        f"({', '.join(unreadable)}); they block a deferred start until they are fixed or "
+        "moved aside"
+    )
+
+
+def deferred_report(run_id: str = "", root: str | pathlib.Path = ".") -> deferred.Offer:
+    """What a completed run deferred, and whether a second pass is offered and advised.
+
+    Read-only, so unreadable summaries do not stop the report. They do stop the pass:
+    `start --mode DEFERRED` refuses while any exists, so the report says `offered: false`, with
+    no recommendation, and gives that as its first reason. The offer must not advise a pass
+    the gate will refuse.
+    """
+    offer = _deferred_context(run_id, root)[2]
+    if offer.unreadable:
+        offer.offered = False
+        offer.recommendation = None
+        offer.reasons.insert(0, _unreadable_block(offer.unreadable))
+    return offer
+
+
+#: The one folder `pipeline deferred --write` may write to: where the layer work files go
+#: (audit-fix.md writes `.claude/audits/out/L1.json`), inside the fingerprint's exclusion.
+_WRITE_DIR = f"{core.EXCLUDED}/out"
+
+
+def write_deferred(output, run_id: str = "",
+                   root: str | pathlib.Path = ".") -> tuple[deferred.Offer, str]:
+    """Write the offered pool's full finding objects to `output`: a deferred run's L1 input.
+
+    Refused when unreadable summaries exist (`start --mode DEFERRED` would refuse the run this
+    file is for), when the pass is not offered (naming any other pools that still are, so an
+    empty newest run does not dead-end), and when `output`, resolved, lies outside
+    `.claude/audits/out/`.
+    """
+    _, findings, offer = _deferred_context(run_id, root)
+    if offer.unreadable:
+        raise RecordRefused(_unreadable_block(offer.unreadable))
+    if not offer.offered:
+        older = ""
+        if offer.other_pools:
+            older = (f"; other pools still on offer: {', '.join(offer.other_pools)}; "
+                     f"pass --run {offer.other_pools[-1]}")
+        raise RecordRefused(
+            f"run {offer.run_id}'s deferred findings are not offered: {offer.reasons[0]}" + older
+        )
+    path = pathlib.Path(output)
+    if not path.is_absolute():
+        path = pathlib.Path(root) / path
+    # An allowlist, not a deny list: `.claude/audits/` also holds the run state, the stored
+    # runs, the disposition ledger and the execution log, and an L1 file written over any of
+    # them destroys the record. `_inside` resolves both paths, so `out/../x` is not inside.
+    if not core._inside(str(path), str(pathlib.Path(root) / _WRITE_DIR)):
+        raise RecordRefused(
+            f"--write {output} is outside {_WRITE_DIR}/, the one folder it may write to; "
+            f"write the L1 file there, for example {_WRITE_DIR}/L1.json"
+        )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(findings, indent=2) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise RecordRefused(
+            f"--write {output} could not be written ({exc.__class__.__name__}: {exc}); "
+            f"name a file under {_WRITE_DIR}/"
+        ) from exc
+    return offer, str(path)

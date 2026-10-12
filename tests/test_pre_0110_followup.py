@@ -3,6 +3,22 @@
 One test per CONFIRMED finding that has observable behaviour (V02 to V15 in the run's
 L2.5 output), plus controls against over-blocking. The red proof of each test is the
 code at 554c8c0, executed by `cca_tautology_check.py verify` at Step 5.6.
+
+Merged into feat/deferred-pass on 2026-10-11, where `record` holds the L2, L2.5 and L3
+files to their counts and to each other: `_run_through_l3` now writes files of that shape
+(V13 also files its finding as P2, see its docstring). No assertion moved. Each test whose
+fixture changed was seen red again that day, against a mutation of the merged production
+line, in its own assertion:
+- V10: `_fixes_planned` in cca_gate_core returned False; failed at pytest.raises (DID NOT
+  RAISE).
+- V04: `a.parked < 0 or a.parked > planned` became `a.parked < 0` in
+  cca_tautology_check.main; failed at `assert 0 != 0`.
+- V13: `edited = state.fixes_applied > 0 or (...)` became `edited = False and (...)` in
+  _planned_p1; failed at `assert 0 != 0`.
+- V15, both tests: `state.tier != "FAST" and len(mine) < confirmed` became `False` in
+  _planned_p1; each failed at `assert 0 != 0`.
+- V04 control and G03 control: `planned > a.parked` became `planned > 0`; each failed at
+  `assert 2 == 0`.
 """
 
 from __future__ import annotations
@@ -15,7 +31,7 @@ import subprocess
 import sys
 
 import pytest
-from conftest import load_hook, make_repo, tree_of, write_output
+from conftest import finding_id, load_hook, make_repo, tree_of, write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -83,16 +99,32 @@ def _no_proofs(monkeypatch, repo, *extra) -> int:
     return _load_tool().main()
 
 
-def _run_through_l3(repo, *, rows, to_fix, tier="DEEP"):
+def _run_through_l3(repo, *, rows, to_fix, tier="DEEP", filed_as=None):
+    """A run through L3 whose ledger holds `rows` (priority, verdict), one finding F-i each.
+
+    Since the deferred-pass merge, `record` holds the L2, L2.5 and L3 files to their counts
+    and to each other, so the files carry the findings: L2 files F-i at its row's priority
+    (or at `filed_as[F-i]`), L2.5 gives it the row's verdict, and L3 plans the first
+    `to_fix` CONFIRMED findings and defers the rest. Fixture support only.
+    """
     state = ps.start(tier, root=repo)
     ps.record("L1", output=write_output(repo), root=repo)
-    ps.record("L2", counts={"unique": len(rows)}, output=write_output(repo), root=repo)
+    ids = [finding_id(i) for i in range(1, len(rows) + 1)]
+    filed_as = filed_as or {}
+    findings = [{"id": i, "priority": filed_as.get(i, p)}
+                for i, (p, _) in zip(ids, rows, strict=True)]
+    ps.record("L2", counts={"unique": len(rows)}, output=write_output(repo, findings),
+              root=repo)
     _ledger(repo, state.run_id, rows)
     tally = {"confirmed": sum(v == "CONFIRMED" for _, v in rows), "fp": 0, "uncertain": 0,
              "duplicate": 0}
-    ps.record("L2.5", counts=tally, output=write_output(repo), root=repo)
+    verdicts = [{"id": i, "verdict": v} for i, (_, v) in zip(ids, rows, strict=True)]
+    ps.record("L2.5", counts=tally, output=write_output(repo, verdicts), root=repo)
     ps.record("L2.6", source="tool", root=repo)
-    ps.record("L3", counts={"to_fix": to_fix}, output=write_output(repo), root=repo)
+    confirmed = [i for i, (_, v) in zip(ids, rows, strict=True) if v == "CONFIRMED"]
+    plan = {"to_fix": confirmed[:to_fix], "deferred": confirmed[to_fix:]}
+    ps.record("L3", counts={"to_fix": to_fix, "deferred": len(plan["deferred"])},
+              output=write_output(repo, plan), root=repo)
     return state
 
 
@@ -227,8 +259,14 @@ def test_v04_parked_cannot_exceed_the_ledger_p1_count(monkeypatch, git_repo):
 def test_v13_no_proofs_refused_for_an_unplanned_edit(monkeypatch, git_repo):
     """Invariant: the zero-proof claim is checked whenever fixes landed, not only when L3
     planned them. Failure mode: L3 --to-fix 0 followed by an edit let --no-proofs pass
-    with CONFIRMED P1s in the ledger (V13). Red proof: the tool at 554c8c0 returns 0."""
-    _run_through_l3(git_repo, rows=[("P1", "CONFIRMED")], to_fix=0)
+    with CONFIRMED P1s in the ledger (V13). Red proof: the tool at 554c8c0 returns 0.
+
+    Fixture adapted at the deferred-pass merge: L3 must now plan or defer every CONFIRMED
+    finding and never defers a P1, so `--to-fix 0` beside a CONFIRMED P1 is refused at L3.
+    The ledger row stays P1 (the priority this check reads) while L2 files the finding as
+    P2, which L3 may defer; the check under test still sees a CONFIRMED P1 and no plan."""
+    _run_through_l3(git_repo, rows=[("P1", "CONFIRMED")], to_fix=0,
+                    filed_as={finding_id(1): "P2"})
     _fix_through_l55(git_repo, fixes=1)
     assert _no_proofs(monkeypatch, git_repo) != 0
 

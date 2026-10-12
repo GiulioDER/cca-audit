@@ -48,6 +48,21 @@ def test_a_ledger_belongs_to_the_clone_that_holds_it(tmp_path):
     assert ledger_repo(path) == "acme/widgets"
 
 
+def test_a_bom_prefixed_ledger_keeps_its_first_row(tmp_path):
+    """A ledger Windows PowerShell 5.1 created starts with a BOM; its first row is still a row.
+
+    Red 2026-10-11: mutation `encoding="utf-8-sig"` became `encoding="utf-8"` in load_ledger;
+    failed at `assert report.malformed == 0` (1 == 0).
+    """
+    path = tmp_path / "AUDITOR_SCORECARD.jsonl"
+    path.write_bytes(b"\xef\xbb\xbf" + (json.dumps(DISP) + "\n").encode("utf-8"))
+    report = LoadReport()
+    runs = load_ledger(path, "acme/widgets", report)
+    assert report.malformed == 0
+    [run] = runs
+    assert run.dispositions[1]["verdict"] == "CONFIRMED"
+
+
 def test_a_ledger_groups_rows_into_runs(tmp_path):
     """Red proof: load_ledger files outcome rows into dispositions -> outcomes is empty."""
     path = _write(tmp_path / "AUDITOR_SCORECARD.jsonl", [DISP, OUT])
