@@ -26,6 +26,8 @@ from .installer import (
     iter_commands,
     iter_hooks,
     iter_tools,
+    stale_copies,
+    user_claude_dir,
 )
 
 __all__ = [
@@ -39,4 +41,6 @@ __all__ = [
     "iter_commands",
     "iter_hooks",
     "iter_tools",
+    "stale_copies",
+    "user_claude_dir",
 ]

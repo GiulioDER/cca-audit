@@ -21,6 +21,32 @@ import pytest
 _HOOKS = pathlib.Path(__file__).resolve().parents[1] / "cca_checks" / "plugin" / "hooks"
 
 
+@pytest.fixture(autouse=True)
+def _private_run_registry(monkeypatch, tmp_path_factory):
+    """Every test gets its own open run registry, so none touches the real `~/.claude`.
+
+    A separate directory from `tmp_path`: several fixtures make `tmp_path` the repository
+    under audit, and a registry file inside it would change the tree fingerprint.
+    """
+    registry = tmp_path_factory.mktemp("cca-registry") / "open-runs.json"
+    monkeypatch.setenv("CCA_RUN_REGISTRY", str(registry))
+    return registry
+
+
+@pytest.fixture(autouse=True)
+def _private_user_claude_dir(monkeypatch, tmp_path_factory):
+    """`pipeline start` compares the user level `.claude/` with the package; never the real one.
+
+    Without this, every CLI start in the suite would read this machine's `~/.claude`, and
+    a stale file there would print warnings into output the tests parse.
+    """
+    from cca_checks.plugin import installer
+
+    user_dir = tmp_path_factory.mktemp("home") / ".claude"
+    monkeypatch.setattr(installer, "user_claude_dir", lambda: user_dir)
+    return user_dir
+
+
 def _git(root, *args, env=None) -> str:
     return subprocess.run(
         ["git", "-C", str(root), *args], check=True, capture_output=True, env=env

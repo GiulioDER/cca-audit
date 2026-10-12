@@ -117,6 +117,68 @@ def iter_hooks():
     )
 
 
+#: The installed files a run depends on, by `.claude/` subdirectory, with the packaged
+#: iterator that holds the current copy of each.
+_WATCHED = (
+    ("commands", iter_commands, ("audit-fix.md",)),
+    ("tools", iter_tools, ("cca_scorecard.py", "cca_tautology_check.py")),
+    ("hooks", iter_hooks, ("cca_gate_core.py", "cca_pipeline_guard.py", "cca_stop_guard.py")),
+)
+
+
+def user_claude_dir() -> pathlib.Path:
+    """The user level `.claude/` directory (`~/.claude`)."""
+    return pathlib.Path.home() / ".claude"
+
+
+def _lf(data: bytes) -> bytes:
+    return data.replace(b"\r\n", b"\n")
+
+
+def stale_copies(root: str | pathlib.Path = ".",
+                 user_dir: str | pathlib.Path | None = None) -> list[str]:
+    """One warning per installed pipeline file that differs from this package's copy.
+
+    Looks in `<root>/.claude/` and in the user level `.claude/` (`user_claude_dir()`
+    unless `user_dir` is given). Bytes are compared after CRLF is normalised to LF, so
+    a checkout's line endings are not a difference. A missing or unreadable file is
+    not a warning: only a copy that exists and differs can mislead a run.
+
+    WHY. A project's gitignored `.claude/` from an older install used to shadow the
+    user level one, and audit-fix.md ran its months-old tools under new prose with
+    nothing saying so. The tools now run from the package, but a stale command file or
+    hook still runs, so `pipeline start` names each one and how to refresh it.
+    """
+    packaged: dict[str, bytes] = {}
+    for subdir, iterator, names in _WATCHED:
+        texts = dict(iterator())
+        for name in names:
+            if name in texts:
+                packaged[f"{subdir}/{name}"] = _lf(texts[name].encode("utf-8"))
+    claude_dirs = [pathlib.Path(root) / ".claude",
+                   pathlib.Path(user_dir) if user_dir is not None else user_claude_dir()]
+    warnings: list[str] = []
+    seen: set[str] = set()
+    for claude_dir in claude_dirs:
+        key = os.path.normcase(os.path.realpath(claude_dir))
+        if key in seen:
+            continue
+        seen.add(key)
+        for relative, expected in packaged.items():
+            path = claude_dir.joinpath(*relative.split("/"))
+            try:
+                if not path.is_file() or _lf(path.read_bytes()) == expected:
+                    continue
+            except OSError:
+                continue
+            warnings.append(
+                f"{path} differs from the copy in the installed cca_checks package (left by "
+                f"an older install?); refresh it with `cca-audit install --target "
+                f"{claude_dir.parent}`"
+            )
+    return warnings
+
+
 def _iter_tree(subdir: str):
     """Yield relative paths and text for every packaged file below `subdir`."""
     root = resources.files(_PACKAGE)

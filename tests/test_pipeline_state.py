@@ -128,7 +128,8 @@ def test_tool_layers_cannot_be_recorded_from_the_cli_source(git_repo):
     (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(git_repo), root=git_repo)
     ps.record("L5", root=git_repo)
-    with pytest.raises(ps.RecordRefused, match="cca_tautology_check"):
+    # The refusal names the packaged command since 0.11, not the script under .claude/tools/.
+    with pytest.raises(ps.RecordRefused, match="cca_checks tautology verify"):
         ps.record("L5.6", detail="1 RED", root=git_repo)
 
 

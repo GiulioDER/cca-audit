@@ -41,9 +41,11 @@ LAYERS = ("L0.4", "L1", "L2", "L2.5", "L2.6", "L3", "L4", "L5", "L5.5", "L5.6", 
 TIERS = ("FAST", "STANDARD", "DEEP")
 MODES = ("DIFF", "HUNT", "DEFERRED")
 APPROVING_VERDICT = "APPROVED"
+#: The command that records each tool layer. The package's own copy of each tool, so a
+#: stale `.claude/tools/` from an older install can never be the one that runs.
 TOOL_LAYERS = {
-    "L2.6": "python .claude/tools/cca_scorecard.py --json --record",
-    "L5.6": "python .claude/tools/cca_tautology_check.py verify --proof ... --record",
+    "L2.6": "python -m cca_checks scorecard --json --record",
+    "L5.6": "python -m cca_checks tautology verify --proof ... --record",
 }
 FIX_VERDICT_LAYERS = ("L5", "L5.5", "L5.6", "L6")
 HEADINGS = {
@@ -114,6 +116,88 @@ def write_state(root, state: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+# --- open run registry -----------------------------------------------------------
+#
+# WHY IT EXISTS. Both hooks used to find the run from the session's directory. A run
+# opened in a worktree below it (`.claude/worktrees/<x>`) was invisible to them: the
+# Stop hook never blocked, and the commit guard let `cd <worktree> && git commit`
+# through. `pipeline start` now writes the run's root here and `close` and `abort`
+# remove it, so a hook can find a run below the directory it was started in.
+#
+# It is a LOOKUP AID, never a gate by itself: every caller swallows a failure here
+# with a warning, and an entry whose run-state.json is gone is simply skipped.
+
+REGISTRY_ENV = "CCA_RUN_REGISTRY"
+
+
+def registry_path() -> pathlib.Path:
+    """`$CCA_RUN_REGISTRY` when set, else `~/.claude/cca/open-runs.json`."""
+    configured = os.environ.get(REGISTRY_ENV)
+    if configured:
+        return pathlib.Path(configured)
+    return pathlib.Path.home() / ".claude" / "cca" / "open-runs.json"
+
+
+def _read_registry(path: pathlib.Path) -> dict:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    raw = json.loads(text)
+    runs = raw.get("runs") if isinstance(raw, dict) else None
+    if not isinstance(runs, dict):
+        raise ValueError(f"the run registry at {path} is not a {{\"runs\": {{...}}}} object")
+    return runs
+
+
+def _write_registry(path: pathlib.Path, runs: dict) -> None:
+    """Write then `os.replace`, so a reader never sees half a file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".open-runs.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"runs": runs}, indent=2) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _same_root(a: str, b: str) -> bool:
+    return os.path.normcase(a) == os.path.normcase(b)
+
+
+def register(root, run_id: str) -> None:
+    """Record that a run is open at `root` (stored as its realpath)."""
+    path = registry_path()
+    key = os.path.realpath(root)
+    runs = {k: v for k, v in _read_registry(path).items() if not _same_root(k, key)}
+    runs[key] = {"run_id": run_id, "registered_utc": now()}
+    _write_registry(path, runs)
+
+
+def unregister(root) -> None:
+    """Forget the run at `root`. No registry, or no entry, is not an error."""
+    path = registry_path()
+    key = os.path.realpath(root)
+    runs = _read_registry(path)
+    kept = {k: v for k, v in runs.items() if not _same_root(k, key)}
+    if len(kept) != len(runs):
+        _write_registry(path, kept)
+
+
+def registered_roots() -> list[pathlib.Path]:
+    """Every registered root whose run-state.json still exists, sorted."""
+    roots = []
+    for key in sorted(_read_registry(registry_path())):
+        if state_file(key).exists():
+            roots.append(pathlib.Path(key))
+    return roots
 
 
 def append_log(root, line: str) -> pathlib.Path:

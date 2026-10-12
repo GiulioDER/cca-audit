@@ -111,12 +111,13 @@ def test_install_writes_agents_commands_and_checkers(tmp_path):
     assert result.backed_up == 0
 
 
-def test_the_installed_checkers_are_the_paths_audit_fix_invokes(tmp_path):
-    """Ties the install layout to the orchestrator's call sites.
+def test_install_still_ships_the_checkers_as_scripts(tmp_path):
+    """The checkers still land in `.claude/tools/`, although audit-fix.md no longer runs them.
 
-    audit-fix.md resolves `.claude/tools/<name>.py` before falling back to
-    `$HOME`. Asserting the files land at exactly those paths is what makes the
-    two halves one contract rather than two independent guesses.
+    Since 0.11 audit-fix.md runs them as `python -m cca_checks scorecard|tautology`, so
+    a stale copy left by an older install can never be the one that runs. The scripts
+    still ship for standalone use, and `pipeline start` compares these copies with the
+    package's to warn when they have gone stale.
     """
     plugin.install(tmp_path)
 
