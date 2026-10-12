@@ -200,7 +200,7 @@ If your tests gate on an external binary via `shutil.which(...)`, **ci.yml must 
 `tests/test_ci_contract.py` asserts that invariant: a test that skips on every CI run is worse than
 no test, because it looks like coverage.
 
-Then add the honest limits to `README.md` — and, per this repo's convention, a test for each.
+Then add the honest limits to `docs/limits.md` — and, per this repo's convention, a test for each.
 
 ## Design Principles
 
