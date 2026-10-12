@@ -547,3 +547,55 @@ def test_fp_check_turns_a_tool_false_positive_into_stale_in_deferred_mode():
     assert 'keep the tool artifact verbatim as the evidence for "now"' in exception
     assert '`git show` read as the evidence for "then"' in exception
     assert "A tool-backed `CONFIRMED` is never overturned, in any mode." in exception
+
+
+def test_the_offer_is_withheld_while_a_summary_is_unreadable():
+    """`pipeline deferred` says `offered: false` while any summary is unreadable, because the
+    deferred start refuses then; the offer prose of audit-fix.md and of the Codex skill must say
+    so, not ask the user to run a pass the gate will refuse.
+
+    Red 2026-10-12 (I5): the audit-fix.md and SKILL.md text before the fix (unreadable names
+    were put before the question when `offered` was true); failed at `assert "While
+    `unreadable` is non-empty, `offered` is false" in offer`. The Codex assertion was also seen
+    False on that same text.
+    """
+    offer = " ".join(PIPELINE[PIPELINE.find("### Offer the deferred pass"):
+                              PIPELINE.find("## Second Pass")].split())
+    assert "While `unreadable` is non-empty, `offered` is false" in offer
+    assert "no pass is offered or advised" in offer
+    codex = " ".join(CODEX[CODEX.find("## Offer the deferred pass"):
+                           CODEX.find("## Report completion")].split())
+    assert "While any summary is unreadable (`unreadable` is non-empty), `offered` is false" \
+        in codex
+
+
+def test_d1_takes_the_commit_fallback_exactly_on_its_literal():
+    """Only the true no-summary refusal of `pipeline deferred` contains `--from commit:<sha>`,
+    so D.1 routes on that literal, not on a paraphrase an unknown `--run` or an unreadable
+    summary could also match.
+
+    Red 2026-10-12 (M7): the D.1 text before the fix ("It says no summary exists ... Only this
+    refusal takes it"); failed at `assert "Its `reason` contains `--from commit:<sha>`" in
+    routing`. The second assertion was also seen False on that same text.
+    """
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    routing = " ".join(second[second.find("**When the first command refuses"):
+                              second.find("**Commit-message fallback.**")].split())
+    assert "Its `reason` contains `--from commit:<sha>`" in routing
+    assert "Take the commit-message fallback below exactly then, and on no other refusal" \
+        in routing
+
+
+def test_d6_records_no_proofs_only_when_the_pool_holds_no_p1():
+    """A summary pool never holds a P1, but a pool parsed by the commit-message fallback may;
+    then Step 5.6's P1 rules apply, and `verify --no-proofs` refuses a confirmed, fixed P1.
+
+    Red 2026-10-12 (D6): the D.6 text before the fix ("The pool holds no P1, so record ...");
+    failed at `assert "only when the pool holds no P1" in d6`. The other assertions were also
+    seen False on that same text.
+    """
+    second = PIPELINE[PIPELINE.find("## Second Pass"):]
+    d6 = " ".join(second[second.find("**D.6 Step 5.6.**"):second.find("**D.7 Step 6.**")].split())
+    assert "only when the pool holds no P1" in d6
+    assert "commit-message fallback may hold one" in d6
+    assert "every CONFIRMED P1 carries a `RED` proof" in d6

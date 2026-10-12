@@ -273,7 +273,7 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
         raise RecordRefused(
             f"no completed run {parent!r} has a summary under .claude/audits/runs/; "
             "`pipeline deferred` names the runs that do, and a run that predates summaries "
-            "is taken with --from commit:<sha>"
+            "is taken by the commit-message fallback of audit-fix.md § Second Pass"
         )
     why_not = deferred.why_not_offered(summary, summaries)
     if why_not:
@@ -993,8 +993,12 @@ def _deferred_context(run_id: str, root) -> tuple[dict, list[dict], deferred.Off
     if run_id:
         summary = next((s for s in summaries if s["run_id"] == run_id), None)
         if summary is None:
+            # Worded apart from the no-summary refusal below: audit-fix.md D.1 takes the
+            # commit-message fallback exactly when a refusal contains `--from commit:<sha>`.
+            known = ", ".join(s["run_id"] for s in summaries) or "none"
             raise RecordRefused(
-                f"no completed run {run_id!r} has a summary under .claude/audits/runs/"
+                f"--run {run_id!r} is not a completed run with a readable summary (completed "
+                f"runs: {known}); omit --run for the newest, or name one of those"
             )
     elif summaries:
         summary = summaries[-1]
@@ -1002,7 +1006,8 @@ def _deferred_context(run_id: str, root) -> tuple[dict, list[dict], deferred.Off
         # No `commit:<sha>` fallback here: `start` refuses while any summary is unreadable, so
         # offering it would send the caller to a start that refuses.
         raise RecordRefused(
-            "no completed run has a readable summary; " + _unreadable_block(unreadable)
+            "every run summary under .claude/audits/runs/ is unreadable; "
+            + _unreadable_block(unreadable)
         )
     else:
         raise RecordRefused(
@@ -1032,13 +1037,22 @@ def _unreadable_block(unreadable: list[str]) -> str:
 def deferred_report(run_id: str = "", root: str | pathlib.Path = ".") -> deferred.Offer:
     """What a completed run deferred, and whether a second pass is offered and advised.
 
-    Read-only, so unreadable summaries do not stop the report; a reason line says that they
-    block `start --mode DEFERRED`, which refuses while any exists.
+    Read-only, so unreadable summaries do not stop the report. They do stop the pass:
+    `start --mode DEFERRED` refuses while any exists, so the report says `offered: false`, with
+    no recommendation, and gives that as its first reason. The offer must not advise a pass
+    the gate will refuse.
     """
     offer = _deferred_context(run_id, root)[2]
     if offer.unreadable:
-        offer.reasons.append(_unreadable_block(offer.unreadable))
+        offer.offered = False
+        offer.recommendation = None
+        offer.reasons.insert(0, _unreadable_block(offer.unreadable))
     return offer
+
+
+#: The one folder `pipeline deferred --write` may write to: where the layer work files go
+#: (audit-fix.md writes `.claude/audits/out/L1.json`), inside the fingerprint's exclusion.
+_WRITE_DIR = f"{core.EXCLUDED}/out"
 
 
 def write_deferred(output, run_id: str = "",
@@ -1047,8 +1061,8 @@ def write_deferred(output, run_id: str = "",
 
     Refused when unreadable summaries exist (`start --mode DEFERRED` would refuse the run this
     file is for), when the pass is not offered (naming any other pools that still are, so an
-    empty newest run does not dead-end), when `output` lies outside `.claude/audits/`, and when
-    it names the run state or anything under `.claude/audits/runs/`.
+    empty newest run does not dead-end), and when `output`, resolved, lies outside
+    `.claude/audits/out/`.
     """
     _, findings, offer = _deferred_context(run_id, root)
     if offer.unreadable:
@@ -1064,20 +1078,13 @@ def write_deferred(output, run_id: str = "",
     path = pathlib.Path(output)
     if not path.is_absolute():
         path = pathlib.Path(root) / path
-    if not core._inside(str(path), str(pathlib.Path(root) / core.EXCLUDED)):
+    # An allowlist, not a deny list: `.claude/audits/` also holds the run state, the stored
+    # runs, the disposition ledger and the execution log, and an L1 file written over any of
+    # them destroys the record. `_inside` resolves both paths, so `out/../x` is not inside.
+    if not core._inside(str(path), str(pathlib.Path(root) / _WRITE_DIR)):
         raise RecordRefused(
-            f"--write {output} is outside .claude/audits/; write it there (for example "
-            ".claude/audits/out/L1.json), where the tree fingerprint ignores it"
-        )
-    # Resolved before comparing, so `out/../run-state.json` is the run state too. Case is
-    # folded for the one equality test: Windows paths do not differ by case.
-    resolved = os.path.realpath(path)
-    if os.path.normcase(resolved) == os.path.normcase(os.path.realpath(core.state_file(root))) \
-            or core._inside(resolved, str(deferred.runs_dir(root))):
-        raise RecordRefused(
-            f"--write {output} names a file the pipeline keeps for itself (the run state, or "
-            "a run's stored work under .claude/audits/runs/); write the L1 file under a name "
-            "of its own, for example .claude/audits/out/L1.json"
+            f"--write {output} is outside {_WRITE_DIR}/, the one folder it may write to; "
+            f"write the L1 file there, for example {_WRITE_DIR}/L1.json"
         )
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1085,6 +1092,6 @@ def write_deferred(output, run_id: str = "",
     except OSError as exc:
         raise RecordRefused(
             f"--write {output} could not be written ({exc.__class__.__name__}: {exc}); "
-            "name a file under .claude/audits/"
+            f"name a file under {_WRITE_DIR}/"
         ) from exc
     return offer, str(path)

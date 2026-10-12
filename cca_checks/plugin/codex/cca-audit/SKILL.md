@@ -154,8 +154,10 @@ After `pipeline close` succeeds, run `python -m cca_checks pipeline deferred`. W
 `"offered": true`, end the report with one question: how many findings were deferred, by
 priority; the `recommendation` (RUN or SKIP) and its first reason; and whether to run the
 deferred pass now. On yes, run `audit+fix deferred` as the canonical § Second Pass describes,
-in this task. Never start it without that yes. When it prints `"offered": false`, report the
-reason in one line.
+in this task. Never start it without that yes. When it prints `"offered": false`, report its
+first reason in one line. While any summary is unreadable (`unreadable` is non-empty), `offered`
+is false and that first reason names the files: the deferred start refuses until they are fixed or
+moved aside.
 
 ## Report completion
 

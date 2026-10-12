@@ -102,7 +102,7 @@ def add_parser(sub) -> None:
                              help="a completed run id; default the newest completed run")
     pl_deferred.add_argument("--write", default=None,
                              help="write the pool's findings to this file under "
-                                  ".claude/audits/, as a deferred run's L1 input")
+                                  ".claude/audits/out/, as a deferred run's L1 input")
     pl_deferred.add_argument("--root", default=".")
 
 

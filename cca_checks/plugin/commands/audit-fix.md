@@ -979,9 +979,11 @@ the `recommendation` (`RUN` or `SKIP`) and its `reasons`, the older runs whose p
 untaken (`other_pools`) and any summary files it could not read (`unreadable`). When `other_pools`
 is non-empty, the report names those older runs. They become reachable with `/audit-fix deferred`
 once the newest pool has been taken or is not offered; D.1 then names them and asks which to take.
-When `unreadable` is non-empty, the report names those summary files. When `offered` is false, report the first reason in one line, then those
-names, and stop. When it is true, put those names before the question, and end with one question
-and nothing after it:
+While `unreadable` is non-empty, `offered` is false and the first reason names those summary files:
+`pipeline start --mode DEFERRED` refuses until they are fixed or moved aside, so no pass is
+offered or advised. When `offered` is false, report the first reason in one line, then the names
+in `other_pools`, and stop. When it is true, put those names before the question, and end with
+one question and nothing after it:
 
 > N findings were deferred (P2: a, P3: b). Recommendation: RUN (or SKIP), because <reasons[0]>.
 > Run the deferred pass now?
@@ -1025,8 +1027,10 @@ An aborted deferred run takes nothing.
 
 **When the first command refuses (exit 2),** read its `reason`:
 
-- It says no summary exists (the checkout that ran the audit is gone, or the run predates 0.11):
-  take the commit-message fallback below. Only this refusal takes it.
+- Its `reason` contains `--from commit:<sha>`: no completed run left a summary (the checkout that
+  ran the audit is gone, or the run predates 0.11). Take the commit-message fallback below exactly
+  then, and on no other refusal: an unknown `--run`, or summaries that exist but cannot be read,
+  are worded without that literal and never take it.
 - It says the newest run's pool is empty, consumed (already taken) or not offered: run
   `python -m cca_checks pipeline deferred` (no `--write`). If it lists `other_pools`, ask the user
   which of those runs to take, then repeat D.1 with `--run <id>` on the first command. Otherwise
@@ -1097,7 +1101,11 @@ DUPLICATE finding's row carries `"verdict": "DUPLICATE"`. Record with `--duplica
 **D.5 Steps 2.6 to 5.5** run as written above. At Step 3 every CONFIRMED finding is planned;
 UNCERTAIN goes to a human.
 
-**D.6 Step 5.6.** The pool holds no P1, so record `python "$TC" verify --no-proofs --record`.
+**D.6 Step 5.6.** Record `python "$TC" verify --no-proofs --record` only when the pool holds no
+P1. A pool loaded from a run's summary never does: P1 findings are never deferred. A pool parsed
+by the commit-message fallback may hold one; then Step 5.6 applies as written above, every
+CONFIRMED P1 carries a `RED` proof, and `verify --no-proofs` refuses while one is confirmed and
+fixed.
 
 **D.7 Step 6.** The architect's fix to finding mapping covers EVERY CONFIRMED finding, P3
 included: in this run they are the point.

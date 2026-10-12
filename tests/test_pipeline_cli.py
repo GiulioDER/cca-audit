@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from conftest import closed_parent, findings_output, verdicts_output, write_output
 
 from cca_checks.__main__ import main
@@ -424,34 +425,51 @@ def test_deferred_write_with_an_empty_name_is_refused(capsys, git_repo):
     assert code == 2 and "outside .claude/audits/" in err["reason"] and out == {}
 
 
-def test_deferred_write_refuses_the_files_the_pipeline_keeps_for_itself(capsys, git_repo):
-    """`--write` may not name the run state or anything under `.claude/audits/runs/`, and the
-    path is resolved before it is compared.
+@pytest.mark.parametrize("name", [
+    ".claude/audits/AUDITOR_SCORECARD.jsonl", ".claude/audits/EXECUTION_LOG.md",
+    ".claude/audits/run-state.json", ".claude/audits/runs/parent/L2.json",
+    ".claude/audits/out/../run-state.json", ".claude/audits/outside.json",
+])
+def test_deferred_write_refuses_anything_outside_claude_audits_out(capsys, git_repo, name):
+    """`--write` writes only under `.claude/audits/out/`, resolved. The rest of
+    `.claude/audits/` holds the disposition ledger, the execution log, the run state and the
+    stored runs, and an L1 file written over any of them destroys the record; each is refused
+    by name, naming the allowed folder, and left as it was.
 
-    Red 2026-10-11 (fix round 1), three mutations in write_deferred. The equality test against
-    `core.state_file(root)` deleted: failed at the first assert, `code == 2 and
-    ".claude/audits/run-state.json" in err["reason"]` (0 == 2). The `or core._inside(resolved,
-    str(deferred.runs_dir(root)))` deleted: failed at the second, `runs/parent/L2.json` (0 == 2).
-    `resolved = os.path.realpath(path)` became `resolved = str(path)`: failed at the third,
-    `out/../run-state.json` (0 == 2).
+    Red 2026-10-12 (I4): mutation `_WRITE_DIR = f"{core.EXCLUDED}/out"` became
+    `_WRITE_DIR = core.EXCLUDED` in pipeline_state (the allowlist widened to all of
+    `.claude/audits/`); all six cases failed at `assert code == 2 and name in err["reason"] and
+    ".claude/audits/out/" in err["reason"]` (0 == 2: each file was written with the pool, the
+    ledger and the log included, since the allowlist is now the only guard).
     """
     closed_parent(git_repo, p3=3)
-    root = str(git_repo)
-    state = git_repo / ".claude/audits/run-state.json"
-    stored = git_repo / ".claude/audits/runs/parent/L2.json"
-    before = stored.read_bytes()
-    code, _, err = _cli(capsys, "deferred", "--write", ".claude/audits/run-state.json",
-                        "--root", root)
-    assert code == 2 and ".claude/audits/run-state.json" in err["reason"]
-    assert not state.exists()
-    code, _, err = _cli(capsys, "deferred", "--write", ".claude/audits/runs/parent/L2.json",
-                        "--root", root)
-    assert code == 2 and "runs/parent/L2.json" in err["reason"]
-    assert stored.read_bytes() == before
-    code, _, err = _cli(capsys, "deferred", "--write", ".claude/audits/out/../run-state.json",
-                        "--root", root)
-    assert code == 2 and "out/../run-state.json" in err["reason"]
-    assert not state.exists()
+    target = git_repo / name
+    before = target.read_bytes() if target.exists() else None
+    code, out, err = _cli(capsys, "deferred", "--write", name, "--root", str(git_repo))
+    assert code == 2 and name in err["reason"] and ".claude/audits/out/" in err["reason"]
+    assert out == {}
+    assert (target.read_bytes() if target.exists() else None) == before
+
+
+def test_deferred_write_accepts_claude_audits_out_absolute_and_relative(capsys, git_repo):
+    """The allowlist admits the one file D.1 writes, `.claude/audits/out/L1.json`, named
+    absolutely and relative to the root.
+
+    Red 2026-10-12 (I4), two mutations in write_deferred's module. `_WRITE_DIR =
+    f"{core.EXCLUDED}/out"` became `_WRITE_DIR = f"{core.EXCLUDED}/in"`; failed at `assert code
+    == 0 and out["written"] == str(target)` on the absolute case (2 == 0: refused as outside).
+    `path = pathlib.Path(root) / path` became `pass` (a relative name read against the working
+    directory, not the root); failed at `assert code == 0 and target.is_file()` on the relative
+    case (2 == 0).
+    """
+    closed_parent(git_repo, p3=3)
+    target = git_repo / ".claude/audits/out/L1.json"
+    code, out, _ = _cli(capsys, "deferred", "--write", str(target), "--root", str(git_repo))
+    assert code == 0 and out["written"] == str(target)
+    target.unlink()
+    code, out, _ = _cli(capsys, "deferred", "--write", ".claude/audits/out/L1.json",
+                        "--root", str(git_repo))
+    assert code == 0 and target.is_file()
 
 
 def test_deferred_write_to_a_directory_is_refused_not_a_traceback(capsys, git_repo):
@@ -512,17 +530,28 @@ def test_deferred_write_is_refused_while_a_summary_is_unreadable(capsys, git_rep
     assert not target.exists()
 
 
-def test_deferred_report_still_prints_but_warns_of_an_unreadable_summary(capsys, git_repo):
-    """R21(b): the plain report is read-only and still prints, and says that the unreadable
-    summary blocks a deferred start. Red 2026-10-11: mutation the `if offer.unreadable:` that
-    appends the reason in deferred_report became `if False:`; failed at `assert
-    any("block a deferred start" in r and broken in r for r in out["reasons"])` (False)."""
+def test_deferred_report_still_prints_but_offers_nothing_while_a_summary_is_unreadable(
+        capsys, git_repo):
+    """R21(b), I5: the plain report is read-only and still prints, but `start --mode DEFERRED`
+    refuses while a summary cannot be read, so the report must not offer or advise a pass: it
+    says `offered: false`, no recommendation, and gives the unreadable files as its first
+    reason, ahead of the run's own.
+
+    Red 2026-10-12 (I5), three mutations in deferred_report. Its `if offer.unreadable:` became
+    `if False:`; failed at `assert out["offered"] is False and out["recommendation"] is None`
+    (True is False). `offer.offered = False` deleted;
+    failed at `assert out["offered"] is False and out["recommendation"] is None` (True is
+    False). `offer.reasons.insert(0, ...)` became `offer.reasons.append(...)`; failed at
+    `assert "block a deferred start" in out["reasons"][0] and broken in out["reasons"][0]`
+    (the first reason was the run's own RUN reason).
+    """
     closed_parent(git_repo, p3=3)
     broken = _corrupt_summary(git_repo)
     code, out, _ = _cli(capsys, "deferred", "--root", str(git_repo))
     assert code == 0 and out["run_id"] == "parent" and out["unreadable"] == [broken]
-    assert any("block a deferred start" in r and broken in r for r in out["reasons"])
-    assert out["recommendation"] == "RUN" and out["offered"] is True
+    assert out["offered"] is False and out["recommendation"] is None
+    assert "block a deferred start" in out["reasons"][0] and broken in out["reasons"][0]
+    assert any("P3 findings, at or above the threshold" in r for r in out["reasons"][1:])
 
 
 def test_deferred_without_a_summary_exits_2(capsys, git_repo):
@@ -549,6 +578,34 @@ def test_deferred_without_a_readable_summary_names_the_unreadable_files(capsys, 
     code, _, err = _cli(capsys, "deferred", "--root", str(git_repo))
     assert code == 2 and broken in err["reason"] and "moved aside" in err["reason"]
     assert "commit:<sha>" not in err["reason"]
+
+
+def test_only_the_no_summary_refusal_names_the_commit_fallback(capsys, git_repo):
+    """audit-fix.md D.1 takes the commit-message fallback exactly when a refusal contains
+    `--from commit:<sha>`, so only the true no-summary refusal of `pipeline deferred` may hold
+    that literal. An unknown `--run` (summaries exist) and a `start` naming an unknown parent
+    are worded apart, and the unknown `--run` names the runs that do exist.
+
+    Red 2026-10-12 (M7), against the code before the fix: the `start` refusal read "... is
+    taken with --from commit:<sha>"; failed at `assert code == 2 and "no completed run
+    'absent'" in err["reason"] and fallback not in err["reason"]`. Mutation the unknown `--run`
+    message in _deferred_context worded as a no-summary refusal ("no completed run 'ghost' has
+    a summary (completed runs: parent); for a run that predates summaries, start with --from
+    commit:<sha>"); failed at `assert code == 2 and "'ghost'" in err["reason"] and fallback not in
+    err["reason"]`.
+    """
+    fallback = "--from commit:<sha>"
+    r = str(git_repo)
+    code, _, err = _cli(capsys, "deferred", "--root", r)
+    assert code == 2 and fallback in err["reason"]
+    closed_parent(git_repo, p3=3)
+    code, _, err = _cli(capsys, "deferred", "--run", "ghost", "--root", r)
+    assert code == 2 and "'ghost'" in err["reason"] and fallback not in err["reason"]
+    assert "completed runs: parent" in err["reason"]
+    code, _, err = _cli(capsys, "start", "--tier", "STANDARD", "--mode", "DEFERRED",
+                        "--from", "absent", "--root", r)
+    assert code == 2 and "no completed run 'absent'" in err["reason"] \
+        and fallback not in err["reason"]
 
 
 def test_deferred_with_a_malformed_summary_is_refused_not_a_traceback(capsys, git_repo):
