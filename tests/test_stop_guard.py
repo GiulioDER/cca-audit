@@ -4,8 +4,16 @@ from __future__ import annotations
 
 import io
 import json
+import os
 
-from conftest import findings_output, load_hook, plan_output, verdicts_output, write_output
+from conftest import (
+    findings_output,
+    load_hook,
+    make_repo,
+    plan_output,
+    verdicts_output,
+    write_output,
+)
 
 from cca_checks import pipeline_state as ps
 
@@ -177,3 +185,65 @@ def test_a_paused_run_lets_the_turn_end_without_spending_a_refusal(monkeypatch, 
         assert _stop(monkeypatch, capsys, git_repo) is None
     state = ps.load(git_repo)
     assert state.stop_refusals == 0 and not state.stop_logged
+
+
+def _session_with_a_worktree_below(tmp_path):
+    """A session checkout with a second checkout below it, as `.claude/worktrees/<x>`."""
+    session = tmp_path / "main"
+    session.mkdir()
+    make_repo(session, ".claude/\n")
+    child = session / ".claude" / "worktrees" / "x"
+    child.mkdir(parents=True)
+    make_repo(child, ".claude/\n")
+    return session, child
+
+
+def test_a_run_in_a_worktree_below_the_session_blocks_and_names_it(monkeypatch, capsys, tmp_path):
+    """The live test's defect: a run opened in a worktree below the session was invisible.
+
+    Invariant: with the payload `cwd` at the session checkout and an incomplete run open in
+    a checkout below it, the Stop hook blocks, names that run's root, and spends its refusal.
+    Red 2026-10-11: baseline 0ec8c47 (the hook looked only from `cwd`); failed at
+    `assert out is not None and out["decision"] == "block"`.
+    """
+    session, child = _session_with_a_worktree_below(tmp_path)
+    ps.start("FAST", root=child)
+    ps.record("L1", output=write_output(child), root=child)
+    out = _stop(monkeypatch, capsys, session)
+    assert out is not None and out["decision"] == "block"
+    assert os.path.realpath(child) in out["reason"] and "L2" in out["reason"]
+    assert ps.load(child).stop_refusals == 1
+
+
+def test_a_registered_run_outside_the_session_does_not_block(monkeypatch, capsys, tmp_path):
+    """A run in a sibling checkout belongs to another session.
+
+    Red 2026-10-11: mutation the `if core._inside(str(r), str(cwd))` filter removed from
+    `_decide` (every registered run is a candidate); failed at `assert _stop(...) is None`.
+    """
+    here = tmp_path / "here"
+    there = tmp_path / "there"
+    here.mkdir()
+    there.mkdir()
+    make_repo(here, ".claude/\n")
+    make_repo(there, ".claude/\n")
+    ps.start("FAST", root=there)
+    assert _stop(monkeypatch, capsys, here) is None
+    assert ps.load(there).stop_refusals == 0
+
+
+def test_a_registry_entry_whose_state_is_gone_is_ignored(monkeypatch, capsys, tmp_path):
+    """An entry left behind (a crash between `unlink` and `unregister`) never blocks.
+
+    Two layers implement this: `registered_roots` drops the entry, and `_judge` reads a
+    missing state as no run. Either alone keeps this green, so the red proof disables both.
+    Red 2026-10-11: mutation the `if state_file(key).exists()` filter removed from
+    `cca_gate_core.registered_roots` AND `_judge`'s `if state is None or ...: return None`
+    changed to block with "unreadable" for a missing state; failed at
+    `assert _stop(monkeypatch, capsys, session) is None`. Each mutation alone: green.
+    """
+    session, child = _session_with_a_worktree_below(tmp_path)
+    core = stop._load_core()
+    core.register(child, "ghost")
+    assert _stop(monkeypatch, capsys, session) is None
+    assert not (child / ".claude").exists()

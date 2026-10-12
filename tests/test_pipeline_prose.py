@@ -599,3 +599,37 @@ def test_d6_records_no_proofs_only_when_the_pool_holds_no_p1():
     assert "only when the pool holds no P1" in d6
     assert "commit-message fallback may hold one" in d6
     assert "every CONFIRMED P1 carries a `RED` proof" in d6
+
+
+def test_audit_fix_runs_the_packaged_tools_not_a_project_copy():
+    """A stale `.claude/tools/` from an older install used to win silently over the package.
+
+    Red 2026-10-11: baseline 0ec8c47 text (`CCA=.claude/tools/cca_scorecard.py; [ -f "$CCA" ]
+    ...`); failed at `assert ".claude/tools/" not in PIPELINE`.
+    """
+    assert ".claude/tools/" not in PIPELINE
+    assert "$CCA" not in PIPELINE and "$TC" not in PIPELINE
+    assert "python -m cca_checks scorecard --json --record" in PIPELINE
+    assert "python -m cca_checks tautology snapshot" in PIPELINE
+    assert "python -m cca_checks tautology verify" in PIPELINE
+    assert "python -m cca_checks tautology verify --no-proofs --record" in PIPELINE
+
+
+def test_codex_skill_records_tool_layers_through_the_package():
+    """Red 2026-10-11: baseline 0ec8c47 text (maps `.claude/tools/cca_*.py` to `scripts/`);
+    failed at `assert "python -m cca_checks scorecard" in CODEX`.
+    """
+    assert "python -m cca_checks scorecard" in CODEX
+    assert "python -m cca_checks tautology" in CODEX
+    assert "`.claude/tools/cca_*.py`" not in CODEX
+
+
+def test_tool_layer_refusals_name_the_packaged_commands():
+    """The refusal for a hand-recorded L2.6 or L5.6 names the command to run instead.
+
+    Red 2026-10-11: baseline 0ec8c47 (`python .claude/tools/cca_scorecard.py ...`); failed at
+    `assert core.TOOL_LAYERS["L2.6"] == "python -m cca_checks scorecard --json --record"`.
+    """
+    from cca_checks.pipeline_state import core
+    assert core.TOOL_LAYERS["L2.6"] == "python -m cca_checks scorecard --json --record"
+    assert core.TOOL_LAYERS["L5.6"].startswith("python -m cca_checks tautology verify ")

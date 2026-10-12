@@ -38,7 +38,7 @@ Map Claude specific terms in the canonical pipeline as follows:
 | Agent or `subagent_type` call | Spawn a Codex subagent with the matching role prompt |
 | Agent return value | The subagent final response returned to the primary agent |
 | Launch in a SINGLE message, or in ONE message (parallel) | Dispatch through the six slot queue under "Respect the six subagent limit" |
-| `.claude/tools/cca_*.py` | The matching checker in this skill's `scripts/` directory |
+| `python -m cca_checks scorecard` and `python -m cca_checks tautology` | Run exactly as written, from the installed package; they record L2.6 and L5.6. This skill's `scripts/` copies are for reading only |
 | Optional `.claude/audits/` trail | Omit unless the user explicitly requests persistent audit files |
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
@@ -48,8 +48,10 @@ also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_
 carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
 Step 2.6 scorecard reads them. Neither is optional trail.
 
-Resolve the selected skill directory from this `SKILL.md` path. Use absolute paths when invoking
-the bundled checker scripts. Never assume the current repository has a `.claude/` directory.
+Resolve the selected skill directory from this `SKILL.md` path, and use absolute paths when reading
+its references. Never run the bundled `scripts/cca_*.py` to record a layer: an older install can leave
+them stale, so the pipeline runs the package's own copies through `python -m cca_checks`. Never
+assume the current repository has a `.claude/` directory.
 
 Stay inside the current Codex task. Use subagents, not user owned tasks, new chats, or external
 services. Do not push, open a pull request, merge, deploy, or communicate findings externally unless

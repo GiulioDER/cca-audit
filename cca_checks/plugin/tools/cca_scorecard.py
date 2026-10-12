@@ -209,14 +209,20 @@ def render(rep: Report) -> str:
     return "\n".join(out)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run the tool; `argv` defaults to `sys.argv[1:]`, as a standalone script reads it.
+
+    `python -m cca_checks scorecard|tautology ...` passes its remaining arguments here,
+    so the pipeline runs the copy inside the installed package, never a stale one in a
+    project's `.claude/tools/`.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     ap.add_argument("--routing", choices=("on", "off"), default="off",
                     help="ON lets low-precision cells RAISE verification. Never drops.")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--record", action="store_true", help="record L2.6 in the open CCA run")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     rep = build(a.ledger, routing=(a.routing == "on"))
     if a.json:
         print(json.dumps({
