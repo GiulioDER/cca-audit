@@ -129,8 +129,14 @@ def _git(root, *args):
 
 
 @pytest.fixture
-def git_repo(tmp_path):
-    """A one commit repository that ignores .claude/ (local: tools/ has no conftest)."""
+def git_repo(tmp_path, tmp_path_factory, monkeypatch):
+    """A one commit repository that ignores .claude/ (local: tools/ has no conftest).
+
+    It also gives the test its own open run registry, so `start` never writes to the
+    real `~/.claude` (tests/conftest.py does the same for every other test).
+    """
+    registry = tmp_path_factory.mktemp("cca-registry") / "open-runs.json"
+    monkeypatch.setenv("CCA_RUN_REGISTRY", str(registry))
     if shutil.which("git") is None:
         pytest.skip("git is required for tree fingerprints")
     _git(tmp_path, "init", "-q")
@@ -171,13 +177,16 @@ def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
     out = git_repo / ".claude" / "audits" / "layer-output.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("[]", encoding="utf-8")
+    # L3's file is an object of two id lists, not an array: record checks its shape.
+    plan = git_repo / ".claude" / "audits" / "plan-output.json"
+    plan.write_text('{"to_fix": [], "deferred": []}', encoding="utf-8")
     ps.start("STANDARD", root=git_repo)
     for layer, counts in (("L1", None), ("L2", {"unique": 0})):
         ps.record(layer, counts=counts, output=out, root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
               output=out, root=git_repo)
     ps.record("L2.6", source="tool", root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=out, root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=plan, root=git_repo)
     (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=out, root=git_repo)
     ps.record("L5", root=git_repo)

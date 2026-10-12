@@ -38,15 +38,20 @@ Map Claude specific terms in the canonical pipeline as follows:
 | Agent or `subagent_type` call | Spawn a Codex subagent with the matching role prompt |
 | Agent return value | The subagent final response returned to the primary agent |
 | Launch in a SINGLE message, or in ONE message (parallel) | Dispatch through the six slot queue under "Respect the six subagent limit" |
-| `.claude/tools/cca_*.py` | The matching checker in this skill's `scripts/` directory |
+| `python -m cca_checks scorecard` and `python -m cca_checks tautology` | Run exactly as written, from the installed package; they record L2.6 and L5.6. This skill's `scripts/` copies are for reading only |
 | Optional `.claude/audits/` trail | Omit unless the user explicitly requests persistent audit files |
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
 Codex must still write the `--output` file that every L1, L2, L2.5, L3 and L4 record requires,
-under `.claude/audits/`, even when it omits the rest of the trail.
+under `.claude/audits/`, even when it omits the rest of the trail. On STANDARD and DEEP it must
+also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_SCORECARD.jsonl`,
+carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
+Step 2.6 scorecard reads them. Neither is optional trail.
 
-Resolve the selected skill directory from this `SKILL.md` path. Use absolute paths when invoking
-the bundled checker scripts. Never assume the current repository has a `.claude/` directory.
+Resolve the selected skill directory from this `SKILL.md` path, and use absolute paths when reading
+its references. Never run the bundled `scripts/cca_*.py` to record a layer: an older install can leave
+them stale, so the pipeline runs the package's own copies through `python -m cca_checks`. Never
+assume the current repository has a `.claude/` directory.
 
 Stay inside the current Codex task. Use subagents, not user owned tasks, new chats, or external
 services. Do not push, open a pull request, merge, deploy, or communicate findings externally unless
@@ -138,6 +143,23 @@ the run on the record with `python -m cca_checks pipeline abort --reason "<why>"
 is the instruction to close the run, every layer is done: run `python -m cca_checks pipeline close`,
 then run the status check again. Never report a run this command refuses as complete. This is weaker than the Claude Code Stop hook, which enforces the
 same check without relying on the orchestrator to call it.
+
+The commit guard does not run in Codex either, so the Step 7 refusals in `references/pipeline.md`
+are yours to apply: stage by path in one command and run `git commit` alone in the next, with no
+other command, substitution or index override in it, and before committing confirm that
+`git diff --cached --name-only` and `git diff --name-only` share no path and that no staged deletion
+still has its file on disk. `pipeline status` does not make those checks.
+
+## Offer the deferred pass
+
+After `pipeline close` succeeds, run `python -m cca_checks pipeline deferred`. When it prints
+`"offered": true`, end the report with one question: how many findings were deferred, by
+priority; the `recommendation` (RUN or SKIP) and its first reason; and whether to run the
+deferred pass now. On yes, run `audit+fix deferred` as the canonical § Second Pass describes,
+in this task. Never start it without that yes. When it prints `"offered": false`, report its
+first reason in one line. While any summary is unreadable (`unreadable` is non-empty), `offered`
+is false and that first reason names the files: the deferred start refuses until they are fixed or
+moved aside.
 
 ## Report completion
 

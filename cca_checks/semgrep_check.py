@@ -26,12 +26,6 @@ SUPPORTED_SINK_CLASSES = frozenset({"sql", "command", "code_exec", "path"})
 #: unaffected and the mechanism is opt-in per language.
 CONTROL_RULE = "parse-control"
 
-# The Python backend's catalog. Kept as module constants because the packaging job
-# in ci.yml asserts these files reached the wheel; `catalog_for` is what the checker
-# itself uses, so a second language does not touch these names.
-SINKS_RULES = "python_sinks.yaml"
-TAINT_RULES = "python_taint.yaml"
-
 #: What the most recent run_semgrep call did remotely, for the verdict's evidence:
 #: None when it ran locally, else {"dest", "version", "error"}.
 _last_remote: dict | None = None

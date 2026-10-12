@@ -388,7 +388,3 @@ def verdict_for_claim(
     label = REFUTE_LABEL.get(claim.claim_type, claim.claim_type)
     ev = f"pyright: no {label} diagnostic @ {claim.file}:{claim.line}"
     return make_verdict(claim.finding_id, "FALSE_POSITIVE", ev, "pyright")
-
-
-def verdict_for_definedness(claim: Claim, diags: list[dict] | None) -> Verdict:
-    return verdict_for_claim(claim, diags, DEFINEDNESS_RULES)

@@ -1,0 +1,93 @@
+# Pre-registration: does the extended parser read the real CCA history, and are its new rows fixes?
+
+**Date:** 2026-10-11   **Status:** predicted, not yet measured
+
+## The question
+
+With the parser extended at `a7d07d6` (spec §11.9), what share of the selected CCA fix commits
+yield at least one row, and what share of the rows it adds are real fix descriptions?
+
+## What I predict
+
+1. **Parsed share:** between 70% and 80% of selected commits (commits with at least one row /
+   commits selected, reverted commits set aside). My estimate is 88 of 117: the 21 read before,
+   plus the 52 with bullets under P1/P2 headings and the 15 with known IDs under topic headings,
+   counted by a structure scan of the unparsed commits on 2026-10-11.
+2. **Rows:** between 500 and 900, up from 187.
+3. **New rows are fixes:** of 10 rows chosen at random among those the first dry run did not
+   produce, at least 9 are a description of a change made in that commit. Not a fix: a heading, a
+   list of test files, a note about the audit itself, a deferral or a "no change" line.
+4. **Apparatus unchanged:** 0 rows `proved` without a binding; exactly 1 with
+   `--bind 0cfa7219954d=pr805a`.
+
+## What would falsify this
+
+* Parsed share below 70%: the three formats were not the main gap after all.
+* Fewer than 9 of 10 sampled new rows being fixes: the "every bullet under P1/P2 is a fix" rule
+  over-counts, and the count it produces cannot back a claim.
+* Any `proved` row without a binding, or a proved count other than 1 with it.
+
+## How it will be measured
+
+The same inputs as `2026-10-11-cca-bug-backfill-dry-run.md`: one clone per GitHub remote under
+`~/Documents` (the one whose default branch has the newest commit, no fetch), every
+`AUDITOR_SCORECARD.jsonl` under `~/Documents` and `~/.claude/archive`, read-only, nothing written.
+Parsed share is distinct `fix_commit` over rows divided by that plus `unparsed`. The sample is
+`random.seed(11); random.sample(new_rows, 10)`, where `new_rows` excludes every `bug_id` the
+first run produced, each judged by reading its summary against `git show -s <fix_commit>`.
+
+## What I already know
+
+* First dry run: 21 of 117 parsed, 187 rows, 0 proved unbound, 1 proved bound.
+* Structure scan of the 96 unparsed commits: 52 have bullets under P1/P2 headings with no known ID,
+  15 have known IDs only under topic headings, 29 have neither (prose).
+
+## Confounds I can name now
+
+* A fix written as several top-level bullets under one P1 heading counts as several fixes. The
+  sample checks whether each row is a fix, not whether two rows are the same fix, so this would
+  inflate the count without failing prediction 3.
+* The skip words are matched anywhere in a heading, so "P1 Critical (2 dropped by fp-check):"
+  would skip a real P1 section and undercount.
+* The judgement in prediction 3 is mine, the author's; a second reader could grade borderline
+  rows differently.
+
+## Result (2026-10-11)
+**Status:** measured. Prediction 1 falsified; 2, 3 and 4 held, 3 only at its threshold.
+
+Measured at `674ae53` (parser `a7d07d6`) against the first run's code (`2f42d44`) on the same
+inputs, read-only.
+
+| # | Predicted | Measured | Held? |
+|---|---|---|---|
+| 1 | parsed share 70% to 80% | **69 of 107, 64.5%** as pre-registered; 79 of 117 (67.5%) against the fixed selection | **no** |
+| 2 | 500 to 900 rows | 644 (409 under stand-in IDs, 51 from topic sections with no severity) | yes |
+| 3 | at least 9 of 10 new rows are fixes | **9 of 10**; the miss is a row under a `DECLINED:` heading | yes, at the threshold |
+| 4 | 0 proved unbound, 1 bound | 0 of 644 unbound; 1 bound (`RE-call:0cfa7219954d:FIX-1`) | yes |
+
+**The metric's denominator moved.** The pre-registered share divides by commits that produced a
+row plus unparsed commits. Ten selected commits now produce neither: every row they yield
+collapses into an earlier commit with the same finding and text (a squash or a cherry-pick). The
+selection itself did not change (117), so 79 of 117 is the steadier figure. Both are below 70%.
+
+**Two defects the measurement found, both mine:**
+
+1. **A regression.** Three rows the first run produced are gone: RE-call `c560dd987a99`'s
+   CODE-003, DOC-002 and DOC-003, whose bullet begins "Stale comments: ...". The bullet-level skip
+   list included "stale", which is a heading word ("Stale (already fixed in round 1):"), not a
+   bullet word: there it describes what was fixed.
+2. **A missing skip word.** `DECLINED:` opened a topic section, so a declined finding (CODE-007,
+   "verified correct; restructuring ... is risk without benefit") counted as a fix.
+
+**Gap.** I estimated 88 commits from a structure scan and measured 79 (or 69). The scan counted a
+commit as readable when it had a P1/P2 heading with bullets or a known ID under a topic heading;
+it could not see that some of those collapse into earlier commits, and it counted commits whose
+only bullets sit under headings the skip list now excludes. The 29 prose-only commits stay
+unparsed by design. The sample judgement is mine, as the confounds section said.
+
+## Post hoc, after fixing both defects (2026-10-11, `1255ba1`; not pre-registered)
+
+Same inputs and script. Rows 643; 0 rows of the first run lost (was 3); the `DECLINED:` section
+no longer counts (topic rows 51 to 47); parsed share unchanged at 69 of 107. 0 proved unbound,
+1 bound. These numbers were measured after seeing the defects they test, so they confirm the two
+fixes and nothing more; the sample of prediction 3 was not redrawn.

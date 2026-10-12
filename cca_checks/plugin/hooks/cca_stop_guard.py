@@ -26,6 +26,17 @@ BEHAVIOUR (always exit 0; a block is the JSON decision on stdout)
 
 The cap lives in the run state so it is per run and visible. Claude Code's own
 limit (eight consecutive continuations) is a backstop, not the design.
+
+WHICH RUNS. The payload's `cwd` is the session's directory, and a run is often
+opened in a worktree below it (`.claude/worktrees/<x>`), which the walk up from
+`cwd` never reaches. So the candidates are the run found from `cwd` (bounded by the
+repository root, as before) plus every run in the open run registry
+(`cca_gate_core.registry_path`) whose root is `cwd` or lies under it. Each is judged
+by the rules above; the first that should block blocks, naming its root and spending
+that run's refusal. A run in a checkout that is neither the session's directory nor
+below it is out of scope: this session did not start it, and blocking on it would
+trap every session on the machine. A registry that cannot be read costs only the
+runs below `cwd`, with a warning on stderr.
 """
 
 from __future__ import annotations
@@ -85,34 +96,64 @@ def _decide(raw: str) -> int:
     if payload.get("background_tasks"):
         return 0
 
-    root = find_root(pathlib.Path(payload.get("cwd") or os.getcwd()).resolve())
-    if root is None:
-        return 0
+    cwd = pathlib.Path(payload.get("cwd") or os.getcwd()).resolve()
+    candidates = []
+    root = find_root(cwd)
+    if root is not None:
+        candidates.append(root)
     try:
         core = _load_core()
-    except Exception:  # noqa: BLE001 - see main()
+    except Exception:  # noqa: BLE001 (see main())
         return 0
+    try:
+        candidates += [r for r in core.registered_roots() if core._inside(str(r), str(cwd))]
+    except Exception as exc:  # noqa: BLE001 (the registry is a lookup aid, never a gate)
+        print(
+            f"CCA stop guard: the run registry could not be read ({exc.__class__.__name__}: "
+            f"{exc}); runs below {cwd} were not checked",
+            file=sys.stderr,
+        )
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = os.path.normcase(os.path.realpath(candidate))
+        if key in seen:
+            continue
+        seen.add(key)
+        reason = _judge(core, pathlib.Path(candidate), payload)
+        if reason is not None:
+            return _block(reason)
+    return 0
+
+
+def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
+    """Why the turn may not end because of the run at `root`; None to allow.
+
+    Spends one of that run's refusals when it returns a reason (an unreadable state
+    excepted, which has no counter to spend).
+    """
+    abort = f'python -m cca_checks pipeline abort --root "{root}" --reason "<why>"'
     try:
         state = core.read_state(root)
     except ValueError as exc:
         if payload.get("stop_hook_active"):
-            return 0
-        return _block(
-            f"The CCA run state is unreadable ({exc}). Retire it with "
-            '`python -m cca_checks pipeline abort --reason "<why>"`.'
-        )
+            return None
+        return f"The CCA run state in {root} is unreadable ({exc}). Retire it with `{abort}`."
     if state is None or core.is_legacy(state):
-        return 0
+        return None
     if state.get("paused"):
         # Paused on the record so the session can end: allowed before the refusal
         # counter, so a pause never spends one.
-        return 0
+        return None
     gate = state.get("layers", {}).get("L6")
     if isinstance(gate, dict) and str(gate.get("detail", "")).strip().upper() == "BLOCKED":
-        return 0
+        return None
 
-    reasons = core.outstanding(state, core.fingerprint(root))
     refusals = int(state.get("stop_refusals", 0) or 0)
+    if refusals >= core.STOP_REFUSAL_CAP and state.get("stop_logged"):
+        # Cap reached and already logged: the answer is "allow" whatever is owed, so
+        # skip the fingerprint (up to FINGERPRINT_TIMEOUT_S on every turn end).
+        return None
+    reasons = core.outstanding(state, core.fingerprint(root))
     if refusals >= core.STOP_REFUSAL_CAP:
         if not state.get("stop_logged"):
             summary = "; ".join(reasons) or "complete but not closed"
@@ -123,20 +164,20 @@ def _decide(raw: str) -> int:
             )
             state["stop_logged"] = True
             core.write_state(root, state)
-        return 0
+        return None
 
     state["stop_refusals"] = refusals + 1
     core.write_state(root, state)
     if reasons:
-        return _block(
-            "The CCA run in this checkout is not finished:\n  - "
+        return (
+            f"The CCA run in {root} is not finished:\n  - "
             + "\n  - ".join(reasons)
             + "\nContinue with the first owed layer, re-reading its section of audit-fix.md. "
-            "If the run must end here, retire it: "
-            'python -m cca_checks pipeline abort --reason "<why>"'
+            f"If the run must end here, retire it: {abort}"
         )
-    return _block(
-        "The CCA run is complete but still open. Close it: python -m cca_checks pipeline close"
+    return (
+        f"The CCA run in {root} is complete but still open. Close it: "
+        f'python -m cca_checks pipeline close --root "{root}"'
     )
 
 
