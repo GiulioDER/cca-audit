@@ -14,6 +14,7 @@ design evidence behind the deterministic verifiers.
 | Add an auditor or language backend | [Extending](extending.md) |
 | Check auditor ownership boundaries | [Auditor scopes](auditor-scopes.md) |
 | Review security implications | [Security policy](../SECURITY.md) |
+| Know where the verifiers are blind | [Honest limits](limits.md) |
 
 ## Design Evidence
 
