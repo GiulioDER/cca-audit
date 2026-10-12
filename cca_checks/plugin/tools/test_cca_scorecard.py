@@ -93,6 +93,22 @@ def test_malformed_rows_are_counted_not_silently_dropped(tmp_path):
     assert "malformed" in sc.render(rep)                # and it is SURFACED, not hidden
 
 
+def test_a_bom_prefixed_ledger_scores_its_first_row(tmp_path):
+    """A ledger created by Windows PowerShell 5.1 starts with a BOM. L2.5 counts its first row
+    (the pipeline reads the ledger as utf-8-sig), so the scorecard must score it too, not call
+    it malformed.
+
+    Red 2026-10-11: mutation `encoding="utf-8-sig"` became `encoding="utf-8"` in load_rows;
+    failed at `assert rep.rows_scored == 2 and rep.rows_skipped_malformed == 0` (1 scored, 1
+    malformed).
+    """
+    p = tmp_path / "ledger.jsonl"
+    body = json.dumps(row("CONFIRMED")) + "\n" + json.dumps(row("FALSE_POSITIVE")) + "\n"
+    p.write_bytes(b"\xef\xbb\xbf" + body.encode("utf-8"))
+    rep = sc.build(p, now=NOW)
+    assert rep.rows_scored == 2 and rep.rows_skipped_malformed == 0
+
+
 def test_yield_flag_for_high_volume_zero_confirmed_auditor(tmp_path):
     led = write(tmp_path, [row("FALSE_POSITIVE", category=f"c{i}") for i in range(15)])
     rep = sc.build(led, now=NOW)
@@ -130,8 +146,14 @@ def _git(root, *args):
 
 
 @pytest.fixture
-def git_repo(tmp_path):
-    """A one commit repository that ignores .claude/ (local: tools/ has no conftest)."""
+def git_repo(tmp_path, tmp_path_factory, monkeypatch):
+    """A one commit repository that ignores .claude/ (local: tools/ has no conftest).
+
+    It also gives the test its own open run registry, so `start` never writes to the
+    real `~/.claude` (tests/conftest.py does the same for every other test).
+    """
+    registry = tmp_path_factory.mktemp("cca-registry") / "open-runs.json"
+    monkeypatch.setenv("CCA_RUN_REGISTRY", str(registry))
     if shutil.which("git") is None:
         pytest.skip("git is required for tree fingerprints")
     _git(tmp_path, "init", "-q")
@@ -170,3 +192,16 @@ def test_record_writes_l2_6_as_a_tool_layer(git_repo, monkeypatch, capsys):
     assert state is not None
     entry = state.layers["L2.6"]
     assert entry["source"] == "tool" and entry["status"] == "done"
+
+
+def test_stale_rows_never_count_toward_a_yield_flag(tmp_path):
+    """A STALE row says the code moved on after a run deferred the finding, not that the
+    auditor was wrong, so it must not count as disposed.
+
+    Red 2026-10-11: baseline (every verdict row increments `disposed`) in cca_scorecard.build;
+    failed at `assert rep.yield_flags == []` (got ["bug-auditor"]).
+    """
+    led = write(tmp_path, [row("STALE") for _ in range(15)])
+    rep = sc.build(led, now=NOW)
+    assert rep.yield_flags == []
+    assert rep.cells == []

@@ -109,7 +109,9 @@ def load_rows(ledger: Path, now: datetime, window_days: int = WINDOW_DAYS):
     if not ledger.exists():
         return
     cutoff = now - timedelta(days=window_days)
-    for line in ledger.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig, like the pipeline's own ledger reader: a ledger created by Windows PowerShell
+    # 5.1 starts with a BOM, which would make its first row malformed here only.
+    for line in ledger.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -156,7 +158,10 @@ def build(ledger: Path = DEFAULT_LEDGER, now: datetime | None = None,
             continue
         rep.rows_scored += 1
         verdict = row["verdict"]
-        per_auditor[row["auditor"]]["disposed"] += 1
+        if verdict != "STALE":
+            # STALE: the code moved on after a run deferred the finding; that says nothing
+            # about whether the auditor was right, so it is not a disposition.
+            per_auditor[row["auditor"]]["disposed"] += 1
         if verdict == "CONFIRMED":
             per_auditor[row["auditor"]]["confirmed"] += 1
         if verdict in _SCORED:
@@ -204,14 +209,20 @@ def render(rep: Report) -> str:
     return "\n".join(out)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run the tool; `argv` defaults to `sys.argv[1:]`, as a standalone script reads it.
+
+    `python -m cca_checks scorecard|tautology ...` passes its remaining arguments here,
+    so the pipeline runs the copy inside the installed package, never a stale one in a
+    project's `.claude/tools/`.
+    """
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     ap.add_argument("--routing", choices=("on", "off"), default="off",
                     help="ON lets low-precision cells RAISE verification. Never drops.")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--record", action="store_true", help="record L2.6 in the open CCA run")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     rep = build(a.ledger, routing=(a.routing == "on"))
     if a.json:
         print(json.dumps({

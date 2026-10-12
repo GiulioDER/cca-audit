@@ -16,7 +16,7 @@ import json
 import pathlib
 
 import pytest
-from conftest import write_output
+from conftest import findings_output, plan_output, verdicts_output, write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -79,10 +79,10 @@ def test_guard_blocks_every_shape_of_commit(monkeypatch, tmp_path, command):
 def test_guard_allows_the_commit_once_the_gates_are_satisfied(monkeypatch, git_repo):
     state = ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=plan_output(git_repo), root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     assert state.run_id
     assert _run(monkeypatch, git_repo, "git commit -m x") == 0
@@ -154,7 +154,7 @@ def test_guard_agrees_with_pipeline_state_across_a_matrix(tmp_path, tier, no_fix
         "fixes_applied": fixes,
         "layers": {k: {"status": "done", "detail": v} for k, v in layers.items()},
     }
-    from_guard = guard.evaluate(state)
+    from_guard = guard._load_core().commit_reasons(state, None)
     from_module = ps.verify_commit_allowed(ps.PipelineState.from_json(state)).reasons
     assert from_guard == from_module
 
@@ -280,13 +280,89 @@ def test_guard_refuses_a_commit_while_the_run_is_paused(monkeypatch, capsys, git
     """
     ps.start("FAST", root=git_repo)
     ps.record("L1", output=write_output(git_repo), root=git_repo)
-    ps.record("L2", counts={"unique": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(git_repo), root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(git_repo), root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+              output=verdicts_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0}, output=plan_output(git_repo), root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     assert _run(monkeypatch, git_repo, "git commit -m x") == 0
     ps.pause("end of day", root=git_repo)
     capsys.readouterr()
     assert _run(monkeypatch, git_repo, "git commit -m x") == 2
     assert "the run is paused" in capsys.readouterr().err
+
+
+def _session_and_child(tmp_path: pathlib.Path, name: str = "child") -> tuple:
+    """A session checkout with a second checkout below it, and a run open in the second."""
+    parent = _repo(tmp_path)
+    child = _repo(parent / name)
+    ps.start("DEEP", root=child)
+    return parent, child
+
+
+def test_cd_into_a_checkout_with_an_open_run_then_commit_is_blocked(monkeypatch, tmp_path):
+    """The live test's defect: `cd <worktree> && git commit` from the session directory.
+
+    Red 2026-10-11: baseline 0ec8c47 (the guard looked only from its own cwd); failed at
+    `assert _run(monkeypatch, parent, "cd child && git commit -m x") == 2` (0 == 2).
+    """
+    parent, _ = _session_and_child(tmp_path)
+    assert _run(monkeypatch, parent, "cd child && git commit -m x") == 2
+    assert _run(monkeypatch, parent, "cd child; git commit -m x") == 2
+    assert _run(monkeypatch, parent, "cd child || exit 1; git commit -m x") == 2
+
+
+def test_git_dash_c_into_a_checkout_with_an_open_run_is_blocked(monkeypatch, tmp_path):
+    """Red 2026-10-11: baseline 0ec8c47; failed at
+    `assert _run(monkeypatch, parent, "git -C child commit -m x") == 2` (0 == 2).
+    """
+    parent, _ = _session_and_child(tmp_path)
+    assert _run(monkeypatch, parent, "git -C child commit -m x") == 2
+
+
+def test_quoted_directories_with_spaces_are_followed(monkeypatch, tmp_path):
+    """Red 2026-10-11: baseline 0ec8c47; failed at
+    `assert _run(monkeypatch, parent, 'cd "child dir" && git commit -m x') == 2` (0 == 2).
+    """
+    parent, _ = _session_and_child(tmp_path, "child dir")
+    assert _run(monkeypatch, parent, 'cd "child dir" && git commit -m x') == 2
+    assert _run(monkeypatch, parent, "git -C 'child dir' commit -m x") == 2
+
+
+def test_the_payload_cwd_is_the_base_directory(monkeypatch, tmp_path):
+    """Claude Code sends the session's directory as `cwd`; the hook process may run elsewhere.
+
+    Red 2026-10-11: baseline 0ec8c47 (payload `cwd` ignored); failed at
+    `assert guard.main() == 2` (0 == 2).
+    """
+    _, child = _session_and_child(tmp_path / "work")
+    elsewhere = _repo(tmp_path / "elsewhere")
+    payload = json.dumps({"tool_name": "Bash", "cwd": str(child),
+                          "tool_input": {"command": "git commit -m x"}})
+    monkeypatch.chdir(elsewhere)
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    assert guard.main() == 2
+
+
+def test_a_heredoc_commit_message_does_not_hide_the_cd(monkeypatch, tmp_path):
+    """A heredoc body is not shell syntax: an apostrophe in it must not lose the `cd`.
+
+    Red 2026-10-11: mutation the longest parsable prefix loop in `commit_directories`
+    replaced by one attempt on the whole command (a parse failure keeps the base
+    directory); failed at `assert _run(monkeypatch, parent, command) == 2` (0 == 2). Also red
+    against baseline 0ec8c47 at the same assert.
+    """
+    parent, _ = _session_and_child(tmp_path)
+    command = "cd child && git commit -F - <<'EOF'\nit's the fix\nEOF"
+    assert _run(monkeypatch, parent, command) == 2
+
+
+def test_a_commit_in_the_session_checkout_ignores_a_run_below_it(monkeypatch, tmp_path):
+    """The other direction: a run in a checkout below does not block the session's commit.
+
+    Red 2026-10-11: mutation `commit_directories` also returns `base / "child"`; failed at
+    `assert _run(monkeypatch, parent, "git commit -m x") == 0` (2 == 0).
+    """
+    parent, _ = _session_and_child(tmp_path)
+    assert _run(monkeypatch, parent, "git commit -m x") == 0
+    assert _run(monkeypatch, parent, "cd child | cat; git commit -m x") == 0

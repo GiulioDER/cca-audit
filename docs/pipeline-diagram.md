@@ -47,7 +47,7 @@ flowchart TD
 ```
 
 The **FAST** tier runs only the 3 core auditors (security, bug, code), verifies P1 findings in
-Step 2.5, and skips Step 5.5. P2 and P3 findings on FAST are reported rather than fixed.
+Step 2.5, and skips Step 5.5. On FAST, P2 and P3 findings are recorded DEFERRED rather than fixed, and offered to the deferred pass.
 
 ## Step-by-Step
 
@@ -136,7 +136,7 @@ artifact.
 From CONFIRMED findings only:
 - **P1 Critical**: always fix.
 - **P2 High**: fix unless `p1-only` mode.
-- **P3 Nice-to-have**: deferred.
+- **P3 Nice-to-have**: deferred (and P2 under `p1-only`); after the run closes, the deferred pass is offered (see `audit-fix.md` § Second Pass).
 
 In `no-fix` mode, the pipeline reports findings + verdicts and stops here.
 

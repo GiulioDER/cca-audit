@@ -6,7 +6,7 @@ registry refuses everything else. That asymmetry is the point: a checker's silen
 is what licenses a FALSE_POSITIVE, so a language must never be able to reach a
 checker that cannot read it -- pyright happily parses Rust as Python, finds no
 `reportUndefinedVariable`, and refutes a real defect with an authoritative
-`source: pyright`. See `cca_checks/__main__.py::_validate_language`.
+`source: pyright`. See `cca_checks/__main__.py::_resolve_backend`.
 
 `claim_types` is therefore a POSITIVE list, never a deny-list. A new claim type is
 unsupported by every backend until its author opts that backend in, which is the

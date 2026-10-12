@@ -9,10 +9,12 @@ design evidence behind the deterministic verifiers.
 |---|---|
 | Install and run the tool | [README](../README.md#install) |
 | Understand the audit pipeline | [Pipeline diagram](pipeline-diagram.md) |
+| See the architecture, each box linked to its source | [Architecture diagram](diagrams/README.md) |
 | Tune tiers, domain dispatch, and verifier tools | [Configuration](configuration.md) |
 | Add an auditor or language backend | [Extending](extending.md) |
 | Check auditor ownership boundaries | [Auditor scopes](auditor-scopes.md) |
 | Review security implications | [Security policy](../SECURITY.md) |
+| Know where the verifiers are blind | [Honest limits](limits.md) |
 
 ## Design Evidence
 

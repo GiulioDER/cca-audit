@@ -1,0 +1,754 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "How CCA-Audit works: find, verify, fix, prove, then gate the commit",
+    "output": "docs/diagrams/cca-overview.html",
+    "quality_profile": "showcase",
+    "locale": "en",
+    "repository": {
+      "url": "https://github.com/GiulioDER/cca-audit",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "f3f47d8e087c7d6f5ca039f505c687a4a40d06a0"
+    }
+  },
+  "components": [
+    {
+      "id": "claude",
+      "type": "frontend",
+      "label": "/audit-fix",
+      "sublabel": "Claude Code command",
+      "pos": [
+        20,
+        200
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 1,
+          "end_line": 4,
+          "label": "command definition"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 85,
+          "end_line": 102,
+          "label": "arguments and modes"
+        },
+        {
+          "path": "cca_checks/plugin/installer.py",
+          "line": 359,
+          "end_line": 458,
+          "label": "cca-audit install"
+        }
+      ]
+    },
+    {
+      "id": "codex",
+      "type": "frontend",
+      "label": "cca-audit skill",
+      "sublabel": "Codex, says audit+fix",
+      "pos": [
+        20,
+        360
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/codex/cca-audit/SKILL.md",
+          "line": 1,
+          "end_line": 29,
+          "label": "skill and trigger"
+        },
+        {
+          "path": "cca_checks/plugin/codex/cca-audit/SKILL.md",
+          "line": 31,
+          "end_line": 49,
+          "label": "Codex adapter"
+        },
+        {
+          "path": "cca_checks/plugin/installer.py",
+          "line": 461,
+          "end_line": 537,
+          "label": "cca-audit install-codex"
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "type": "backend",
+      "label": "Scope and tier",
+      "sublabel": "L0 to L0.6: files, domains",
+      "pos": [
+        260,
+        280
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "FAST, STANDARD or DEEP",
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 104,
+          "end_line": 136,
+          "label": "Step 0: target files"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 185,
+          "end_line": 245,
+          "label": "Step 0.5: domain flags"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 247,
+          "end_line": 275,
+          "label": "Step 0.6: tier matrix"
+        }
+      ]
+    },
+    {
+      "id": "viability",
+      "type": "security",
+      "label": "Viability L0.4",
+      "sublabel": "hunt mode only",
+      "pos": [
+        260,
+        110
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "REJECT stops the run",
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 138,
+          "end_line": 183,
+          "label": "five viability gates"
+        }
+      ]
+    },
+    {
+      "id": "auditors",
+      "type": "backend",
+      "label": "Core auditors L1",
+      "sublabel": "CODE BUG SEC PERF DOC ENV",
+      "pos": [
+        500,
+        280
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 347,
+          "end_line": 363,
+          "label": "generic auditors"
+        },
+        {
+          "path": "cca_checks/plugin/agents/cca-security-auditor.md",
+          "line": 1,
+          "end_line": 6,
+          "label": "one agent file each"
+        }
+      ]
+    },
+    {
+      "id": "conditional",
+      "type": "backend",
+      "label": "Domain auditors L1",
+      "sublabel": "STAKES NUM DAT DEP DEPLOY",
+      "pos": [
+        500,
+        410
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 365,
+          "end_line": 424,
+          "label": "conditional auditors"
+        },
+        {
+          "path": "cca_checks/plugin/agents/cca-numeric-auditor.md",
+          "line": 1,
+          "end_line": 6,
+          "label": "numeric-auditor"
+        }
+      ]
+    },
+    {
+      "id": "consolidate",
+      "type": "backend",
+      "label": "Consolidate L2",
+      "sublabel": "dedup file, line, category",
+      "pos": [
+        740,
+        280
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 477,
+          "end_line": 499,
+          "label": "deterministic dedup"
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "type": "security",
+      "label": "Verify L2.5",
+      "sublabel": "fp-check, every tier",
+      "pos": [
+        980,
+        280
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "UNCERTAIN goes to you",
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 501,
+          "end_line": 537,
+          "label": "verdicts per finding"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 539,
+          "end_line": 592,
+          "label": "DEEP panel, NUM artifact"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 583,
+          "end_line": 585,
+          "label": "UNCERTAIN goes to the user"
+        }
+      ]
+    },
+    {
+      "id": "checks",
+      "type": "backend",
+      "label": "cca_checks settlers",
+      "sublabel": "pyright, semgrep, clippy",
+      "pos": [
+        980,
+        110
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "plus pytest, hypothesis",
+      "sources": [
+        {
+          "path": "cca_checks/__main__.py",
+          "line": 114,
+          "end_line": 131,
+          "label": "coordinate, backend, settle"
+        },
+        {
+          "path": "cca_checks/claim.py",
+          "line": 13,
+          "end_line": 24,
+          "label": "verdict contract"
+        },
+        {
+          "path": "cca_checks/plugin/agents/cca-fp-check.md",
+          "line": 285,
+          "end_line": 289,
+          "label": "tool verdict is final"
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "backend",
+      "label": "Fix L3 to L5",
+      "sublabel": "CONFIRMED only, red to green",
+      "pos": [
+        980,
+        610
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 669,
+          "end_line": 679,
+          "label": "L3 fix plan"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 705,
+          "end_line": 740,
+          "label": "L4 implement, snapshot"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 742,
+          "end_line": 765,
+          "label": "L5 re-verify"
+        }
+      ]
+    },
+    {
+      "id": "regress",
+      "type": "security",
+      "label": "Regression L5.5",
+      "sublabel": "differential-review",
+      "pos": [
+        740,
+        540
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 767,
+          "end_line": 794,
+          "label": "verdict per hunk"
+        },
+        {
+          "path": "cca_checks/plugin/agents/cca-differential-review.md",
+          "line": 1,
+          "end_line": 6,
+          "label": "differential-review"
+        }
+      ]
+    },
+    {
+      "id": "proof",
+      "type": "security",
+      "label": "Red-state proof L5.6",
+      "sublabel": "reruns proofs on old code",
+      "pos": [
+        740,
+        680
+      ],
+      "size": [
+        160,
+        60
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 796,
+          "end_line": 836,
+          "label": "tautological test detector"
+        },
+        {
+          "path": "cca_checks/plugin/tools/cca_tautology_check.py",
+          "line": 188,
+          "end_line": 193,
+          "label": "failed blocks the commit"
+        }
+      ]
+    },
+    {
+      "id": "architect",
+      "type": "security",
+      "label": "Architect L6",
+      "sublabel": "every fix maps to a finding",
+      "pos": [
+        500,
+        610
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "tag": "APPROVED, REVISE, BLOCKED",
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 838,
+          "end_line": 873,
+          "label": "gate and mapping"
+        },
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 681,
+          "end_line": 703,
+          "label": "three repair cycles"
+        }
+      ]
+    },
+    {
+      "id": "commit",
+      "type": "external",
+      "label": "Commit L7",
+      "sublabel": "then pipeline close",
+      "pos": [
+        260,
+        610
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/commands/audit-fix.md",
+          "line": 875,
+          "end_line": 914,
+          "label": "commit rules"
+        }
+      ]
+    },
+    {
+      "id": "guard",
+      "type": "security",
+      "label": "Commit guard",
+      "sublabel": "PreToolUse hook, exit 2",
+      "pos": [
+        260,
+        860
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/hooks/cca_pipeline_guard.py",
+          "line": 19,
+          "end_line": 28,
+          "label": "behaviour"
+        },
+        {
+          "path": "cca_checks/plugin/hooks/cca_pipeline_guard.py",
+          "line": 179,
+          "end_line": 197,
+          "label": "refuse"
+        },
+        {
+          "path": "cca_checks/plugin/hooks/cca_gate_core.py",
+          "line": 479,
+          "end_line": 491,
+          "label": "commit_reasons"
+        }
+      ]
+    },
+    {
+      "id": "runstate",
+      "type": "database",
+      "label": "run-state.json",
+      "sublabel": ".claude/audits",
+      "pos": [
+        500,
+        860
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/hooks/cca_gate_core.py",
+          "line": 87,
+          "end_line": 88,
+          "label": "state file"
+        },
+        {
+          "path": "cca_checks/plugin/hooks/cca_gate_core.py",
+          "line": 301,
+          "end_line": 336,
+          "label": "required layers"
+        }
+      ]
+    },
+    {
+      "id": "pipelinecli",
+      "type": "backend",
+      "label": "pipeline CLI",
+      "sublabel": "start, record each layer",
+      "pos": [
+        740,
+        860
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/pipeline_cli.py",
+          "line": 18,
+          "end_line": 85,
+          "label": "subcommands"
+        },
+        {
+          "path": "cca_checks/pipeline_state.py",
+          "line": 397,
+          "end_line": 477,
+          "label": "record refuses gaps"
+        }
+      ]
+    },
+    {
+      "id": "stopguard",
+      "type": "security",
+      "label": "Stop guard",
+      "sublabel": "refuses an unfinished turn",
+      "pos": [
+        500,
+        1010
+      ],
+      "size": [
+        160,
+        64
+      ],
+      "sources": [
+        {
+          "path": "cca_checks/plugin/hooks/cca_stop_guard.py",
+          "line": 8,
+          "end_line": 28,
+          "label": "behaviour"
+        },
+        {
+          "path": "cca_checks/plugin/hooks/cca_stop_guard.py",
+          "line": 114,
+          "end_line": 144,
+          "label": "refusal cap"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Find and verify",
+      "wraps": [
+        "auditors",
+        "conditional",
+        "consolidate",
+        "verify"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Fix and prove, at most 3 repair cycles per finding",
+      "wraps": [
+        "fix",
+        "regress",
+        "proof",
+        "architect"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "claude-scope",
+      "from": "claude",
+      "to": "scope",
+      "label": "spec"
+    },
+    {
+      "id": "codex-scope",
+      "from": "codex",
+      "to": "scope",
+      "label": "spec"
+    },
+    {
+      "id": "scope-viability",
+      "from": "scope",
+      "to": "viability",
+      "label": "HUNT only",
+      "variant": "dashed"
+    },
+    {
+      "id": "scope-auditors",
+      "from": "scope",
+      "to": "auditors",
+      "label": "dispatch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "scope-conditional",
+      "from": "scope",
+      "to": "conditional",
+      "label": "domain flags",
+      "variant": "dashed"
+    },
+    {
+      "id": "auditors-consolidate",
+      "from": "auditors",
+      "to": "consolidate",
+      "label": "findings",
+      "variant": "emphasis"
+    },
+    {
+      "id": "conditional-consolidate",
+      "from": "conditional",
+      "to": "consolidate",
+      "label": "findings"
+    },
+    {
+      "id": "consolidate-verify",
+      "from": "consolidate",
+      "to": "verify",
+      "label": "P1, P2",
+      "variant": "emphasis"
+    },
+    {
+      "id": "verify-checks",
+      "from": "verify",
+      "to": "checks",
+      "label": "settle claim"
+    },
+    {
+      "id": "verify-fix",
+      "from": "verify",
+      "to": "fix",
+      "label": "CONFIRMED",
+      "variant": "emphasis"
+    },
+    {
+      "id": "fix-regress",
+      "from": "fix",
+      "to": "regress",
+      "label": "diff"
+    },
+    {
+      "id": "fix-proof",
+      "from": "fix",
+      "to": "proof",
+      "label": "proofs"
+    },
+    {
+      "id": "regress-architect",
+      "from": "regress",
+      "to": "architect",
+      "label": "per hunk"
+    },
+    {
+      "id": "proof-architect",
+      "from": "proof",
+      "to": "architect",
+      "label": "RED or fail"
+    },
+    {
+      "id": "architect-commit",
+      "from": "architect",
+      "to": "commit",
+      "label": "APPROVED",
+      "variant": "security"
+    },
+    {
+      "id": "architect-revise",
+      "from": "architect",
+      "to": "fix",
+      "label": "REVISE",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          580,
+          790
+        ],
+        [
+          1060,
+          790
+        ]
+      ]
+    },
+    {
+      "id": "commit-guard",
+      "from": "commit",
+      "to": "guard",
+      "label": "git commit",
+      "variant": "security"
+    },
+    {
+      "id": "guard-runstate",
+      "from": "guard",
+      "to": "runstate",
+      "label": "reads"
+    },
+    {
+      "id": "pipelinecli-runstate",
+      "from": "pipelinecli",
+      "to": "runstate",
+      "label": "writes"
+    },
+    {
+      "id": "stopguard-runstate",
+      "from": "stopguard",
+      "to": "runstate",
+      "label": "reads"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Tiers",
+      "items": [
+        "FAST: CODE, BUG and SEC only; L2.5 on P1; no L2.6, L5.5 or L5.6",
+        "STANDARD: six core auditors plus domain flags; L2.5 on P1 and P2; red to green tests",
+        "DEEP: forced by high stakes, numeric code or hunt mode; adds a 2 of 3 adversarial panel on high stakes P1"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Tool evidence first",
+      "items": [
+        "Python and Rust claims are settled by pyright, semgrep, pytest, hypothesis or clippy",
+        "An LLM may not overturn a tool verdict; it adjudicates UNCERTAIN only",
+        "A missing tool or unknown language returns UNCERTAIN, never a pass"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "The gate",
+      "items": [
+        "Every layer is recorded with pipeline record, which refuses gaps and wrong counts",
+        "The commit guard blocks git commit until every owed layer is recorded and L6 is APPROVED",
+        "Codex has no hooks: pipeline status --require-complete is its gate"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Not drawn",
+      "items": [
+        "L2.6 auditor scorecard, recorded by its tool on STANDARD and DEEP",
+        "no-fix and p1-only modes; the deferred second pass for P3",
+        "Pause and resume at a layer boundary"
+      ]
+    }
+  ]
+}

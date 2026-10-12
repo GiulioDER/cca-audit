@@ -10,7 +10,6 @@ from cca_checks.pyright_check import (
     TYPE_RULES,
     run_pyright,
     verdict_for_claim,
-    verdict_for_definedness,
 )
 
 
@@ -117,13 +116,6 @@ def test_matched_diagnostic_missing_message_still_confirms_with_evidence():
     assert v.source == "pyright"
     assert v.evidence.strip()
     assert "reportOptionalMemberAccess" in v.evidence
-
-
-def test_verdict_for_definedness_delegates_to_verdict_for_claim():
-    diags = [diag(7, "reportUnboundVariable", "possibly unbound")]
-    assert verdict_for_definedness(claim(), diags).verdict == "CONFIRMED"
-    assert verdict_for_definedness(claim(), []).verdict == "FALSE_POSITIVE"
-    assert verdict_for_definedness(claim(), None).source == "llm"
 
 
 @pytest.mark.parametrize("rule", sorted(NULLABILITY_RULES))
