@@ -6,7 +6,7 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## Unreleased
+## [0.11.0] - 2026-10-12
 
 ### Changed
 - Every step of `/audit-fix` is now gated, not only L1, L2, L2.5 and L6. A HUNT owes L0.4 PASS; STANDARD and DEEP owe L2.6; every fixing run owes L3; L4 onward is owed whenever the working tree changed, whether or not L4 was recorded. In 0.10.x an unrecorded L4 switched off L5, L5.5 and L5.6.
@@ -26,8 +26,11 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline record` and `pipeline status` fingerprint the working tree once per call. Each fingerprint is a `git add -A` over a copy of the index; `record` ran two and `status` ran three. `pipeline_state.required_layers`, `outstanding`, `verify_commit_allowed` and `record` accept a precomputed `tree=` from the new `current_tree()`.
 - The `pipeline` subcommand moved from `cca_checks/__main__.py` to `cca_checks/pipeline_cli.py`. The command line is unchanged.
 - The installers moved from `cca_checks/plugin/__init__.py` to `cca_checks/plugin/installer.py`. `cca_checks.plugin` still exports the same public names; code that patched a private helper on the package (`plugin._write`) must patch `cca_checks.plugin.installer` instead.
+- Every GitHub Action in CI and in the release workflow is pinned to a commit SHA, starting with the step that holds the PyPI token; `tests/test_ci_contract.py` fails on any `uses:` that is not a SHA.
+- The README, which is also the PyPI project page, is cut from 521 lines to 181.
 
 ### Added
+- `CCA_REMOTE_SEMGREP=<ssh destination>` runs semgrep on a remote host when it cannot execute locally (for example under Windows Smart App Control), so `taint` claims are settled instead of escalated. Local semgrep is always tried first. On the host, a forced-command runner (`cca_checks/remote/runner.py`, stdlib only) accepts one capped tar archive with fixed member names and scans under a memory and CPU cap. `capabilities` reports the remote, and remote verdicts name the host in their evidence. A remote "no sink" refutes a taint finding, so the host joins the trust base; setup and the host key check are in `docs/remote-semgrep.md`.
 - `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
 - `pipeline status --require-complete` for Codex, which has no hooks.
 - `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
@@ -35,9 +38,13 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input, and writes only under `.claude/audits/out/`. While any summary is unreadable the report says `offered: false`, since the deferred start refuses then.
 - `pipeline start --mode DEFERRED --from <run_id>` (or `--from commit:<sha>`): a deferred pass that owes every layer, refuses FAST, and cannot defer again. `/audit-fix` offers it after a run closes.
 - The `STALE` verdict, for deferred runs only: the issue was present in the tree the parent run audited (its `base_tree`, which `pipeline close` now writes into the summary) and is gone now, because later work moved, rewrote or fixed it. `pipeline record L2.5` takes it as `--stale <S>` (a deferred run can use neither `--unverified` at L2.5 nor `--deferred` at L3), the L2.5 file of any other run refuses it, and its ledger row says `STALE`, never `FALSE_POSITIVE`.
+- `python -m cca_checks bugs backfill`: a cross-project ledger of the bugs CCA fixed, read from CCA fix commits and the per-project `AUDITOR_SCORECARD.jsonl` files. A bug is `proved` only when it was confirmed at L2.5, landed, approved at L6 and red at L5.6; everything else is `historical`. Ledger evidence applies only through an explicit `--bind SHA=RUN`. Read-only unless `--write`, which appends to `~/.claude/cca-bugs/bugs.jsonl`, outside any repository.
+- An architecture diagram (`docs/diagrams/`), light and dark, with an interactive version that links each box to the source lines it describes.
+- `docs/limits.md`, the full list of where the verifiers are blind, each with the test that asserts it.
 - `fp-check` has a `MODE=DEFERRED`: it verifies every deferred finding, P2 and P3 alike, checks that the cited code lies inside the diff of the run that deferred it, and returns `STALE` for an issue that later work removed. Its status block gained `mode: DEFERRED` and a `stale:` count.
 
 ### Removed
+- `docs/banner.svg`; the README shows the architecture diagram instead.
 - `Claim.predicted_impact`, which nothing read or wrote.
 - `pyright_check.verdict_for_definedness`; call `verdict_for_claim(claim, diags, DEFINEDNESS_RULES)`.
 - `semgrep_check.SINKS_RULES` and `TAINT_RULES`; the CI packaging job checks every backend's `semgrep_catalog`, and the comment claiming it read these was stale.
@@ -64,6 +71,7 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `--parked N` can over-claim up to the ledger's CONFIRMED P1 count; the count is written into L5.6 for the architect. A tighter bound needs pinned L3/L4 output shapes.
 
 ### Fixed
+- The benchmark write-up's 40-point memorization gap (83% memorized against 43% novel) is withdrawn. The 95% interval on the difference is [-2.2, +70.0] points (Newcombe) and Fisher exact gives p = 0.129, so the pilot cannot tell the gap from zero; the two arms also come from different corpora. What stands is the contamination measurement: BugsInPy came back 12/12 recognized. `benchmarks/harness/interval.py` recomputes every figure from the counts, and a test refuses any document that quotes 83 and 43 without the retraction.
 - A stale project copy of the pipeline no longer runs silently. `/audit-fix` ran its two tools as `.claude/tools/<tool>.py` when that file existed, so a gitignored `.claude/` left by an older install ran months-old tools while the agent followed the new prose, and nothing said so. The tools now run from the installed package as `python -m cca_checks scorecard` and `python -m cca_checks tautology`, which pass their arguments and exit code through. `pipeline start` adds a `"warnings"` list to its output (and prints each on stderr) naming every installed `audit-fix.md`, tool or hook, in the project's or the user's `.claude/`, that differs from the package's copy, with the `cca-audit install --target <dir>` that refreshes it. It never refuses.
 - A run opened in a worktree below the session's directory is now enforced. Both hooks looked for the run from the session's directory, so the Stop hook never blocked and `cd <worktree> && git commit` passed the commit guard. `pipeline start` now records each open run in `~/.claude/cca/open-runs.json` (or the file `CCA_RUN_REGISTRY` names) and `close` and `abort` remove it; the Stop hook also judges every registered run at or below the session's directory, naming its root; and the commit guard looks from the directory the commit runs in, following leading `cd <dir>` and `git -C <dir>`. A run in another checkout stays out of scope.
 - The Codex skill keeps at most six subagents open, Codex's default `agents.max_threads`. A finished subagent holds its slot until `close_agent`, so the skill now records and closes each one before spawning the next queued role. A DEEP run used to launch every auditor at once and die on `agent thread limit reached`.
