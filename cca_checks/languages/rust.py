@@ -28,6 +28,7 @@ Both BLOCK FALSE_POSITIVE rather than being ignored. A file must not be able to 
 a refutation carrying an authoritative `source` precisely by being hard to read.
 """
 
+from .. import remote
 from .. import treesitter as ts
 from ..claim import Claim, Verdict, make_verdict
 from ..clippy_check import LINTS_BY_CLAIM, run_clippy
@@ -453,8 +454,20 @@ class RustBackend:
                 out[claim_type] = f"{cargo_reason}, so clippy cannot run"
         semgrep_reason = tool_unavailable_reason("semgrep")
         if semgrep_reason is not None:
+            # A remote host may serve taint (cca_checks.remote); semgrep_status says so,
+            # or returns why neither side can run it.
+            semgrep_reason, _served = remote.semgrep_status(semgrep_reason)
+        if semgrep_reason is not None:
             out["taint"] = semgrep_reason
         return out
+
+    def remote_claim_types(self) -> dict[str, str]:
+        """Claim types served by a remote host, with where: reported, never silent."""
+        local = tool_unavailable_reason("semgrep")
+        if local is None:
+            return {}
+        _reason, served = remote.semgrep_status(local)
+        return {"taint": served} if served else {}
 
     def settle(self, claim: Claim) -> Verdict:
         if claim.claim_type == "clock_leak":
