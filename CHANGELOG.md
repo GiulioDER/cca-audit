@@ -26,6 +26,8 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline record` and `pipeline status` fingerprint the working tree once per call. Each fingerprint is a `git add -A` over a copy of the index; `record` ran two and `status` ran three. `pipeline_state.required_layers`, `outstanding`, `verify_commit_allowed` and `record` accept a precomputed `tree=` from the new `current_tree()`.
 - The `pipeline` subcommand moved from `cca_checks/__main__.py` to `cca_checks/pipeline_cli.py`. The command line is unchanged.
 - The installers moved from `cca_checks/plugin/__init__.py` to `cca_checks/plugin/installer.py`. `cca_checks.plugin` still exports the same public names; code that patched a private helper on the package (`plugin._write`) must patch `cca_checks.plugin.installer` instead.
+- Every GitHub Action in CI and in the release workflow is pinned to a commit SHA, starting with the step that holds the PyPI token; `tests/test_ci_contract.py` fails on any `uses:` that is not a SHA.
+- The README, which is also the PyPI project page, is cut from 521 lines to 181.
 
 ### Added
 - `cca_stop_guard.py`, a Stop hook that refuses to end the turn while a run is open, three times per run, then logs `STOPPED_INCOMPLETE`. `install --print-hook` now prints both hooks; re-run it and update settings.json.
@@ -35,9 +37,13 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input, and writes only under `.claude/audits/out/`. While any summary is unreadable the report says `offered: false`, since the deferred start refuses then.
 - `pipeline start --mode DEFERRED --from <run_id>` (or `--from commit:<sha>`): a deferred pass that owes every layer, refuses FAST, and cannot defer again. `/audit-fix` offers it after a run closes.
 - The `STALE` verdict, for deferred runs only: the issue was present in the tree the parent run audited (its `base_tree`, which `pipeline close` now writes into the summary) and is gone now, because later work moved, rewrote or fixed it. `pipeline record L2.5` takes it as `--stale <S>` (a deferred run can use neither `--unverified` at L2.5 nor `--deferred` at L3), the L2.5 file of any other run refuses it, and its ledger row says `STALE`, never `FALSE_POSITIVE`.
+- `python -m cca_checks bugs backfill`: a cross-project ledger of the bugs CCA fixed, read from CCA fix commits and the per-project `AUDITOR_SCORECARD.jsonl` files. A bug is `proved` only when it was confirmed at L2.5, landed, approved at L6 and red at L5.6; everything else is `historical`. Ledger evidence applies only through an explicit `--bind SHA=RUN`. Read-only unless `--write`, which appends to `~/.claude/cca-bugs/bugs.jsonl`, outside any repository.
+- An architecture diagram (`docs/diagrams/`), light and dark, with an interactive version that links each box to the source lines it describes.
+- `docs/limits.md`, the full list of where the verifiers are blind, each with the test that asserts it.
 - `fp-check` has a `MODE=DEFERRED`: it verifies every deferred finding, P2 and P3 alike, checks that the cited code lies inside the diff of the run that deferred it, and returns `STALE` for an issue that later work removed. Its status block gained `mode: DEFERRED` and a `stale:` count.
 
 ### Removed
+- `docs/banner.svg`; the README shows the architecture diagram instead.
 - `Claim.predicted_impact`, which nothing read or wrote.
 - `pyright_check.verdict_for_definedness`; call `verdict_for_claim(claim, diags, DEFINEDNESS_RULES)`.
 - `semgrep_check.SINKS_RULES` and `TAINT_RULES`; the CI packaging job checks every backend's `semgrep_catalog`, and the comment claiming it read these was stale.
