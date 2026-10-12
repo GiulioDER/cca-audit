@@ -11,7 +11,7 @@ import json
 import os
 import pathlib
 
-from conftest import write_output
+from conftest import findings_output, plan_output, verdicts_output, write_output
 
 from cca_checks import pipeline_state as ps
 
@@ -27,10 +27,10 @@ def _entries(registry) -> dict:
 
 def _finish_fast_run(root) -> None:
     ps.record("L1", output=write_output(root), root=root)
-    ps.record("L2", counts={"unique": 0}, output=write_output(root), root=root)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(root), root=root)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(root), root=root)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(root), root=root)
+              output=verdicts_output(root), root=root)
+    ps.record("L3", counts={"to_fix": 0, "deferred": 0}, output=plan_output(root), root=root)
     ps.record("L6", detail="APPROVED", root=root)
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import closed_parent, findings_output, verdicts_output, write_output
+from conftest import closed_parent, findings_output, plan_output, verdicts_output, write_output
 
 from cca_checks.__main__ import main
 
@@ -721,9 +721,9 @@ def _through_l2_5(root) -> None:
     from cca_checks import pipeline_state as ps
     ps.start("STANDARD", root=root)
     ps.record("L1", output=write_output(root), root=root)
-    ps.record("L2", counts={"unique": 0}, output=write_output(root), root=root)
+    ps.record("L2", counts={"unique": 0}, output=findings_output(root), root=root)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
-              output=write_output(root), root=root)
+              output=verdicts_output(root), root=root)
 
 
 def test_scorecard_subcommand_records_l2_6_from_the_packaged_tool(capsys, git_repo,
@@ -754,7 +754,8 @@ def test_tautology_subcommand_records_l5_6_with_no_proofs(capsys, git_repo, monk
     from cca_checks import pipeline_state as ps
     _through_l2_5(git_repo)
     ps.record("L2.6", source="tool", root=git_repo)
-    ps.record("L3", counts={"to_fix": 0}, output=write_output(git_repo), root=git_repo)
+    ps.record("L3", counts={"to_fix": 0, "deferred": 0}, output=plan_output(git_repo),
+              root=git_repo)
     (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(git_repo), root=git_repo)
     ps.record("L5", root=git_repo)

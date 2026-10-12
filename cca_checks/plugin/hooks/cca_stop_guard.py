@@ -103,7 +103,7 @@ def _decide(raw: str) -> int:
         candidates.append(root)
     try:
         core = _load_core()
-    except Exception:  # noqa: BLE001 - see main()
+    except Exception:  # noqa: BLE001 (see main())
         return 0
     try:
         candidates += [r for r in core.registered_roots() if core._inside(str(r), str(cwd))]
@@ -152,7 +152,7 @@ def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
     if refusals >= core.STOP_REFUSAL_CAP and state.get("stop_logged"):
         # Cap reached and already logged: the answer is "allow" whatever is owed, so
         # skip the fingerprint (up to FINGERPRINT_TIMEOUT_S on every turn end).
-        return 0
+        return None
     reasons = core.outstanding(state, core.fingerprint(root))
     if refusals >= core.STOP_REFUSAL_CAP:
         if not state.get("stop_logged"):

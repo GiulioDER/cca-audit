@@ -1099,7 +1099,7 @@ DUPLICATE finding's row carries `"verdict": "DUPLICATE"`. Record with `--duplica
 **D.5 Steps 2.6 to 5.5** run as written above. At Step 3 every CONFIRMED finding is planned;
 UNCERTAIN goes to a human.
 
-**D.6 Step 5.6.** Record `python "$TC" verify --no-proofs --record` only when the pool holds no
+**D.6 Step 5.6.** Record `python -m cca_checks tautology verify --no-proofs --record` only when the pool holds no
 P1. A pool loaded from a run's summary never does: P1 findings are never deferred. A pool parsed
 by the commit-message fallback may hold one; then Step 5.6 applies as written above, every
 CONFIRMED P1 carries a `RED` proof, and `verify --no-proofs` refuses while one is confirmed and

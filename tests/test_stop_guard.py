@@ -7,7 +7,12 @@ import json
 import os
 
 from conftest import (
-    findings_output, load_hook, make_repo, plan_output, verdicts_output, write_output,
+    findings_output,
+    load_hook,
+    make_repo,
+    plan_output,
+    verdicts_output,
+    write_output,
 )
 
 from cca_checks import pipeline_state as ps
