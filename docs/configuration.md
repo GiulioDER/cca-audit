@@ -85,6 +85,7 @@ affected claim types; it never silently passes them.
 | `CCA_SUBSTRATE_DPS` | 50 | decimal digits of the reference substrate |
 | `CCA_CLOCK_STRONG_PARAMS` | `now,as_of,clock,…` | parameter names whose *dead* presence can confirm a clock leak — shared by the Python and Rust checkers |
 | `CCA_CLOCK_WEAK_PARAMS` | `ts,timestamp,at,…` | names that only raise the question |
+| `CCA_REMOTE_SEMGREP` | unset | an ssh destination (alias or `user@host`) where semgrep runs when it cannot run locally; see [remote-semgrep.md](remote-semgrep.md). Read from the environment only, never from the audited repository |
 
 A malformed value falls back to the default rather than crashing the checker: refusing to start
 would take the whole deterministic layer down, and a layer that is down is indistinguishable from

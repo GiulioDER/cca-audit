@@ -166,7 +166,7 @@ The full list, with the test that asserts each one, is in
 
 - [Documentation map](https://github.com/GiulioDER/cca-audit/blob/master/docs/README.md): pipeline, auditor scopes, configuration, extension, design evidence
 - [Changelog](https://github.com/GiulioDER/cca-audit/blob/master/CHANGELOG.md) · [Contributing](https://github.com/GiulioDER/cca-audit/blob/master/CONTRIBUTING.md)
-- Articles: [Fluency isn't evidence](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-fluency-isnt-evidence.md) · [Why AI code review hallucinates](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-why-ai-review-hallucinates.md) · [The benchmark memorization gap](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-benchmark-memorization-gap.md)
+- Articles: [Fluency isn't evidence](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-fluency-isnt-evidence.md) · [Why AI code review hallucinates](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-why-ai-review-hallucinates.md) · [Your AI code reviewer's benchmark is memorized](https://github.com/GiulioDER/cca-audit/blob/master/docs/blog-benchmark-memorization-gap.md)
 
 ## Acknowledgements
 

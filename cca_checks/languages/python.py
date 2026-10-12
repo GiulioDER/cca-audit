@@ -12,6 +12,7 @@ so this module is the patch seam for tests that need to stand a checker down. Th
 seam used to be `__main__`; it moved here with the dispatch it belongs to.
 """
 
+from .. import remote
 from ..claim import Claim, Verdict
 from ..clock_check import verdict_for_clock_leak
 from ..pyright_check import RULES_BY_CLAIM, run_pyright, verdict_for_claim
@@ -55,8 +56,20 @@ class PythonBackend:
                 out[claim_type] = pyright_reason
         semgrep_reason = tool_unavailable_reason("semgrep")
         if semgrep_reason is not None:
+            # A remote host may serve taint (cca_checks.remote); semgrep_status says so,
+            # or returns why neither side can run it.
+            semgrep_reason, _served = remote.semgrep_status(semgrep_reason)
+        if semgrep_reason is not None:
             out["taint"] = semgrep_reason
         return out
+
+    def remote_claim_types(self) -> dict[str, str]:
+        """Claim types served by a remote host, with where: reported, never silent."""
+        local = tool_unavailable_reason("semgrep")
+        if local is None:
+            return {}
+        _reason, served = remote.semgrep_status(local)
+        return {"taint": served} if served else {}
 
     def settle(self, claim: Claim) -> Verdict:
         if claim.claim_type == "taint":

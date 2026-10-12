@@ -1,12 +1,14 @@
+import dataclasses
 import json
 import os
 import subprocess
 from importlib import resources
 
+from . import remote
 from .claim import Claim, Verdict, make_verdict
 from .config import TIMEOUT_S
 from .scope import enclosing_span
-from .toolpath import resolve_tool
+from .toolpath import resolve_tool, tool_unavailable_reason
 
 SUPPORTED_SINK_CLASSES = frozenset({"sql", "command", "code_exec", "path"})
 
@@ -23,6 +25,10 @@ SUPPORTED_SINK_CLASSES = frozenset({"sql", "command", "code_exec", "path"})
 #: cross-examined; one that does not is trusted as before, so the Python catalog is
 #: unaffected and the mechanism is opt-in per language.
 CONTROL_RULE = "parse-control"
+
+#: What the most recent run_semgrep call did remotely, for the verdict's evidence:
+#: None when it ran locally, else {"dest", "version", "error"}.
+_last_remote: dict | None = None
 
 # Semgrep can neither prove a taint bug (it flags safely-parameterized calls) nor
 # prove its absence (rule coverage is finite). What it settles soundly is whether a
@@ -81,7 +87,23 @@ def run_semgrep(config: str, path: str) -> list[dict] | None:
     the evidence against itself and collect a refutation carrying an authoritative
     `source: semgrep`. A refutation may only rest on a scan the audited repo could
     not influence.
+
+    REMOTE. When semgrep cannot run on this machine and CCA_REMOTE_SEMGREP names a host,
+    the scan runs there instead (cca_checks.remote). Local first: with local semgrep
+    runnable, nothing leaves the machine. The remote JSON goes through the same
+    validation as a local run, and must be a scan of the one file sent.
+
+    TRUST. A remote scan puts that host in the trust base for refutations: the audited
+    repo still cannot influence the scan, but a compromised host, or anyone holding its
+    host key, could return a clean result for a file with a real sink. The verdict's
+    evidence names the host, and docs/remote-semgrep.md tells the operator to verify the
+    host key out of band.
     """
+    global _last_remote
+    _last_remote = None
+    dest, _invalid = remote.destination()
+    if dest is not None and tool_unavailable_reason("semgrep") is not None:
+        return _run_remote(config, path, dest)
     exe = resolve_tool("semgrep")
     if exe is None:
         # Missing from PATH, or resolved inside the audited tree (hijack attempt).
@@ -102,6 +124,11 @@ def run_semgrep(config: str, path: str) -> list[dict] | None:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
+    return _results_of(data)
+
+
+def _results_of(data) -> list[dict] | None:
+    """semgrep's results, or None unless the run is clean, scanned something, and listed results."""
     try:
         if not isinstance(data, dict) or data.get("errors"):
             return None
@@ -113,6 +140,37 @@ def run_semgrep(config: str, path: str) -> list[dict] | None:
         return results if isinstance(results, list) else None
     except Exception:
         return None
+
+
+def _run_remote(config: str, path: str, dest: str) -> list[dict] | None:
+    global _last_remote
+    ext = os.path.splitext(path)[1].lstrip(".").lower()
+    try:
+        with open(config, "rb") as fh:
+            rules = fh.read()
+        with open(path, "rb") as fh:
+            target = fh.read()
+    except OSError as exc:
+        _last_remote = {"dest": dest, "version": None,
+                        "error": f"could not read the files ({exc})"}
+        return None
+    data, why = remote.remote_semgrep(dest, rules, target, ext)
+    if data is None:
+        _last_remote = {"dest": dest, "version": None, "error": why}
+        return None
+    results = _results_of(data)
+    if results is None:
+        _last_remote = {"dest": dest, "version": None,
+                        "error": "semgrep reported errors or scanned nothing"}
+        return None
+    sent = f"target.{ext}"
+    if data["paths"]["scanned"] != [sent]:
+        _last_remote = {"dest": dest, "version": None,
+                        "error": f"the answer is not a scan of {sent} alone"}
+        return None
+    _last_remote = {"dest": dest, "version": str(data.get("version") or "unknown"),
+                    "error": None}
+    return results
 
 
 def hits_in_span(results: list[dict], lo: int, hi: int, rule_id: str) -> list[dict]:
@@ -206,18 +264,38 @@ def verdict_for_taint(claim: Claim, sinks=None, taint=None) -> Verdict:
             f"sink class {claim.sink_class!r} / language not covered by the bundled "
             f"catalog; escalated", "llm")
 
+    global _last_remote
+    _last_remote = None
+    remote_used = None
     if sinks is None and taint is None:
         sink_rules, taint_rules = catalog
         sinks = run_semgrep(rules_path(sink_rules), claim.file)
+        remote_used = _last_remote
         if sinks is not None:
             taint = run_semgrep(rules_path(taint_rules), claim.file) or []
 
     if sinks is None:
+        if remote_used and remote_used.get("error"):
+            return make_verdict(
+                claim.finding_id, "UNCERTAIN",
+                f"semgrep cannot run here and the remote scan on {remote_used['dest']} "
+                f"failed ({remote_used['error']}); falling back to LLM", "llm")
         return make_verdict(claim.finding_id, "UNCERTAIN",
                             "semgrep unavailable; falling back to LLM", "llm")
     if taint is None:
         taint = []
 
+    verdict = _settle(claim, sinks, taint, catalog)
+    if remote_used and not remote_used.get("error") and verdict.source == "semgrep":
+        verdict = dataclasses.replace(
+            verdict,
+            evidence=(f"{verdict.evidence} "
+                      f"(semgrep {remote_used['version']} on {remote_used['dest']})"))
+    return verdict
+
+
+def _settle(claim: Claim, sinks: list, taint: list, catalog) -> Verdict:
+    """The verdict from scan results, local or remote alike."""
     try:
         lo, hi = enclosing_span(claim.file, claim.line)
     except Exception:
