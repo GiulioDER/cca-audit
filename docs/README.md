@@ -36,7 +36,7 @@ the engineering log behind the current behavior.
 
 - [Fluency isn't evidence](blog-fluency-isnt-evidence.md)
 - [Why AI code review hallucinates](blog-why-ai-review-hallucinates.md)
-- [The benchmark memorization gap](blog-benchmark-memorization-gap.md)
+- [Your AI code reviewer's benchmark is memorized](blog-benchmark-memorization-gap.md)
 
 ## Maintenance Rule
 
