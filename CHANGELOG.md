@@ -32,9 +32,9 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 - `pipeline status --require-complete` for Codex, which has no hooks.
 - `pipeline pause --reason` and `pipeline resume`. A run paused right after a `record` can end the session (the Stop hook allows it without spending a refusal) and continue later from the next layer: `resume` prints that layer, its heading, the stored outputs, whether the tree changed while paused, and what the run still owes. While paused, `record`, `close` and `git commit` are refused; `abort` still works. `resume` resets the Stop hook's refusal count, and names L4 next after an L3 that planned fixes. `pipeline start --run-id` accepts only letters, digits, `.`, `_` and `-`, since the run id names a directory.
 - `pipeline close` writes `.claude/audits/runs/<run_id>/summary.json`: tier, mode, base and final commit, and the deferred pool.
-- `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input.
+- `pipeline deferred [--run <id>] [--write <file>]`: what the last completed run deferred, whether a second pass is offered, and RUN or SKIP with reasons; `--write` produces the deferred run's L1 input, and writes only under `.claude/audits/out/`. While any summary is unreadable the report says `offered: false`, since the deferred start refuses then.
 - `pipeline start --mode DEFERRED --from <run_id>` (or `--from commit:<sha>`): a deferred pass that owes every layer, refuses FAST, and cannot defer again. `/audit-fix` offers it after a run closes.
-- The `STALE` verdict, for deferred runs only: the issue was present at the parent run's commit and is gone now, because later work moved, rewrote or fixed it. `pipeline record L2.5` takes it as `--stale <S>` (a deferred run can use neither `--unverified` at L2.5 nor `--deferred` at L3), the L2.5 file of any other run refuses it, and its ledger row says `STALE`, never `FALSE_POSITIVE`.
+- The `STALE` verdict, for deferred runs only: the issue was present in the tree the parent run audited (its `base_tree`, which `pipeline close` now writes into the summary) and is gone now, because later work moved, rewrote or fixed it. `pipeline record L2.5` takes it as `--stale <S>` (a deferred run can use neither `--unverified` at L2.5 nor `--deferred` at L3), the L2.5 file of any other run refuses it, and its ledger row says `STALE`, never `FALSE_POSITIVE`.
 - `fp-check` has a `MODE=DEFERRED`: it verifies every deferred finding, P2 and P3 alike, checks that the cited code lies inside the diff of the run that deferred it, and returns `STALE` for an issue that later work removed. Its status block gained `mode: DEFERRED` and a `stale:` count.
 
 ### Removed
@@ -45,6 +45,7 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ### Compatibility
 - A run started by 0.10.x finishes under 0.10.x rules.
+- A run already in flight when this version lands, whose L2, L2.5 or L3 file lacks the new shape, is refused at that `record`, and the refusal names the shape. The execution ledger is append-only, so the run cannot be repaired in place: `pipeline abort --reason` it and start again.
 - Upgrading from 0.10.x: run `cca-audit install` first, so `.claude/hooks/` holds `cca_gate_core.py` and `cca_stop_guard.py`, and only then replace BOTH hook entries in settings.json with the output of `cca-audit install --print-hook`. A Stop hook registered before its script is installed exits 2, which refuses every turn end. The commit guard's timeout rose from 15 s to 60 s: it now fingerprints the tree for up to 30 s, and a hook that times out lets the commit through. `install` warns about a guard entry still registered below 60 s, and `--print-hook` warns when the hook files are missing.
 
 ### Fixed in the pre-release audit

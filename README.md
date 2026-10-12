@@ -482,7 +482,7 @@ still works.
 
 | | |
 |---|---|
-| Tests | 1097 collected, run in CI on every push and PR |
+| Tests | 1114 passed, run in CI on every push and PR |
 | Python | 3.10, 3.11, 3.12 and 3.13, the full matrix in CI |
 | Packaging | wheel built and smoke-installed into a clean venv in CI |
 | Lint | `ruff`, zero warnings |

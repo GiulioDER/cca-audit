@@ -276,3 +276,45 @@ file for such a finding stays `DEFERRED`; L3 keeps `--deferred`. So every `--def
 gives L2.5 (§ 2.3, § 4's L2.5 row, § 5, the Testing table) reads `--unverified`, and the sum rule
 is `confirmed + fp + uncertain + duplicate + unverified + stale == L2 unique`. The ledger is also
 tallied per verdict (master's U15), `STALE` included.
+
+## Corrections made while building (2026-10-11)
+
+The text above is the design as approved. Building it, and the final review, changed these points;
+where they disagree with the sections above, this list wins.
+
+- **The pool is enforced, not only described (ruling R12).** § 1's table is checked from the
+  priorities stored in L2: an L2.5 `DEFERRED` id must be P3, or P2 or P3 on a FAST run; an L3
+  deferred id must not be P1. A P1 is never passed on unverified or left unfixed, and the refusal
+  names the id and its priority.
+- **A `commit:<sha>` parent gets more than three checks (ruling R20).** § 5 says only the
+  ancestor, consumed and FAST checks apply to it. Also: a sha that is the `commit` of a run that
+  left a summary is refused, naming that run, so that run's own rules apply through
+  `--from <run_id>`; the sha takes 7 to 64 hexadecimal characters and never a revision
+  expression.
+- **Unreadable summaries refuse a deferred start (R20), and withhold the offer.** One of them might
+  be the child that already took the pool, so the gate fails closed. While any exists,
+  `pipeline deferred` reports `offered: false` with no recommendation, its first reason naming the
+  files, and `--write` is refused.
+- **`--base` is refused with `--mode DEFERRED` (R20).** The run inherits its parent's base, resolved
+  by git rather than copied from the summary.
+- **The L2.5 count is `--unverified`**, as the master merge note above records; L3 keeps
+  `--deferred`.
+- **STALE is judged against `base_tree`.** § 2.5's summary gains `base_tree`, the start
+  fingerprint: the tree the parent's auditors read. The parent's `commit` already holds the
+  parent's own fixes, so a finding those fixes removed would read there as never present. STALE
+  means present at `git show <base_tree>:<file>` (failing that, `<base_commit>:<file>` with the
+  finding's own evidence) and absent now. `pipeline deferred` prints the parent's `base_tree` and
+  `base_commit`. In MODE=DEFERRED a tool-backed FALSE_POSITIVE on a finding present in the audited
+  tree is the "now" half of a STALE verdict, not a refutation.
+- **A deferred run is held to its parent's pool.** For a run id parent, `record L2` refuses a file
+  whose ids are not exactly the pool, or that changes a priority. Duplicates are therefore not
+  merged at L2: each keeps its id and the later one gets `DUPLICATE` at L2.5.
+- **`pipeline deferred --write` writes only under `.claude/audits/out/`**, resolved, not anywhere
+  under `.claude/audits/`: the rest of that folder holds the run state, the stored runs, the
+  disposition ledger and the execution log.
+- **L5.6 in a deferred run** (§ 4's table): `--no-proofs` holds for a summary pool, which never has
+  a P1. A pool parsed by the commit-message fallback may hold one, and then the P1 proof rules of
+  Step 5.6 apply.
+- **Compatibility** (§ 5): an in-flight run whose files lack the new shape is refused, naming the
+  shape. The execution ledger is append-only, so such a run cannot be repaired in place: abort it
+  and start again.
