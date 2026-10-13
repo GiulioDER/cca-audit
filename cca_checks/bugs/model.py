@@ -16,6 +16,9 @@ CLAIMED = "claimed"
 ABSENT = "absent"
 CONDITIONS = ("confirmed_l25", "fixed", "l6_approved", "red_proof")
 SHA_LEN = 12
+# A full commit sha as git prints it. Lowercase only: GitHub answers in lowercase, and
+# a record that resolve accepts must be one that github.lookup accepts too.
+SHA40 = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclass

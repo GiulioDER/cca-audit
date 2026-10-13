@@ -17,7 +17,6 @@ a run file that cannot be read stops only its own record. Both are reported unde
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -25,15 +24,15 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import github
-from .forward import Merge, rows_with_fix_ids
+from .forward import Merge, rows_and_skips
 from .ledgers import fix_number
-from .model import SHA_LEN, BugRow
+from .model import SHA40, SHA_LEN, BugRow, render_memo
 from .pending import ABANDONED, PENDING, RECORDED, TMP_PREFIX
 from .store import LEDGER
 from .store import write as write_rows
 
 DEFAULT_RUNNER = github.gh
-_COMMIT = re.compile(r"[0-9a-fA-F]{40}")
+_COMMIT = SHA40
 
 
 @dataclass
@@ -45,6 +44,7 @@ class ResolveReport:
     stale: list[str] = field(default_factory=list)
     incomplete: list[str] = field(default_factory=list)
     already_backfilled: list[str] = field(default_factory=list)
+    not_fixed: list[str] = field(default_factory=list)
     rows_written: int = 0
     memos_written: int = 0
 
@@ -171,7 +171,11 @@ class _Ordinals:
 
 
 class _Backfilled:
-    """Bugs a backfill (rows without a run_id) already recorded, by project and commit.
+    """Bugs a backfill already recorded, by project and commit.
+
+    A backfill row is one without a run_id, or one whose sources name no run: backfill
+    sets run_id on a row it links to a scorecard run, while a forward row always carries
+    a `run:` source.
 
     A squash keeps the CCA commit message, so backfill may have parsed the same merge
     under the bullet's id: L4's finding id, or its fix id (FIX-n). Either names one bug.
@@ -183,7 +187,10 @@ class _Backfilled:
             for line in ledger.read_text(encoding="utf-8").splitlines():
                 try:
                     row = json.loads(line)
-                    if row.get("run_id") is not None:
+                    sources = row.get("sources")
+                    forward = isinstance(sources, list) and any(
+                        isinstance(s, str) and s.startswith("run:") for s in sources)
+                    if row.get("run_id") is not None and forward:
                         continue
                     project, commit, finding = _key(row["project"], row["fix_commit"],
                                                     row["finding_id"])
@@ -209,7 +216,7 @@ def _sort_key(folder: Path) -> tuple[str, str]:
 
 def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
             stale_days: int = 14, now: datetime | None = None) -> ResolveReport:
-    run = run or DEFAULT_RUNNER
+    run = github.cached(run or DEFAULT_RUNNER)
     now = now or datetime.now(timezone.utc)
     report = ResolveReport()
     base = root / PENDING
@@ -244,25 +251,34 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
     ordinals = _Ordinals(root / LEDGER)
     backfilled = _Backfilled(root / LEDGER)
     batch = []
+    stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     for folder, merge in merged:
         try:
-            pairs = rows_with_fix_ids(folder, merge)
+            pairs, skipped = rows_and_skips(folder, merge)
+            for row, _ in pairs:  # a memo that cannot render must fail here, not mid-write
+                render_memo(row, stamp)
         except Exception as exc:  # one bad record must not stop the others
             report.incomplete.append(f"{folder.name}: {type(exc).__name__}: {exc}")
             _stale(report, folder, _meta(folder), "incomplete", now, stale_days)
             continue
+        report.not_fixed += [f"{folder.name}: {s}" for s in skipped]
         rows = []
+        known = []
         for row, fix_id in pairs:
             same = backfilled.match(row, fix_id)
             if same is not None:
-                report.already_backfilled.append(
-                    f"{folder.name}: {row.finding_id} is backfill row {same}")
+                known.append(f"{folder.name}: {row.finding_id} is backfill row {same}")
                 continue
-            row.ordinal = ordinals.assign(row)
             rows.append(row)
+        report.already_backfilled += known
+        if not rows and not known and not skipped:
+            report.incomplete.append(f"{folder.name}: no ledger rows could be built")
+            _stale(report, folder, _meta(folder), "incomplete", now, stale_days)
+            continue
+        for row in rows:
+            row.ordinal = ordinals.assign(row)
         batch.append((folder, rows))
     if write and batch:
-        stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         added, memos = write_rows([r for _, rows in batch for r in rows], root, stamp)
         report.rows_written, report.memos_written = added, memos
         for folder, _ in batch:  # only after the rows are on disk

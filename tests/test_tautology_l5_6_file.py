@@ -56,3 +56,26 @@ def test_the_file_does_not_make_l5_6_stale(git_repo, monkeypatch):
     ps.record("L5.5", root=git_repo)
     ps.record("L6", detail="APPROVED", root=git_repo)
     assert not ps.outstanding(ps.load(git_repo), git_repo)
+
+
+def test_a_second_record_keeps_the_verdicts_it_did_not_rerun(git_repo, monkeypatch):
+    """BUG-005. Invariant: a `verify --record` that re-runs only some proofs keeps the
+    earlier verdicts of the others and replaces those it re-ran.
+
+    Red 2026-10-13: pre-fix `_save_proofs` overwriting the file; failed at the final
+    equality assert (FIX-001's RED verdict was gone).
+    """
+    state = _through_l5(git_repo)
+    monkeypatch.chdir(git_repo)
+    first = [tc.ProofResult("FIX-001", "t::a", tc.RED, ""),
+             tc.ProofResult("FIX-002", "t::b", tc.RED, "")]
+    monkeypatch.setattr(tc, "verify", lambda proofs, snapdir, extra=None: first)
+    tc.main(["verify", "--proof", "FIX-001=t::a", "--proof", "FIX-002=t::b", "--record"])
+    again = [tc.ProofResult("FIX-002", "t::b2", tc.TAUTOLOGICAL, "")]
+    monkeypatch.setattr(tc, "verify", lambda proofs, snapdir, extra=None: again)
+    tc.main(["verify", "--proof", "FIX-002=t::b2", "--record"])
+    path = git_repo / ".claude" / "audits" / "runs" / state.run_id / "L5.6.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == [
+        {"finding": "FIX-001", "nodeid": "t::a", "verdict": "RED"},
+        {"finding": "FIX-002", "nodeid": "t::b2", "verdict": "TAUTOLOGICAL"},
+    ]

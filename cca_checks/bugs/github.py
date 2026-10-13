@@ -20,8 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .forward import Merge
+from .model import SHA40 as _SHA
 
-_SHA = re.compile(r"[0-9a-f]{40}")
 _REPO = re.compile(r"(?!\.+/)[A-Za-z0-9_.-]+/(?!\.+$)[A-Za-z0-9_.-]+")
 ABANDON_AFTER = timedelta(hours=24)
 
@@ -58,6 +58,27 @@ def gh(args: list[str]) -> str:
         first = (out.stderr.strip().splitlines() or ["no message"])[0]
         raise GhError(f"gh {' '.join(args[:2])} exited {out.returncode}: {first}")
     return out.stdout
+
+
+def cached(run: Runner) -> Runner:
+    """`run`, answering `gh api user` and `gh api repos/{repo}` from memory after the first
+    time, so one resolve asks each once however many records it looks up. A call that
+    raises is not remembered.
+    """
+    memo: dict[tuple[str, ...], str] = {}
+
+    def wrapped(args: list[str]) -> str:
+        key = tuple(args)
+        steady = (len(args) == 2 and args[0] == "api"
+                  and (args[1] == "user"
+                       or (args[1].startswith("repos/") and args[1].count("/") == 2)))
+        if not steady:
+            return run(args)
+        if key not in memo:
+            memo[key] = run(args)
+        return memo[key]
+
+    return wrapped
 
 
 def _owners(run: Runner) -> list[str]:

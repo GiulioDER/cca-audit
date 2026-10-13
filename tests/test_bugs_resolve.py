@@ -403,3 +403,121 @@ def test_a_capture_in_progress_is_ignored(_private_bugs_dir, tmp_path):
     building.mkdir(parents=True)
     rep = resolve(root, write=True, run=gh_merged)
     assert rep.incomplete == [] and rep.recorded == [] and building.exists()
+
+
+def test_malformed_l2_fields_still_give_every_row_its_memo(_private_bugs_dir, tmp_path):
+    """SEC-001. Invariant: a row appended to the ledger always gets its memo, even when
+    L2 holds a non-string claim and priority; resolve does not raise.
+
+    Red 2026-10-13: pre-fix code raised AttributeError out of render_memo after the row
+    was appended (the defect itself, not a setup failure); the assertion red proof for
+    SEC-001 is test_bugs_forward.py::test_untrusted_field_types_never_reach_the_row.
+    """
+    root = _private_bugs_dir
+    folder = pending_record(root, tmp_path, "r1")
+    (folder / "L2.json").write_text(json.dumps([
+        {"id": "BUG-001", "priority": {"a": 1}, "claim": ["x"]}]))
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.rows_written == 2 and rep.memos_written == 2
+    rows = [json.loads(x) for x in (root / "bugs.jsonl").read_text().splitlines()]
+    assert all(isinstance(r["summary"], str) for r in rows)
+    assert rows[0]["severity"] is None
+
+
+def test_a_parked_fix_is_reported_not_fixed_and_not_written(_private_bugs_dir, tmp_path):
+    """BUG-002. Invariant: resolve writes no row for a fix the scorecard marks parked, and
+    lists it under not_fixed with its record and finding id.
+
+    Red 2026-10-13: pre-fix code; failed at `assert rep.rows_written == 1` (2).
+    """
+    root = _private_bugs_dir
+    folder = pending_record(root, tmp_path, "r1")
+    lines = [{"run_id": "r1", "fix_id": "FIX-002", "result": "parked"}]
+    (folder / "scorecard.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.rows_written == 1
+    assert [x.split(": ", 1)[1].split(" ")[0] for x in rep.not_fixed] == ["DOC-001"]
+    assert rep.not_fixed[0].startswith(f"{folder.name}: ")
+    assert rep.recorded == [folder.name]
+
+
+def test_a_backfill_row_linked_to_a_run_is_already_backfilled(_private_bugs_dir, tmp_path):
+    """BUG-003. Invariant: a backfill row that backfill linked to a run (run_id set, but
+    no run: source) is still a backfill row, so the forward row for the same bug is
+    skipped and reported, never counted twice.
+
+    Red 2026-10-13: pre-fix `_Backfilled` skipping every row with a run_id; failed at
+    `assert rep.rows_written == 1` (2).
+    """
+    root = _private_bugs_dir
+    linked = {"bug_id": f"widgets:{MERGE_SHA[:12]}:FIX-1", "project": "widgets",
+              "fix_commit": MERGE_SHA, "finding_id": "FIX-1", "run_id": "pr805a",
+              "ordinal": 1, "sources": [f"git:{MERGE_SHA}", "ledger:x.jsonl#L3"]}
+    (root / "bugs.jsonl").write_text(json.dumps(linked) + "\n")
+    pending_record(root, tmp_path, "r1")
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.rows_written == 1
+    assert [x.split(": ", 1)[1] for x in rep.already_backfilled] == [
+        "BUG-001 is backfill row FIX-1"]
+
+
+def test_a_merged_record_with_no_rows_stays_pending_as_incomplete(_private_bugs_dir,
+                                                                   tmp_path):
+    """BUG-004. Invariant: a merged record from which no row could be built, and nothing
+    was skipped as backfilled or not fixed, is reported incomplete and left in pending/.
+
+    Red 2026-10-13: pre-fix code; failed at `assert folder.exists() and ...` (moved to
+    recorded/).
+    """
+    root = _private_bugs_dir
+    folder = pending_record(root, tmp_path, "r1")
+    (folder / "L4.json").write_text(json.dumps({"fix_id": "FIX-001", "finding": "BUG-001"}))
+    rep = resolve(root, write=True, run=gh_merged)
+    assert folder.exists() and rep.recorded == []
+    assert rep.incomplete == [f"{folder.name}: no ledger rows could be built"]
+
+
+def test_an_uppercase_commit_is_incomplete_not_unknown(_private_bugs_dir, tmp_path):
+    """CODE-001. Invariant: resolve and lookup agree on what a commit sha is, so an
+    uppercase sha is refused as incomplete before gh, rather than looping as unknown.
+
+    Red 2026-10-13: pre-fix `_COMMIT` accepting A-F; failed at
+    `assert calls == [] and rep.unknown == []` (reported unknown).
+    """
+    root = _private_bugs_dir
+    folder = pending_record(root, tmp_path, "r1", commit="A" * 40)
+    calls = []
+
+    def spy(args):
+        calls.append(args)
+        return gh_merged(args)
+
+    rep = resolve(root, write=True, run=spy)
+    assert calls == [] and rep.unknown == []
+    assert [x.split(":")[0] for x in rep.incomplete] == [folder.name]
+
+
+def test_owner_and_default_branch_are_asked_once_per_resolve(_private_bugs_dir, tmp_path,
+                                                             monkeypatch):
+    """PERF-001. Invariant: one resolve asks gh for the login and for a repository's
+    default branch once, however many records it looks up.
+
+    Red 2026-10-13: pre-fix code (no cache); failed at
+    `assert calls.count(["api", "user"]) == 1` (3).
+    """
+    monkeypatch.delenv("CCA_BUGS_OWNERS")
+    root = _private_bugs_dir
+    for n, c in enumerate("abc"):
+        pending_record(root, tmp_path, f"r{n}", commit=c * 40)
+    calls = []
+
+    def spy(args):
+        calls.append(args)
+        if args == ["api", "user"]:
+            return json.dumps({"login": "acme"})
+        return gh_merged(args)
+
+    rep = resolve(root, write=False, run=spy)
+    assert len(rep.recorded) == 3
+    assert calls.count(["api", "user"]) == 1
+    assert calls.count(["api", "repos/acme/widgets"]) == 1
