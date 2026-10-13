@@ -7,6 +7,7 @@ Stage 2 (`resolve.py`) reads it. Nothing here touches the ledger.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -19,6 +20,7 @@ from .store import bugs_dir
 PENDING = "pending"
 RECORDED = "recorded"
 ABANDONED = "abandoned"
+TMP_PREFIX = ".tmp-"
 RUN_FILES = ("summary.json", "L2.json", "L2.5.json", "L4.json", "L5.6.json")
 SCORECARD = ".claude/audits/AUDITOR_SCORECARD.jsonl"
 
@@ -54,18 +56,34 @@ def capture(root, run_id: str) -> Path | None:
         return None
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     commit = summary["commit"]
-    dest = bugs_dir() / PENDING / f"{run_id}__{commit[:12]}"
-    dest.mkdir(parents=True, exist_ok=True)
-    for name in RUN_FILES:
-        if (run_dir / name).exists():
-            shutil.copy2(run_dir / name, dest / name)
-    (dest / "scorecard.jsonl").write_text(_own_rows(root, run_id), encoding="utf-8",
-                                          newline="\n")
-    meta = {
-        "schema": 1, "run_id": run_id, "commit": commit,
-        "repo": remote_repo(root), "branch": _branch(root),
-        "captured_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "host": socket.gethostname(),
-    }
-    (dest / "meta.json").write_text(json.dumps(meta, indent=1) + "\n", encoding="utf-8")
+    pending = bugs_dir() / PENDING
+    dest = pending / f"{run_id}__{commit[:12]}"
+    # Built beside pending/<name> and renamed in, so a reader (resolve, or the VPS2
+    # harvest) never sees a half-written record.
+    tmp = pending / f"{TMP_PREFIX}{dest.name}-{os.getpid()}"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True)
+    try:
+        for name in RUN_FILES:
+            if (run_dir / name).exists():
+                shutil.copy2(run_dir / name, tmp / name)
+        (tmp / "scorecard.jsonl").write_text(_own_rows(root, run_id), encoding="utf-8",
+                                             newline="\n")
+        meta = {
+            "schema": 1, "run_id": run_id, "commit": commit,
+            "repo": remote_repo(root), "branch": _branch(root),
+            "captured_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "host": socket.gethostname(),
+            # Closed before the fixes were committed: HEAD is the base, a commit an
+            # earlier pull request already merged, so no PR can be matched to this run.
+            "commit_is_base": commit == summary.get("base_commit"),
+        }
+        (tmp / "meta.json").write_text(json.dumps(meta, indent=1) + "\n", encoding="utf-8")
+        if dest.exists():
+            shutil.rmtree(dest)
+        tmp.rename(dest)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     return dest
