@@ -1,7 +1,9 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
+python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
-be reviewed before anything lands in the ledger.
+be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
+be asked about some record (the hourly worker retries), otherwise 0.
 """
 from __future__ import annotations
 
@@ -73,7 +75,23 @@ def main(argv: list[str] | None = None) -> int:
                         "applies only through a binding (the dry run lists candidates)")
     b.add_argument("--write", action="store_true", help="append to the ledger and write memos")
     b.add_argument("--json", action="store_true")
+    r = sub.add_parser("resolve", help="write pending runs whose pull request merged")
+    r.add_argument("--write", action="store_true", help="append rows and move records")
+    r.add_argument("--json", action="store_true")
+    r.add_argument("--stale-days", type=int, default=14)
     a = p.parse_args(argv)
+
+    if a.cmd == "resolve":
+        from dataclasses import asdict
+
+        from . import resolve as rs
+        report = rs.resolve(bugs_dir(), write=a.write, stale_days=a.stale_days)
+        data = asdict(report)
+        if a.json:
+            print(json.dumps(data, indent=2))
+        else:
+            print(_printable("\n".join(f"{k}: {v}" for k, v in data.items())))
+        return 3 if report.unknown else 0
 
     try:
         result = backfill(a.repo, [_ledger_arg(s) for s in a.ledger], dict(a.bind))
