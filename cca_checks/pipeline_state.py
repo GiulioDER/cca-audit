@@ -284,7 +284,7 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
     return parent, base_commit
 
 
-def _capture_pending(state: "PipelineState", root) -> None:
+def _capture_pending(state: PipelineState, root) -> None:
     """Save the closed run for the bug ledger; a failure is a warning, never a refusal.
 
     The ledger records a run only after its pull request merges (`bugs resolve`), and by
