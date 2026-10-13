@@ -34,6 +34,16 @@ def _private_run_registry(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _private_bugs_dir(monkeypatch, tmp_path_factory):
+    """Every test gets its own bug ledger directory, so `pipeline close` never writes a
+    pending record into the real `~/.claude/cca-bugs`. Outside `tmp_path`, which several
+    fixtures make the repository under audit."""
+    path = tmp_path_factory.mktemp("cca-bugs")
+    monkeypatch.setenv("CCA_BUGS_DIR", str(path))
+    return path
+
+
+@pytest.fixture(autouse=True)
 def _private_user_claude_dir(monkeypatch, tmp_path_factory):
     """`pipeline start` compares the user level `.claude/` with the package; never the real one.
 
