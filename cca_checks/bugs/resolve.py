@@ -2,13 +2,17 @@
 
 Runs at every session close and hourly (the dotclaude worker `refresh-cca-vps2.ps1`).
 A record waits in pending/ until GitHub says its PR merged into the default branch, moves
-to recorded/ after its rows are appended, or to abandoned/ when every PR was closed
-unmerged. Append-only end to end: a rerun after any crash appends nothing new.
+to recorded/ after its rows are appended, or to abandoned/ when every PR has been closed
+unmerged for more than a day. Append-only end to end: a rerun after any crash appends
+nothing new, and a bug a backfill already recorded under the same merge is reported as
+`already_backfilled` instead of counted twice. A record kept in pending/ for longer than
+`stale_days`, whether waiting, unknown or incomplete, is listed as stale.
 
 A record folder may be unfinished (a capture that crashed before writing meta.json) or
 hostile (a harvested copy), so its meta.json is checked before anything reaches gh, and
 a run file that cannot be read stops only its own record. Both are reported under
-`incomplete` and left where they are.
+`incomplete` and left where they are, as is a record closed at its base commit. A
+`.tmp-` folder is a capture still being built and is skipped.
 """
 from __future__ import annotations
 
@@ -21,9 +25,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import github
-from .forward import Merge, rows_for
+from .forward import Merge, rows_with_fix_ids
+from .ledgers import fix_number
 from .model import SHA_LEN, BugRow
-from .pending import ABANDONED, PENDING, RECORDED
+from .pending import ABANDONED, PENDING, RECORDED, TMP_PREFIX
 from .store import LEDGER
 from .store import write as write_rows
 
@@ -39,6 +44,7 @@ class ResolveReport:
     unknown: list[str] = field(default_factory=list)
     stale: list[str] = field(default_factory=list)
     incomplete: list[str] = field(default_factory=list)
+    already_backfilled: list[str] = field(default_factory=list)
     rows_written: int = 0
     memos_written: int = 0
 
@@ -79,12 +85,43 @@ def _move(folder: Path, root: Path, where: str) -> None:
     shutil.move(str(folder), str(dest))
 
 
-def _captured(meta: dict) -> datetime | None:
+def _utc(text) -> datetime | None:
     try:
-        return datetime.strptime(meta["captured_utc"], "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=timezone.utc)
-    except (KeyError, TypeError, ValueError):
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
         return None
+
+
+def _captured(meta: dict) -> datetime | None:
+    return _utc(meta.get("captured_utc"))
+
+
+def _closed(folder: Path, meta: dict) -> datetime | None:
+    """When the run closed: summary.json's completed_utc, else the capture time.
+
+    A run captured after the fact (Task 9's retro capture of runs closed before capture
+    existed) has a captured_utc later than its own merge; completed_utc does not.
+    """
+    try:
+        summary = json.loads((folder / "summary.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        summary = None
+    done = _utc(summary.get("completed_utc")) if isinstance(summary, dict) else None
+    return done or _captured(meta)
+
+
+def _stale(report: ResolveReport, folder: Path, meta: dict, kind: str, now: datetime,
+           stale_days: int) -> None:
+    """List a record that has sat in pending/ too long, whatever kept it there."""
+    since = _captured(meta)
+    if since is None:
+        try:
+            since = datetime.fromtimestamp(folder.stat().st_mtime, timezone.utc)
+        except OSError:
+            return
+    if now - since > timedelta(days=stale_days):
+        report.stale.append(f"{folder.name}: {kind} since "
+                            f"{since.strftime('%Y-%m-%dT%H:%M:%SZ')}")
 
 
 def _key(project, fix_commit, finding_id) -> tuple[str, str, str]:
@@ -133,6 +170,38 @@ class _Ordinals:
         return k
 
 
+class _Backfilled:
+    """Bugs a backfill (rows without a run_id) already recorded, by project and commit.
+
+    A squash keeps the CCA commit message, so backfill may have parsed the same merge
+    under the bullet's id: L4's finding id, or its fix id (FIX-n). Either names one bug.
+    """
+
+    def __init__(self, ledger: Path):
+        self.ids: dict[tuple[str, str], set[str]] = defaultdict(set)
+        if ledger.exists():
+            for line in ledger.read_text(encoding="utf-8").splitlines():
+                try:
+                    row = json.loads(line)
+                    if row.get("run_id") is not None:
+                        continue
+                    project, commit, finding = _key(row["project"], row["fix_commit"],
+                                                    row["finding_id"])
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    continue
+                self.ids[(project, commit)].add(finding)
+
+    def match(self, row: BugRow, fix_id: str) -> str | None:
+        project, commit, finding = _key(row.project, row.fix_commit, row.finding_id)
+        held = self.ids.get((project, commit), set())
+        if finding in held:
+            return finding
+        n = fix_number(fix_id)
+        if n is None:
+            return None
+        return next((f for f in sorted(held) if fix_number(f) == n), None)
+
+
 def _sort_key(folder: Path) -> tuple[str, str]:
     captured = _meta(folder).get("captured_utc")
     return (captured if isinstance(captured, str) else "", folder.name)
@@ -144,16 +213,22 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
     now = now or datetime.now(timezone.utc)
     report = ResolveReport()
     base = root / PENDING
-    folders = sorted((p for p in base.iterdir() if p.is_dir()) if base.exists() else [],
+    folders = sorted((p for p in base.iterdir() if p.is_dir()
+                      and not p.name.startswith(TMP_PREFIX)) if base.exists() else [],
                      key=_sort_key)
     merged: list[tuple[Path, Merge]] = []
     for folder in folders:
         problem = _check_meta(folder)
+        meta = _meta(folder)
+        if problem is None and meta.get("commit_is_base") is True:
+            problem = ("closed at its base commit with fixes listed: the fixes were not "
+                       "committed before close, so no pull request can hold this run")
         if problem is not None:
             report.incomplete.append(f"{folder.name}: {problem}")
+            _stale(report, folder, meta, "incomplete", now, stale_days)
             continue
-        meta = _meta(folder)
-        got = github.lookup(meta.get("repo"), meta["commit"], run)
+        got = github.lookup(meta.get("repo"), meta["commit"], run,
+                            not_before=_closed(folder, meta), now=now)
         if isinstance(got, Merge):
             merged.append((folder, got))
         elif isinstance(got, github.Abandoned):
@@ -162,21 +237,29 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
                 _move(folder, root, ABANDONED)
         elif isinstance(got, github.Unknown):
             report.unknown.append(f"{folder.name}: {got.reason}")
+            _stale(report, folder, meta, "unknown", now, stale_days)
         else:
             report.waiting.append(f"{folder.name}: {got.reason}")
-            when = _captured(meta)
-            if when is not None and now - when > timedelta(days=stale_days):
-                report.stale.append(f"{folder.name}: waiting since {meta['captured_utc']}")
+            _stale(report, folder, meta, "waiting", now, stale_days)
     ordinals = _Ordinals(root / LEDGER)
+    backfilled = _Backfilled(root / LEDGER)
     batch = []
     for folder, merge in merged:
         try:
-            rows = rows_for(folder, merge)
+            pairs = rows_with_fix_ids(folder, merge)
         except Exception as exc:  # one bad record must not stop the others
             report.incomplete.append(f"{folder.name}: {type(exc).__name__}: {exc}")
+            _stale(report, folder, _meta(folder), "incomplete", now, stale_days)
             continue
-        for row in rows:
+        rows = []
+        for row, fix_id in pairs:
+            same = backfilled.match(row, fix_id)
+            if same is not None:
+                report.already_backfilled.append(
+                    f"{folder.name}: {row.finding_id} is backfill row {same}")
+                continue
             row.ordinal = ordinals.assign(row)
+            rows.append(row)
         batch.append((folder, rows))
     if write and batch:
         stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")

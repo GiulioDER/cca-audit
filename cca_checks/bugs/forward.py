@@ -14,7 +14,6 @@ from pathlib import Path
 from .ledgers import fix_number
 from .model import ABSENT, CLAIMED, EVIDENCED, BugRow
 
-
 _SAFE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 
 
@@ -70,6 +69,11 @@ def _proof(proofs: list[dict], finding: str, fix_id: str) -> str:
 
 
 def rows_for(record: Path, merge: Merge) -> list[BugRow]:
+    return [row for row, _ in rows_with_fix_ids(record, merge)]
+
+
+def rows_with_fix_ids(record: Path, merge: Merge) -> list[tuple[BugRow, str]]:
+    """Each row with the L4 fix id it came from, which a backfill row may be keyed by."""
     meta = _load(record, "meta.json", {})
     l2 = {f.get("id"): f for f in _load(record, "L2.json", []) if isinstance(f, dict)}
     l25 = {v.get("id"): v.get("verdict") for v in _load(record, "L2.5.json", [])
@@ -88,7 +92,7 @@ def rows_for(record: Path, merge: Merge) -> list[BugRow]:
                 or not finding.strip(".")):
             continue
         found = l2.get(finding, {})
-        out.append(BugRow(
+        out.append((BugRow(
             project=merge.repo.split("/", 1)[1], repo=merge.repo, finding_id=finding,
             fix_commit=merge.sha, date=merge.date, files=list(entry.get("files") or []),
             summary=found.get("claim") or entry.get("summary") or "(no description recorded)",
@@ -102,5 +106,5 @@ def rows_for(record: Path, merge: Merge) -> list[BugRow]:
             },
             sources=[f"run:{merge.repo}:{run_id}", f"pr:{merge.repo}#{merge.pr}",
                      f"git:{merge.sha}"],
-        ))
+        ), fix_id))
     return out

@@ -115,7 +115,10 @@ def test_a_backfill_row_is_the_same_bug_not_a_blocker(_private_bugs_dir, tmp_pat
 
     Red 2026-10-13: mutation letting run_id null rows block an ordinal (deleting
     `if run_id is None: continue`); failed at `assert rep.rows_written == 1` (2: BUG-001~2
-    was written as a second copy of the backfilled bug)."""
+    was written as a second copy of the backfilled bug).
+    Red 2026-10-13 (final fix, I3): mutation deleting the finding id branch of
+    `_Backfilled.match`; failed at `assert [...] == ["BUG-001 is backfill row BUG-001"]`
+    (the skip happened only through the bug_id, unreported)."""
     root = _private_bugs_dir
     backfilled = {"bug_id": f"widgets:{MERGE_SHA[:12]}:BUG-001", "project": "widgets",
                   "fix_commit": MERGE_SHA, "finding_id": "BUG-001", "run_id": None,
@@ -133,6 +136,8 @@ def test_a_backfill_row_is_the_same_bug_not_a_blocker(_private_bugs_dir, tmp_pat
            if '"bug_id"' in x]
     assert ids == [backfilled["bug_id"], f"widgets:{MERGE_SHA[:12]}:DOC-001"]
     assert not any((root / "pending").iterdir())
+    assert [x.split(": ", 1)[1] for x in rep.already_backfilled] == [
+        "BUG-001 is backfill row BUG-001"]
 
 
 def test_waiting_records_stay_and_old_ones_are_stale(_private_bugs_dir, tmp_path):
@@ -248,3 +253,148 @@ def test_dry_run_writes_and_moves_nothing(_private_bugs_dir, tmp_path):
     assert rep.recorded == [folder.name] and rep.rows_written == 0
     assert not (root / "bugs.jsonl").exists()
     assert folder.exists()
+
+
+def _gh_closed(closed_at):
+    def run(args):
+        if args[-1] == "repos/acme/widgets":
+            return json.dumps({"default_branch": "master"})
+        return json.dumps([{"number": 7, "state": "closed", "merged_at": None,
+                            "closed_at": closed_at, "merge_commit_sha": None,
+                            "base": {"ref": "master"}}])
+    return run
+
+
+def test_a_pr_closed_over_a_day_ago_moves_the_record_to_abandoned(_private_bugs_dir,
+                                                                   tmp_path):
+    """I4. Invariant: a record whose every PR has been closed unmerged for more than a day
+    moves to abandoned/ and writes nothing; one closed an hour ago stays pending.
+
+    Red 2026-10-13: mutation deleting `_move(folder, root, ABANDONED)`; failed at
+    `assert (root / "abandoned" / folder.name).exists()`."""
+    root = _private_bugs_dir
+    folder = pending_record(root, tmp_path, "r1")
+    now = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
+    rep = resolve(root, write=True, run=_gh_closed("2026-10-14T11:00:00Z"), now=now)
+    assert rep.abandoned == [] and len(rep.waiting) == 1 and folder.exists()
+    rep = resolve(root, write=True, run=_gh_closed("2026-10-13T10:00:00Z"), now=now)
+    assert rep.abandoned == [folder.name] and rep.rows_written == 0
+    assert (root / "abandoned" / folder.name).exists()
+    assert not folder.exists() and not (root / "bugs.jsonl").exists()
+
+
+def test_unknown_and_incomplete_records_go_stale_too(_private_bugs_dir, tmp_path):
+    """I1, I5. Invariant: a record stuck as unknown or incomplete is listed as stale after
+    the same 14 days as a waiting one; an incomplete record without captured_utc is aged
+    by its folder's mtime.
+
+    Red 2026-10-13: mutation deleting the `_stale` call in the unknown branch; failed at
+    `assert sorted(...) == [...]` (unknown record missing).
+    Red 2026-10-13: mutation deleting the `_stale` call for a refused meta; failed at
+    the same assert (both incomplete records missing)."""
+    import os
+
+    import cca_checks.bugs.github as g
+
+    root = _private_bugs_dir
+    unknown = pending_record(root, tmp_path, "unk", captured="2026-09-01T00:00:00Z")
+    old_no_meta = pending_record(root, tmp_path, "nometa", commit="b" * 40)
+    (old_no_meta / "meta.json").unlink()
+    old = datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(old_no_meta, (old, old))
+    new_no_meta = pending_record(root, tmp_path, "fresh", commit="c" * 40)
+    (new_no_meta / "meta.json").unlink()
+    fresh = datetime(2026, 10, 13, tzinfo=timezone.utc).timestamp()
+    os.utime(new_no_meta, (fresh, fresh))
+    based = pending_record(root, tmp_path, "based", captured="2026-09-02T00:00:00Z",
+                           commit="e" * 40)
+    meta = json.loads((based / "meta.json").read_text())
+    (based / "meta.json").write_text(json.dumps({**meta, "commit_is_base": True}))
+
+    def broken(args):
+        raise g.GhError("gh: not logged in")
+
+    rep = resolve(root, write=True, run=broken, now=datetime(2026, 10, 14, tzinfo=timezone.utc))
+    assert sorted(x.split(": ")[0] for x in rep.stale) == sorted(
+        [unknown.name, old_no_meta.name, based.name])
+    assert any(x.startswith(f"{unknown.name}: unknown since") for x in rep.stale)
+
+
+def test_a_record_closed_at_its_base_commit_is_incomplete_and_never_looked_up(
+        _private_bugs_dir, tmp_path):
+    """I2. Invariant: a record whose meta says commit_is_base is reported incomplete with
+    the reason, and gh is never asked (its commit belongs to an earlier PR).
+
+    Red 2026-10-13: mutation deleting the `commit_is_base` refusal; failed at
+    `assert calls == []`."""
+    root = _private_bugs_dir
+    folder = pending_record(root, tmp_path, "based")
+    meta = json.loads((folder / "meta.json").read_text())
+    (folder / "meta.json").write_text(json.dumps({**meta, "commit_is_base": True}))
+    calls = []
+
+    def spy(args):
+        calls.append(args)
+        return gh_merged(args)
+
+    rep = resolve(root, write=True, run=spy)
+    assert calls == []
+    assert len(rep.incomplete) == 1 and "base commit" in rep.incomplete[0]
+    assert folder.exists() and rep.rows_written == 0
+
+
+def test_a_merge_before_the_run_closed_is_not_this_runs(_private_bugs_dir, tmp_path):
+    """I2. Invariant: resolve passes the run's close time to lookup, so a PR merged before
+    the run closed is ignored; the close time is summary.json's completed_utc when present
+    (a retro capture is captured after its own merge), else captured_utc.
+
+    Red 2026-10-13: mutation passing `not_before=None`; failed at
+    `assert late.recorded == []` (the earlier merge was taken).
+    Red 2026-10-13: mutation passing `not_before=_captured(meta)`; failed at
+    `assert retro.recorded == [r2.name]` (the retro record waited)."""
+    root = _private_bugs_dir
+    pending_record(root, tmp_path, "late", captured="2026-10-15T00:00:00Z")
+    late = resolve(root, write=False, run=gh_merged)
+    assert late.recorded == [] and len(late.waiting) == 1
+    r2 = pending_record(root, tmp_path, "retro", captured="2026-10-15T00:00:00Z",
+                        commit="b" * 40)
+    (r2 / "summary.json").write_text(json.dumps({"completed_utc": "2026-10-13T10:00:00Z"}))
+    retro = resolve(root, write=False, run=gh_merged)
+    assert retro.recorded == [r2.name]
+
+
+def test_a_fix_id_backfill_row_is_already_backfilled(_private_bugs_dir, tmp_path):
+    """I3. Invariant: a backfill row (run_id null) on the same project and merge commit
+    whose id is the forward row's fix id by fix_number (FIX-1 for L4's FIX-001) is the
+    same bug: the forward row is skipped and reported, never a second count.
+
+    Red 2026-10-13: mutation deleting the fix_number branch of `_Backfilled.match`;
+    failed at `assert rep.rows_written == 1` (2)."""
+    root = _private_bugs_dir
+    backfilled = {"bug_id": f"widgets:{MERGE_SHA[:12]}:FIX-1", "project": "widgets",
+                  "fix_commit": MERGE_SHA, "finding_id": "FIX-1", "run_id": None,
+                  "ordinal": 1}
+    other = {**backfilled, "bug_id": f"widgets:{'f' * 12}:FIX-2", "fix_commit": "f" * 40,
+             "finding_id": "FIX-2"}
+    (root / "bugs.jsonl").write_text(json.dumps(backfilled) + "\n" + json.dumps(other) + "\n")
+    pending_record(root, tmp_path, "r1")
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.rows_written == 1
+    assert [x.split(": ", 1)[1] for x in rep.already_backfilled] == [
+        "BUG-001 is backfill row FIX-1"]
+    ids = [json.loads(x)["bug_id"] for x in (root / "bugs.jsonl").read_text().splitlines()]
+    assert ids[-1] == f"widgets:{MERGE_SHA[:12]}:DOC-001"
+    assert not any((root / "pending").iterdir())
+
+
+def test_a_capture_in_progress_is_ignored(_private_bugs_dir, tmp_path):
+    """I5. Invariant: a `.tmp-` folder is a capture still being built; resolve neither
+    reports nor moves it.
+
+    Red 2026-10-13: mutation deleting the TMP_PREFIX filter; failed at
+    `assert rep.incomplete == []`."""
+    root = _private_bugs_dir
+    building = root / "pending" / f".tmp-r1__{SHA[:12]}-123"
+    building.mkdir(parents=True)
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.incomplete == [] and rep.recorded == [] and building.exists()
