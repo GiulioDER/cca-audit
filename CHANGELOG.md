@@ -6,6 +6,15 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+### Added
+- The bug ledger now grows by itself. `pipeline close` saves a run that fixed something to `~/.claude/cca-bugs/pending/<run_id>__<commit>/` (its L2, L2.5, L4 and L5.6 files, its scorecard rows and its summary), outside the worktree, so deleting the worktree loses nothing. A failure to save only warns; it never refuses the close.
+- `python -m cca_checks bugs resolve --write` asks GitHub, through `gh`, whether the pull request holding the run's commit merged into the default branch. A merged run becomes ledger rows keyed by the merge commit; a pull request closed unmerged moves the record to `abandoned/`; anything else waits, and a record waiting longer than 14 days is listed as stale. Squash merges work because GitHub keeps a pull request's commits. Two runs of one merge keep separate rows, and a rerun appends nothing new.
+- A record captured without a GitHub origin (a Codex close on VPS2) is matched by a commit search, and the match is accepted only from an owner listed in `CCA_BUGS_OWNERS` or, when that is unset, the `gh` login.
+- A record whose `meta.json` is missing or malformed, or whose run files cannot be read, is reported under `incomplete` and left in pending. A finding id that is not a plain identifier gets no row, because it would name a memo file; GitHub's merge sha must be 40 hex characters. `resolve` exits 3 only when `gh` could not answer.
+- `cca_tautology_check.py verify --record` writes `runs/<run_id>/L5.6.json`, each proof's verdict by finding. The L5.6 entry holds only counts, so without this file no run could ever be recorded as proved.
+
 ## [0.11.0] - 2026-10-12
 
 ### Changed
