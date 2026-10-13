@@ -10,6 +10,7 @@ ledger row key and a memo filename, so both are checked before a Merge is built.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from typing import Callable
 from .forward import Merge
 
 _SHA = re.compile(r"[0-9a-f]{40}")
-_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_REPO = re.compile(r"(?!\.+/)[A-Za-z0-9_.-]+/(?!\.+$)[A-Za-z0-9_.-]+")
 
 
 class GhError(Exception):
@@ -55,14 +56,32 @@ def gh(args: list[str]) -> str:
     return out.stdout
 
 
+def _owners(run: Runner) -> list[str]:
+    """Owners whose repositories a searched commit may be attributed to."""
+    raw = os.environ.get("CCA_BUGS_OWNERS", "")
+    owners = [o.strip().lower() for o in raw.split(",") if o.strip()]
+    if owners:
+        return owners
+    login = json.loads(run(["api", "user"]))["login"]
+    if not isinstance(login, str) or not login:
+        raise ValueError("gh api user returned no login")
+    return [login.lower()]
+
+
 def lookup(repo: str | None, commit: str, run: Runner = gh):
+    if not isinstance(commit, str) or not _SHA.fullmatch(commit):
+        return Unknown(f"unusable commit sha: {commit!r}")
     try:
         if repo is None:
             items = json.loads(run(["api", "-X", "GET", "search/commits",
                                     "-f", f"q=hash:{commit}"])).get("items") or []
-            if not items:
-                return Waiting("no repository on GitHub holds the commit yet")
-            repo = items[0]["repository"]["full_name"]
+            owners = _owners(run)
+            names = [(i.get("repository") or {}).get("full_name") for i in items]
+            repo = next((n for n in names if isinstance(n, str) and "/" in n
+                         and n.split("/", 1)[0].lower() in owners), None)
+            if repo is None:
+                return Waiting("no repository owned by " + ", ".join(owners)
+                               + " holds the commit yet")
         if not isinstance(repo, str) or not _REPO.fullmatch(repo):
             return Unknown(f"unusable repository name from GitHub: {repo!r}")
         default = json.loads(run(["api", f"repos/{repo}"]))["default_branch"]

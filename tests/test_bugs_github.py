@@ -52,8 +52,9 @@ def test_no_pr_lists_the_commit_is_waiting_not_abandoned():
     assert isinstance(lookup("acme/widgets", SHA, fake([])), Waiting)
 
 
-def test_an_unknown_repo_is_found_by_searching_the_commit():
+def test_an_unknown_repo_is_found_by_searching_the_commit(monkeypatch):
     """Red 2026-10-13: mutation returning Waiting whenever repo is None; failed at ==."""
+    monkeypatch.setenv("CCA_BUGS_OWNERS", "acme")
     run = fake([pr(7, merged="2026-10-14T09:00:00Z")],
                search=[{"repository": {"full_name": "acme/widgets"}}])
     assert lookup(None, SHA, run) == Merge("acme/widgets", "b" * 40, "2026-10-14", 7)
@@ -77,8 +78,73 @@ def test_a_malformed_merge_sha_is_unknown_not_a_merge(bad):
     assert isinstance(got, Unknown)
 
 
-def test_a_malformed_repo_name_from_search_is_unknown():
+def test_a_malformed_repo_name_from_search_is_unknown(monkeypatch):
     """The repo is untrusted too. Red 2026-10-13: mutation removing the repo name check; gh was
-    then called with `repos/../etc/passwd`, which the fake runner refuses with AssertionError."""
-    run = fake([], search=[{"repository": {"full_name": "../etc/passwd"}}])
+    then called with `repos/acme/wid gets`, which the fake runner refuses with AssertionError."""
+    monkeypatch.setenv("CCA_BUGS_OWNERS", "acme")
+    run = fake([], search=[{"repository": {"full_name": "acme/wid gets"}}])
     assert isinstance(lookup(None, SHA, run), Unknown)
+
+
+def _hit(name):
+    return {"repository": {"full_name": name}}
+
+
+def test_a_foreign_first_hit_is_skipped_for_an_owned_one(monkeypatch):
+    """A fork carrying the same sha must not answer. Red 2026-10-13: mutation taking items[0]
+    without the owner filter; the fake runner
+    refused `repos/attacker/RE-call` with AssertionError."""
+    monkeypatch.setenv("CCA_BUGS_OWNERS", " ACME ,other")
+    run = fake([pr(7, merged="2026-10-14T09:00:00Z")],
+               search=[_hit("attacker/RE-call"), _hit("acme/widgets")])
+    assert lookup(None, SHA, run) == Merge("acme/widgets", "b" * 40, "2026-10-14", 7)
+
+
+def test_only_foreign_hits_are_waiting(monkeypatch):
+    """Red 2026-10-13: mutation accepting any owner; the fake runner refused
+    `repos/acme2/widgets` with AssertionError."""
+    monkeypatch.setenv("CCA_BUGS_OWNERS", "acme")
+    run = fake([pr(7, merged="2026-10-14T09:00:00Z")], search=[_hit("acme2/widgets")])
+    got = lookup(None, SHA, run)
+    assert isinstance(got, Waiting) and "acme" in got.reason
+
+
+def test_owners_default_to_the_gh_login(monkeypatch):
+    """Red 2026-10-13: mutation ignoring `gh api user` and returning no owners; failed at the ==
+    (got Waiting)."""
+    monkeypatch.delenv("CCA_BUGS_OWNERS", raising=False)
+    inner = fake([pr(7, merged="2026-10-14T09:00:00Z")],
+                 search=[_hit("attacker/x"), _hit("acme/widgets")])
+
+    def run(args):
+        return json.dumps({"login": "Acme"}) if args == ["api", "user"] else inner(args)
+    assert lookup(None, SHA, run) == Merge("acme/widgets", "b" * 40, "2026-10-14", 7)
+
+
+def test_a_failing_login_lookup_is_unknown(monkeypatch):
+    """Red 2026-10-13: mutation swallowing the login error as an empty owner list; failed at
+    isinstance(got, Unknown)."""
+    monkeypatch.setenv("CCA_BUGS_OWNERS", "")
+    inner = fake([], search=[_hit("acme/widgets")])
+
+    def run(args):
+        if args == ["api", "user"]:
+            raise GhError("gh: not logged in")
+        return inner(args)
+    assert isinstance(lookup(None, SHA, run), Unknown)
+
+
+@pytest.mark.parametrize("name", ["../..", "./.", "acme/..", "../widgets"])
+def test_a_dots_only_segment_is_unknown(name):
+    """Red 2026-10-13: mutation reverting _REPO to the plain character class; failed at
+    pytest.fail in the runner (gh called with `repos/../..`)."""
+    got = lookup(name, SHA, lambda args: pytest.fail(f"gh called: {args}"))
+    assert isinstance(got, Unknown)
+
+
+@pytest.mark.parametrize("commit", ["abc", "A" * 40, "a" * 41, "../" + "a" * 37, ""])
+def test_a_non_hex_commit_is_unknown_and_asks_gh_nothing(commit):
+    """Red 2026-10-13: mutation removing the commit check; failed at pytest.fail inside the
+    runner (gh was called)."""
+    got = lookup("acme/widgets", commit, lambda args: pytest.fail(f"gh called: {args}"))
+    assert isinstance(got, Unknown)
