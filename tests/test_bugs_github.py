@@ -13,8 +13,14 @@ SHA = "a" * 40
 NOW = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
 
 
-def _api(name):
-    return {"repository_url": f"https://api.github.com/repos/{name}"}
+@pytest.fixture(autouse=True)
+def _acme_is_allowed(monkeypatch):
+    """Tests that exercise the gh login default unset or blank this themselves."""
+    monkeypatch.setenv("CCA_BUGS_OWNERS", "acme")
+
+
+def _api(name, number=7):
+    return {"repository_url": f"https://api.github.com/repos/{name}", "number": number}
 
 
 def fake(pulls, *, default="master", search=None, by_owner=None, queries=None):
@@ -290,3 +296,80 @@ def test_the_real_gh_runner_maps_every_failure_to_gh_error(monkeypatch):
     assert "second line" not in str(failed) and github._commit_missing(failed)
     monkeypatch.setattr(github.subprocess, "run", ok)
     assert _outcome(["api", "user"]) == "[]"
+
+
+MISSING = "missing"  # the repository's commits/<sha>/pulls answers 422
+
+
+def multi(pulls_by_repo, hits):
+    """A fake gh over several repositories; `hits` are the PR search's (repo, number)."""
+    def run(args):
+        path = args[-1]
+        if "search/issues" in args:
+            return json.dumps({"items": [_api(n, k) for n, k in hits]})
+        for name, pulls in pulls_by_repo.items():
+            if path == f"repos/{name}":
+                return json.dumps({"default_branch": "master"})
+            if path == f"repos/{name}/commits/{SHA}/pulls":
+                if pulls == MISSING:
+                    raise GhError(f"gh api {path} exited 1: gh: No commit found for SHA: "
+                                  f"{SHA} (HTTP 422)")
+                return json.dumps(pulls)
+        raise AssertionError(args)
+    return run
+
+
+def test_a_mention_only_hit_does_not_hide_the_real_repository():
+    """Invariant: a PR in another repository of the same owner that only mentions the sha
+    (its pulls call answers 422) is skipped, and the next candidate decides.
+
+    Red 2026-10-13: mutation judging only the first candidate (`candidates[:1]`); failed
+    at the == (got Waiting)."""
+    run = multi({"acme/other": MISSING,
+                 "acme/widgets": [pr(7, merged="2026-10-14T09:00:00Z")]},
+                [("acme/other", 3), ("acme/widgets", 7)])
+    assert lookup(None, SHA, run) == Merge("acme/widgets", "b" * 40, "2026-10-14", 7)
+
+
+def test_a_closed_pr_in_another_repository_cannot_abandon_the_record():
+    """Invariant: abandoned only when every repository that holds the commit abandoned
+    it; a PR a stranger opened into acme/other and closed a day ago, while the real PR
+    in acme/widgets is open, leaves the record waiting.
+
+    Red 2026-10-13: mutation returning the first non-skipped candidate's answer
+    (`if got is not _SKIP: return got`); failed at `assert isinstance(got, Waiting)`
+    (got Abandoned)."""
+    run = multi({"acme/other": [pr(5, closed="2026-10-12T00:00:00Z")],
+                 "acme/widgets": [pr(7, state="open")]},
+                [("acme/other", 5), ("acme/widgets", 7)])
+    got = lookup(None, SHA, run, now=NOW)
+    assert isinstance(got, Waiting)
+    both = multi({"acme/other": [pr(5, closed="2026-10-12T00:00:00Z")],
+                  "acme/widgets": [pr(7, closed="2026-10-12T00:00:00Z")]},
+                 [("acme/other", 5), ("acme/widgets", 7)])
+    assert isinstance(lookup(None, SHA, both, now=NOW), Abandoned)
+
+
+def test_only_mention_only_hits_are_waiting_with_the_right_reason():
+    """Invariant: when no searched repository holds the commit (its pulls call answers
+    422, or lists none of the searched PRs), the record waits and says so, rather than
+    claiming GitHub never received the commit.
+
+    Red 2026-10-13: mutation deleting the hit number check in `_judge`; failed at
+    `assert got == Waiting(...)` (got Abandoned from acme/widgets' unrelated #99)."""
+    run = multi({"acme/other": MISSING,
+                 "acme/widgets": [pr(99, closed="2026-10-01T00:00:00Z")]},
+                [("acme/other", 3), ("acme/widgets", 7)])
+    got = lookup(None, SHA, run, now=NOW)
+    assert got == Waiting("no searched repository holds the commit")
+
+
+def test_an_explicit_repo_with_a_foreign_owner_is_unknown():
+    """Invariant: a repository named in meta.json (untrusted when harvested) passes the
+    same owner allowlist as a searched one.
+
+    Red 2026-10-13: mutation deleting the owner check on the explicit repo path; failed
+    at `assert isinstance(got, Unknown) ...` (got a Merge in attacker/widgets)."""
+    run = multi({"attacker/widgets": [pr(7, merged="2026-10-14T09:00:00Z")]}, [])
+    got = lookup("attacker/widgets", SHA, run)
+    assert isinstance(got, Unknown) and "allowed owner" in got.reason

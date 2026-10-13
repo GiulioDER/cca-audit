@@ -23,6 +23,11 @@ def pending_record(root, tmp_path, name, *, captured="2026-10-13T10:00:00Z", com
     return dest
 
 
+@pytest.fixture(autouse=True)
+def _acme_is_allowed(monkeypatch):
+    monkeypatch.setenv("CCA_BUGS_OWNERS", "acme")
+
+
 def gh_merged(args):
     if args[-1] == "repos/acme/widgets":
         return json.dumps({"default_branch": "master"})

@@ -72,12 +72,15 @@ def _owners(run: Runner) -> list[str]:
     return [login.lower()]
 
 
-def _search_repo(commit: str, owners: list[str], run: Runner) -> str | None:
-    """The repository of a pull request holding the commit, from an allowed owner.
+def _search_repos(commit: str, owners: list[str], run: Runner) -> list[tuple[str, set[int]]]:
+    """Every allowed-owner repository with a pull request matching the sha, in order,
+    each with the numbers of its matching pull requests.
 
     GitHub's commit search covers only default branches, which a squash merge never puts
-    the run's own commit on; the pull request search matches a sha on any PR's commits.
+    the run's own commit on; the pull request search matches a sha on any PR's commits,
+    but also on a PR that only mentions it, so no single hit is trusted to be the one.
     """
+    found_in: dict[str, set[int]] = {}
     for owner in owners:
         found = json.loads(run(["api", "-X", "GET", "search/issues",
                                 "-f", f"q={commit} is:pr user:{owner}"]))
@@ -86,9 +89,13 @@ def _search_repo(commit: str, owners: list[str], run: Runner) -> str | None:
             if not isinstance(url, str) or "/repos/" not in url:
                 continue
             name = url.split("/repos/", 1)[1]
-            if name.split("/", 1)[0].lower() == owner:
-                return name  # checked against _REPO by the caller
-    return None
+            if name.split("/", 1)[0].lower() != owner:
+                continue
+            numbers = found_in.setdefault(name, set())  # checked against _REPO later
+            number = item.get("number")
+            if isinstance(number, int) and not isinstance(number, bool):
+                numbers.add(number)
+    return list(found_in.items())
 
 
 def _when(text) -> datetime | None:
@@ -105,57 +112,94 @@ def _commit_missing(exc: GhError) -> bool:
     return any(mark in text for mark in ("No commit found", "HTTP 422", "HTTP 404"))
 
 
+_SKIP = object()  # a searched repository that does not hold the commit
+
+
+def _judge(repo: str, commit: str, hits: set[int] | None, run: Runner,
+           not_before: datetime | None, now: datetime):
+    """One repository's answer; `_SKIP` for a searched one that does not hold the commit.
+
+    `hits` is None for the repository a record names itself, and otherwise the numbers
+    of the searched pull requests in it: a repository whose commit pulls list none of
+    them only mentioned the sha, so it decides nothing.
+    """
+    if not _REPO.fullmatch(repo):
+        return Unknown(f"unusable repository name from GitHub: {repo!r}")
+    default = json.loads(run(["api", f"repos/{repo}"]))["default_branch"]
+    try:
+        pulls = json.loads(run(["api", f"repos/{repo}/commits/{commit}/pulls"]))
+    except GhError as exc:
+        if not _commit_missing(exc):
+            raise
+        return Waiting("GitHub has not received the commit") if hits is None else _SKIP
+    if hits is not None and not any(p.get("number") in hits for p in pulls):
+        return _SKIP
+    if not_before is not None:
+        early = [p for p in pulls if p.get("merged_at")
+                 and _when(p["merged_at"]) is not None
+                 and _when(p["merged_at"]) < not_before]
+        pulls = [p for p in pulls if p not in early]
+        if early and not pulls:
+            return Waiting("only pull requests merged before the run closed list "
+                           "the commit")
+    for p in pulls:
+        if p.get("merged_at") and (p.get("base") or {}).get("ref") == default:
+            sha = p.get("merge_commit_sha")
+            if not isinstance(sha, str) or not _SHA.fullmatch(sha):
+                return Unknown(f"unusable merge commit sha on #{p.get('number')}: {sha!r}")
+            return Merge(repo, sha, p["merged_at"][:10], p["number"])
+    if not pulls:
+        return Waiting("no pull request lists the commit")
+    closed = [p for p in pulls if p.get("state") == "closed" and not p.get("merged_at")]
+    if len(closed) == len(pulls):
+        # A PR closed and reopened within the hour must not be abandoned for good.
+        settled = all((_when(p.get("closed_at")) or now) <= now - ABANDON_AFTER
+                      for p in closed)
+        if settled:
+            return Abandoned(f"{repo} closed without merging: "
+                             + ", ".join(f"#{p['number']}" for p in pulls))
+        return Waiting("closed without merging less than 24 hours ago")
+    return Waiting("pull request not merged into " + default)
+
+
 def lookup(repo: str | None, commit: str, run: Runner = gh, *,
            not_before: datetime | None = None, now: datetime | None = None):
     """Merge, Waiting, Abandoned or Unknown for the pull request holding `commit`.
 
     `not_before` is when the run closed: a PR merged earlier cannot hold this run's work
-    (the run closed at a commit already on master), so it is ignored.
+    (the run closed at a commit already on master), so it is ignored. Without a repo,
+    every searched repository is judged: the first merge wins, and the record is
+    abandoned only when every repository that holds the commit abandoned it, so a PR
+    that a stranger opened and closed in another repository cannot end the record.
     """
     if not isinstance(commit, str) or not _SHA.fullmatch(commit):
         return Unknown(f"unusable commit sha: {commit!r}")
     now = now or datetime.now(timezone.utc)
     try:
-        if repo is None:
+        if repo is not None:
+            if not isinstance(repo, str) or not _REPO.fullmatch(repo):
+                return Unknown(f"unusable repository name from GitHub: {repo!r}")
             owners = _owners(run)
-            repo = _search_repo(commit, owners, run)
-            if repo is None:
-                return Waiting("no pull request in a repository owned by "
-                               + ", ".join(owners) + " holds the commit yet")
-        if not isinstance(repo, str) or not _REPO.fullmatch(repo):
-            return Unknown(f"unusable repository name from GitHub: {repo!r}")
-        default = json.loads(run(["api", f"repos/{repo}"]))["default_branch"]
-        try:
-            pulls = json.loads(run(["api", f"repos/{repo}/commits/{commit}/pulls"]))
-        except GhError as exc:
-            if _commit_missing(exc):
-                return Waiting("GitHub has not received the commit")
-            raise
-        if not_before is not None:
-            early = [p for p in pulls if p.get("merged_at")
-                     and _when(p["merged_at"]) is not None
-                     and _when(p["merged_at"]) < not_before]
-            pulls = [p for p in pulls if p not in early]
-            if early and not pulls:
-                return Waiting("only pull requests merged before the run closed list "
-                               "the commit")
-        for p in pulls:
-            if p.get("merged_at") and (p.get("base") or {}).get("ref") == default:
-                sha = p.get("merge_commit_sha")
-                if not isinstance(sha, str) or not _SHA.fullmatch(sha):
-                    return Unknown(f"unusable merge commit sha on #{p.get('number')}: {sha!r}")
-                return Merge(repo, sha, p["merged_at"][:10], p["number"])
-        if not pulls:
-            return Waiting("no pull request lists the commit")
-        closed = [p for p in pulls if p.get("state") == "closed" and not p.get("merged_at")]
-        if len(closed) == len(pulls):
-            # A PR closed and reopened within the hour must not be abandoned for good.
-            settled = all((_when(p.get("closed_at")) or now) <= now - ABANDON_AFTER
-                          for p in closed)
-            if settled:
-                return Abandoned("closed without merging: "
-                                 + ", ".join(f"#{p['number']}" for p in pulls))
-            return Waiting("closed without merging less than 24 hours ago")
+            if repo.split("/", 1)[0].lower() not in owners:
+                return Unknown(f"repository {repo} is not owned by an allowed owner ("
+                               + ", ".join(owners) + ")")
+            return _judge(repo, commit, None, run, not_before, now)
+        owners = _owners(run)
+        candidates = _search_repos(commit, owners, run)
+        if not candidates:
+            return Waiting("no pull request in a repository owned by "
+                           + ", ".join(owners) + " holds the commit yet")
+        judged = []
+        for name, hits in candidates:
+            got = _judge(name, commit, hits, run, not_before, now)
+            if isinstance(got, (Merge, Unknown)):
+                return got
+            if got is not _SKIP:
+                judged.append(got)
+        if not judged:
+            return Waiting("no searched repository holds the commit")
+        if all(isinstance(g, Abandoned) for g in judged):
+            return Abandoned("; ".join(g.reason for g in judged))
+        return next(g for g in judged if isinstance(g, Waiting))
     except (GhError, ValueError, KeyError, TypeError, AttributeError) as exc:
         return Unknown(str(exc))
-    return Waiting("pull request not merged into " + default)
