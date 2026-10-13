@@ -83,3 +83,34 @@ def test_an_unconfirmed_finding_is_not_confirmed(tmp_path):
     """
     rows = rows_for(make_record(tmp_path, verdict="UNCERTAIN"), MERGE)
     assert rows[0].evidence["confirmed_l25"] == ABSENT
+
+
+def test_the_last_architect_verdict_decides(tmp_path):
+    """Backfill keeps the last verdict per fix, so a REVISE then APPROVED retry is approved.
+
+    Red 2026-10-13: mutation iterating `rows` instead of `reversed(rows)` in `_architect`;
+    failed at `assert rows[0].evidence["l6_approved"] == EVIDENCED`.
+    """
+    rec = make_record(tmp_path)
+    lines = [{"run_id": "r1", "fix_id": "FIX-001", "architect_verdict": v}
+             for v in ("REVISE", "APPROVED")]
+    (rec / "scorecard.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+    rows = rows_for(rec, MERGE)
+    assert rows[0].evidence["l6_approved"] == EVIDENCED
+
+
+def test_an_unsafe_finding_id_yields_no_row(tmp_path):
+    """L4 is untrusted and the id becomes a memo filename.
+
+    Red 2026-10-13: mutation removing the `_SAFE_ID` check in `rows_for`; failed at
+    `assert [r.finding_id for r in rows] == ["DOC-001"]`.
+    """
+    rec = make_record(tmp_path)
+    (rec / "L4.json").write_text(json.dumps([
+        {"fix_id": "FIX-001", "finding": "../../evil", "files": ["a.py"]},
+        {"fix_id": "FIX-003", "finding": "a/b", "files": ["a.py"]},
+        {"fix_id": "FIX-004", "finding": "a\\b", "files": ["a.py"]},
+        {"fix_id": "FIX-005", "finding": "..", "files": ["a.py"]},
+        {"fix_id": "FIX-002", "finding": "DOC-001", "files": ["b.py"]}]))
+    rows = rows_for(rec, MERGE)
+    assert [r.finding_id for r in rows] == ["DOC-001"]

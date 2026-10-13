@@ -7,11 +7,15 @@ The row is keyed by the merge commit, the same `bug_id` a backfill of that commi
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from .ledgers import fix_number
 from .model import ABSENT, CLAIMED, EVIDENCED, BugRow
+
+
+_SAFE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 
 
 @dataclass(frozen=True)
@@ -49,7 +53,7 @@ def _same(a: str, b: str) -> bool:
 
 
 def _architect(rows: list[dict], fix_id: str) -> str:
-    for row in rows:
+    for row in reversed(rows):  # the last verdict decides, as in backfill
         if _same(str(row.get("fix_id") or ""), fix_id) and "architect_verdict" in row:
             verdict = str(row["architect_verdict"]).upper()
             if verdict.startswith("APPROVED"):
@@ -79,6 +83,10 @@ def rows_for(record: Path, merge: Merge) -> list[BugRow]:
             continue
         fix_id = str(entry.get("fix_id") or "")
         finding = entry.get("finding") or entry.get("finding_id") or fix_id
+        # The id becomes a memo filename, and L4 comes from untrusted places.
+        if (not isinstance(finding, str) or not _SAFE_ID.fullmatch(finding)
+                or not finding.strip(".")):
+            continue
         found = l2.get(finding, {})
         out.append(BugRow(
             project=merge.repo.split("/", 1)[1], repo=merge.repo, finding_id=finding,
