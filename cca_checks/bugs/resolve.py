@@ -22,7 +22,9 @@ from pathlib import Path
 
 from . import github
 from .forward import Merge, rows_for
+from .model import SHA_LEN, BugRow
 from .pending import ABANDONED, PENDING, RECORDED
+from .store import LEDGER
 from .store import write as write_rows
 
 DEFAULT_RUNNER = github.gh
@@ -85,6 +87,52 @@ def _captured(meta: dict) -> datetime | None:
         return None
 
 
+def _key(project, fix_commit, finding_id) -> tuple[str, str, str]:
+    # The parts a bug_id is built from: rows that agree on these collide.
+    return (str(project), str(fix_commit)[:SHA_LEN], str(finding_id))
+
+
+class _Ordinals:
+    """Ordinals that stay the same across invocations, so no run's rows collide.
+
+    A row reuses the ordinal its own run already holds in the ledger (a rerun after a
+    crash appends nothing); otherwise it takes the smallest ordinal that no other run
+    holds, in the ledger or earlier in this batch. A ledger row without a run_id (a
+    backfill row) blocks nothing: the forward row that lands on it is the same bug.
+    """
+
+    def __init__(self, ledger: Path):
+        self.taken: dict[tuple, set[int]] = defaultdict(set)
+        self.own: dict[tuple, list[int]] = defaultdict(list)
+        if ledger.exists():
+            for line in ledger.read_text(encoding="utf-8").splitlines():
+                try:  # as tolerant as store.existing_ids
+                    row = json.loads(line)
+                    key = _key(row["project"], row["fix_commit"], row["finding_id"])
+                    ordinal = int(row.get("ordinal", 1))
+                    run_id = row.get("run_id")
+                except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
+                    continue
+                if run_id is None:
+                    continue
+                self.taken[key].add(ordinal)
+                if isinstance(run_id, str):  # anything else blocks, and no run reuses it
+                    self.own[(key, run_id)].append(ordinal)
+        for held in self.own.values():
+            held.sort()
+
+    def assign(self, row: BugRow) -> int:
+        key = _key(row.project, row.fix_commit, row.finding_id)
+        held = self.own[(key, row.run_id)]
+        if held:
+            return held.pop(0)
+        k = 1
+        while k in self.taken[key]:
+            k += 1
+        self.taken[key].add(k)
+        return k
+
+
 def _sort_key(folder: Path) -> tuple[str, str]:
     captured = _meta(folder).get("captured_utc")
     return (captured if isinstance(captured, str) else "", folder.name)
@@ -119,9 +167,7 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
             when = _captured(meta)
             if when is not None and now - when > timedelta(days=stale_days):
                 report.stale.append(f"{folder.name}: waiting since {meta['captured_utc']}")
-    # Ordinals count within this batch, in capture order, so a rerun after a crash
-    # rebuilds the same bug_ids and store.write skips every one of them.
-    seen: dict[tuple[str, str], int] = defaultdict(int)
+    ordinals = _Ordinals(root / LEDGER)
     batch = []
     for folder, merge in merged:
         try:
@@ -130,8 +176,7 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
             report.incomplete.append(f"{folder.name}: {type(exc).__name__}: {exc}")
             continue
         for row in rows:
-            seen[(merge.sha, row.finding_id)] += 1
-            row.ordinal = seen[(merge.sha, row.finding_id)]
+            row.ordinal = ordinals.assign(row)
         batch.append((folder, rows))
     if write and batch:
         stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")

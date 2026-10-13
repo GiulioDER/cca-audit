@@ -55,7 +55,9 @@ def test_two_runs_in_one_merge_keep_both_rows(_private_bugs_dir, tmp_path):
     """Review Focus 1. Invariant: two runs squashed into one merge commit both keep their rows.
 
     Red 2026-10-13: mutation leaving every ordinal at 1; failed at
-    `assert rep.rows_written == 4` (2: the second run's rows collided and were skipped)."""
+    `assert rep.rows_written == 4` (2: the second run's rows collided and were skipped).
+    Red 2026-10-13 (fix round 1): mutation not marking a batch-given ordinal as taken in
+    `_Ordinals.assign`; failed at the same assert (2 == 4)."""
     root = _private_bugs_dir
     pending_record(root, tmp_path, "r1", captured="2026-10-13T10:00:00Z")
     pending_record(root, tmp_path, "r2", captured="2026-10-13T11:00:00Z", commit="b" * 40)
@@ -70,7 +72,9 @@ def test_a_crash_before_the_move_writes_nothing_twice(_private_bugs_dir, tmp_pat
     nothing and completes the move.
 
     Red 2026-10-13: mutation assigning ordinals against the ledger's existing ids instead
-    of within the batch; failed at `assert rep.rows_written == 0 and len(rep.recorded) == 1`."""
+    of within the batch; failed at `assert rep.rows_written == 0 and len(rep.recorded) == 1`.
+    Red 2026-10-13 (fix round 1): mutation removing the reuse of the run's own ledger
+    ordinal in `_Ordinals.assign`; failed at the same assert (2 == 0)."""
     root = _private_bugs_dir
     pending_record(root, tmp_path, "r1")
     import cca_checks.bugs.resolve as rs
@@ -84,6 +88,50 @@ def test_a_crash_before_the_move_writes_nothing_twice(_private_bugs_dir, tmp_pat
             resolve(root, write=True, run=gh_merged)
     rep = resolve(root, write=True, run=gh_merged)
     assert rep.rows_written == 0 and len(rep.recorded) == 1
+    assert not any((root / "pending").iterdir())
+
+
+def test_a_second_run_of_one_merge_resolved_later_keeps_its_rows(_private_bugs_dir, tmp_path):
+    """Fix round 1 (a). Invariant: a run of an already recorded merge, resolved in a later
+    invocation, takes ordinal 2 instead of colliding with the first run's rows.
+
+    Red 2026-10-13: mutation making `_Ordinals` ignore the ledger (ordinals count within
+    the batch only, the original code); failed at `assert rep.rows_written == 2` (0)."""
+    root = _private_bugs_dir
+    pending_record(root, tmp_path, "r1", captured="2026-10-13T10:00:00Z")
+    assert resolve(root, write=True, run=gh_merged).rows_written == 2
+    pending_record(root, tmp_path, "r2", captured="2026-10-13T11:00:00Z", commit="b" * 40)
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.rows_written == 2
+    rows = [json.loads(x) for x in (root / "bugs.jsonl").read_text().splitlines()]
+    assert {(r["bug_id"], r["run_id"]) for r in rows if r["run_id"] == "r2"} == {
+        (f"widgets:{MERGE_SHA[:12]}:BUG-001~2", "r2"),
+        (f"widgets:{MERGE_SHA[:12]}:DOC-001~2", "r2")}
+
+
+def test_a_backfill_row_is_the_same_bug_not_a_blocker(_private_bugs_dir, tmp_path):
+    """Fix round 1 (c). Invariant: a ledger row without a run_id (backfill) at ordinal 1
+    does not push the forward row to ordinal 2; the forward row lands on it and is skipped.
+
+    Red 2026-10-13: mutation letting run_id null rows block an ordinal (deleting
+    `if run_id is None: continue`); failed at `assert rep.rows_written == 1` (2: BUG-001~2
+    was written as a second copy of the backfilled bug)."""
+    root = _private_bugs_dir
+    backfilled = {"bug_id": f"widgets:{MERGE_SHA[:12]}:BUG-001", "project": "widgets",
+                  "fix_commit": MERGE_SHA, "finding_id": "BUG-001", "run_id": None,
+                  "ordinal": 1}
+    # Corrupt lines are skipped or tolerated, never fatal (not a red-proved claim: without
+    # the guards they raise TypeError or OverflowError rather than fail an assert).
+    corrupt = ['{garbage', '{"project": "widgets", "fix_commit": "x", "finding_id": "O",'
+               ' "run_id": [1]}', '{"project": "w", "fix_commit": "x", "finding_id": "O",'
+               ' "ordinal": Infinity, "run_id": "z"}']
+    (root / "bugs.jsonl").write_text(json.dumps(backfilled) + "\n" + "\n".join(corrupt) + "\n")
+    pending_record(root, tmp_path, "r1")
+    rep = resolve(root, write=True, run=gh_merged)
+    assert rep.rows_written == 1
+    ids = [json.loads(x)["bug_id"] for x in (root / "bugs.jsonl").read_text().splitlines()
+           if '"bug_id"' in x]
+    assert ids == [backfilled["bug_id"], f"widgets:{MERGE_SHA[:12]}:DOC-001"]
     assert not any((root / "pending").iterdir())
 
 
