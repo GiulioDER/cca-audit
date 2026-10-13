@@ -3,6 +3,8 @@
 Asked of GitHub through the `gh` CLI, never a library. GitHub keeps a pull request's
 commits after a squash merge, so a commit that never reached the default branch still
 names the PR that did, and that PR names the squash commit the ledger keys rows by.
+A record without a repository is matched by a pull request search for the sha, limited
+to the allowed owners.
 
 What GitHub returns is untrusted: the repository name and the merge sha end up in a
 ledger row key and a memo filename, so both are checked before a Merge is built.
@@ -13,13 +15,15 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+from datetime import datetime, timedelta, timezone
 
 from .forward import Merge
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 _REPO = re.compile(r"(?!\.+/)[A-Za-z0-9_.-]+/(?!\.+$)[A-Za-z0-9_.-]+")
+ABANDON_AFTER = timedelta(hours=24)
 
 
 class GhError(Exception):
@@ -68,24 +72,73 @@ def _owners(run: Runner) -> list[str]:
     return [login.lower()]
 
 
-def lookup(repo: str | None, commit: str, run: Runner = gh):
+def _search_repo(commit: str, owners: list[str], run: Runner) -> str | None:
+    """The repository of a pull request holding the commit, from an allowed owner.
+
+    GitHub's commit search covers only default branches, which a squash merge never puts
+    the run's own commit on; the pull request search matches a sha on any PR's commits.
+    """
+    for owner in owners:
+        found = json.loads(run(["api", "-X", "GET", "search/issues",
+                                "-f", f"q={commit} is:pr user:{owner}"]))
+        for item in found.get("items") or []:
+            url = item.get("repository_url") if isinstance(item, dict) else None
+            if not isinstance(url, str) or "/repos/" not in url:
+                continue
+            name = url.split("/repos/", 1)[1]
+            if name.split("/", 1)[0].lower() == owner:
+                return name  # checked against _REPO by the caller
+    return None
+
+
+def _when(text) -> datetime | None:
+    try:
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _commit_missing(exc: GhError) -> bool:
+    # gh reports GitHub's answer for a sha it never received as "No commit found for
+    # SHA" (HTTP 422); a 404 on this one call means the same.
+    text = str(exc)
+    return any(mark in text for mark in ("No commit found", "HTTP 422", "HTTP 404"))
+
+
+def lookup(repo: str | None, commit: str, run: Runner = gh, *,
+           not_before: datetime | None = None, now: datetime | None = None):
+    """Merge, Waiting, Abandoned or Unknown for the pull request holding `commit`.
+
+    `not_before` is when the run closed: a PR merged earlier cannot hold this run's work
+    (the run closed at a commit already on master), so it is ignored.
+    """
     if not isinstance(commit, str) or not _SHA.fullmatch(commit):
         return Unknown(f"unusable commit sha: {commit!r}")
+    now = now or datetime.now(timezone.utc)
     try:
         if repo is None:
-            items = json.loads(run(["api", "-X", "GET", "search/commits",
-                                    "-f", f"q=hash:{commit}"])).get("items") or []
             owners = _owners(run)
-            names = [(i.get("repository") or {}).get("full_name") for i in items]
-            repo = next((n for n in names if isinstance(n, str) and "/" in n
-                         and n.split("/", 1)[0].lower() in owners), None)
+            repo = _search_repo(commit, owners, run)
             if repo is None:
-                return Waiting("no repository owned by " + ", ".join(owners)
-                               + " holds the commit yet")
+                return Waiting("no pull request in a repository owned by "
+                               + ", ".join(owners) + " holds the commit yet")
         if not isinstance(repo, str) or not _REPO.fullmatch(repo):
             return Unknown(f"unusable repository name from GitHub: {repo!r}")
         default = json.loads(run(["api", f"repos/{repo}"]))["default_branch"]
-        pulls = json.loads(run(["api", f"repos/{repo}/commits/{commit}/pulls"]))
+        try:
+            pulls = json.loads(run(["api", f"repos/{repo}/commits/{commit}/pulls"]))
+        except GhError as exc:
+            if _commit_missing(exc):
+                return Waiting("GitHub has not received the commit")
+            raise
+        if not_before is not None:
+            early = [p for p in pulls if p.get("merged_at")
+                     and _when(p["merged_at"]) is not None
+                     and _when(p["merged_at"]) < not_before]
+            pulls = [p for p in pulls if p not in early]
+            if early and not pulls:
+                return Waiting("only pull requests merged before the run closed list "
+                               "the commit")
         for p in pulls:
             if p.get("merged_at") and (p.get("base") or {}).get("ref") == default:
                 sha = p.get("merge_commit_sha")
@@ -94,9 +147,15 @@ def lookup(repo: str | None, commit: str, run: Runner = gh):
                 return Merge(repo, sha, p["merged_at"][:10], p["number"])
         if not pulls:
             return Waiting("no pull request lists the commit")
-        if all(p.get("state") == "closed" and not p.get("merged_at") for p in pulls):
-            return Abandoned("closed without merging: "
-                             + ", ".join(f"#{p['number']}" for p in pulls))
+        closed = [p for p in pulls if p.get("state") == "closed" and not p.get("merged_at")]
+        if len(closed) == len(pulls):
+            # A PR closed and reopened within the hour must not be abandoned for good.
+            settled = all((_when(p.get("closed_at")) or now) <= now - ABANDON_AFTER
+                          for p in closed)
+            if settled:
+                return Abandoned("closed without merging: "
+                                 + ", ".join(f"#{p['number']}" for p in pulls))
+            return Waiting("closed without merging less than 24 hours ago")
     except (GhError, ValueError, KeyError, TypeError, AttributeError) as exc:
         return Unknown(str(exc))
     return Waiting("pull request not merged into " + default)
