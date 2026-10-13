@@ -112,12 +112,17 @@ def _commit_missing(exc: GhError) -> bool:
     return any(mark in text for mark in ("No commit found", "HTTP 422", "HTTP 404"))
 
 
-_SKIP = object()  # a searched repository that does not hold the commit
+Answer = Merge | Waiting | Abandoned | Unknown
+
+
+def _merged_before(pull: dict, moment: datetime) -> bool:
+    merged = _when(pull.get("merged_at"))
+    return merged is not None and merged < moment
 
 
 def _judge(repo: str, commit: str, hits: set[int] | None, run: Runner,
-           not_before: datetime | None, now: datetime):
-    """One repository's answer; `_SKIP` for a searched one that does not hold the commit.
+           not_before: datetime | None, now: datetime) -> Answer | None:
+    """One repository's answer; None for a searched one that does not hold the commit.
 
     `hits` is None for the repository a record names itself, and otherwise the numbers
     of the searched pull requests in it: a repository whose commit pulls list none of
@@ -131,13 +136,11 @@ def _judge(repo: str, commit: str, hits: set[int] | None, run: Runner,
     except GhError as exc:
         if not _commit_missing(exc):
             raise
-        return Waiting("GitHub has not received the commit") if hits is None else _SKIP
+        return Waiting("GitHub has not received the commit") if hits is None else None
     if hits is not None and not any(p.get("number") in hits for p in pulls):
-        return _SKIP
+        return None
     if not_before is not None:
-        early = [p for p in pulls if p.get("merged_at")
-                 and _when(p["merged_at"]) is not None
-                 and _when(p["merged_at"]) < not_before]
+        early = [p for p in pulls if _merged_before(p, not_before)]
         pulls = [p for p in pulls if p not in early]
         if early and not pulls:
             return Waiting("only pull requests merged before the run closed list "
@@ -163,7 +166,7 @@ def _judge(repo: str, commit: str, hits: set[int] | None, run: Runner,
 
 
 def lookup(repo: str | None, commit: str, run: Runner = gh, *,
-           not_before: datetime | None = None, now: datetime | None = None):
+           not_before: datetime | None = None, now: datetime | None = None) -> Answer:
     """Merge, Waiting, Abandoned or Unknown for the pull request holding `commit`.
 
     `not_before` is when the run closed: a PR merged earlier cannot hold this run's work
@@ -183,18 +186,20 @@ def lookup(repo: str | None, commit: str, run: Runner = gh, *,
             if repo.split("/", 1)[0].lower() not in owners:
                 return Unknown(f"repository {repo} is not owned by an allowed owner ("
                                + ", ".join(owners) + ")")
-            return _judge(repo, commit, None, run, not_before, now)
+            got = _judge(repo, commit, None, run, not_before, now)
+            # Without hits _judge never skips; the fallback only satisfies the type.
+            return got if got is not None else Waiting("no pull request lists the commit")
         owners = _owners(run)
         candidates = _search_repos(commit, owners, run)
         if not candidates:
             return Waiting("no pull request in a repository owned by "
                            + ", ".join(owners) + " holds the commit yet")
-        judged = []
+        judged: list[Waiting | Abandoned] = []
         for name, hits in candidates:
             got = _judge(name, commit, hits, run, not_before, now)
             if isinstance(got, (Merge, Unknown)):
                 return got
-            if got is not _SKIP:
+            if got is not None:
                 judged.append(got)
         if not judged:
             return Waiting("no searched repository holds the commit")
