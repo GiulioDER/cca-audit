@@ -284,6 +284,20 @@ def _deferred_parent(tier: str, no_fix: bool, parent: str, root) -> tuple[str, s
     return parent, base_commit
 
 
+def _capture_pending(state: PipelineState, root) -> None:
+    """Save the closed run for the bug ledger; a failure is a warning, never a refusal.
+
+    The ledger records a run only after its pull request merges (`bugs resolve`), and by
+    then the worktree may be gone, so the run's files are copied out now.
+    """
+    try:
+        from .bugs import pending
+        pending.capture(root, state.run_id)
+    except Exception as exc:  # noqa: BLE001 (see the docstring)
+        print(f"warning: could not save this run for the bug ledger "
+              f"({exc.__class__.__name__}: {exc})", file=sys.stderr)
+
+
 def _registry(action: str, *args) -> None:
     """Update the open run registry; a failure is a warning, never a refusal.
 
@@ -934,6 +948,7 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
         )
     if not state.legacy:
         _write_summary(state, root)
+        _capture_pending(state, root)
     recorded = ", ".join(sorted(state.layers))
     log = core.append_log(
         root,

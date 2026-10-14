@@ -1,0 +1,159 @@
+"""Ledger rows for one captured run whose pull request merged.
+
+Built only from the run's own files and the merge GitHub reported, never from a commit
+message, so a squash merge (whose message does not carry CCA's fix bullets) loses nothing.
+The row is keyed by the merge commit, the same `bug_id` a backfill of that commit makes.
+"""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from .ledgers import fix_number
+from .model import ABSENT, CLAIMED, EVIDENCED, BugRow
+
+_SAFE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+
+
+@dataclass(frozen=True)
+class Merge:
+    repo: str
+    sha: str
+    date: str
+    pr: int
+
+
+def _load(record: Path, name: str, default):
+    path = record / name
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _scorecard(record: Path) -> list[dict]:
+    path = record / "scorecard.jsonl"
+    rows = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                rows.append(row)
+    return rows
+
+
+def _same(a: str, b: str) -> bool:
+    na, nb = fix_number(a), fix_number(b)
+    return a == b or (na is not None and na == nb)
+
+
+def _architect(rows: list[dict], fix_id: str) -> str:
+    for row in reversed(rows):  # the last verdict decides, as in backfill
+        if _same(str(row.get("fix_id") or ""), fix_id) and "architect_verdict" in row:
+            verdict = str(row["architect_verdict"]).upper()
+            if verdict.startswith("APPROVED"):
+                return EVIDENCED
+            if verdict in ("BLOCKED", "REVISE"):
+                return ABSENT
+    return CLAIMED
+
+
+def _proof(proofs: list[dict], finding: str, fix_id: str) -> str:
+    verdicts = [str(p.get("verdict", "")).upper() for p in proofs
+                if _same(str(p.get("finding", "")), fix_id) or p.get("finding") == finding]
+    return EVIDENCED if verdicts and all(v == "RED" for v in verdicts) else ABSENT
+
+
+def _files(value) -> list[str]:
+    """L4 stores files as a list or as one comma separated string; anything else is []."""
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, list):
+        return []
+    return [f.strip() for f in value if isinstance(f, str) and f.strip()]
+
+
+def _text(value) -> str | None:
+    """A field from L2 or L4 kept only when it is a non-empty string."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _result(rows: list[dict], fix_id: str) -> str | None:
+    """The fix's last scorecard outcome (fixed, parked or reverted), or None without one."""
+    for row in reversed(rows):
+        if _same(str(row.get("fix_id") or ""), fix_id) and "result" in row:
+            return str(row["result"]).strip().lower()
+    return None
+
+
+def _not_fixed(entry: dict, fix_id: str, card: list[dict]) -> str | None:
+    """Why this L4 entry is not a fix that reached the merge, or None when it is."""
+    if not fix_id:
+        said = " ".join(v for v in entry.values() if isinstance(v, str)).lower()
+        return "parked (no fix id)" if "parked" in said else "has no fix id"
+    result = _result(card, fix_id)
+    if result is not None and result != "fixed":
+        return f"{fix_id} scorecard result {result}"
+    return None
+
+
+def rows_for(record: Path, merge: Merge) -> list[BugRow]:
+    return [row for row, _ in rows_with_fix_ids(record, merge)]
+
+
+def rows_with_fix_ids(record: Path, merge: Merge) -> list[tuple[BugRow, str]]:
+    """Each row with the L4 fix id it came from, which a backfill row may be keyed by."""
+    return rows_and_skips(record, merge)[0]
+
+
+def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]], list[str]]:
+    """The rows, and "<finding id> <reason>" for each L4 entry that was not fixed.
+
+    A fix parked or reverted after L4 was recorded stays in L4.json, so only an entry
+    with a fix id whose scorecard result, when there is one, is `fixed` becomes a row.
+    """
+    meta = _load(record, "meta.json", {})
+    l2 = {f.get("id"): f for f in _load(record, "L2.json", []) if isinstance(f, dict)}
+    l25 = {v.get("id"): v.get("verdict") for v in _load(record, "L2.5.json", [])
+           if isinstance(v, dict)}
+    proofs = [p for p in _load(record, "L5.6.json", []) if isinstance(p, dict)]
+    card = _scorecard(record)
+    run_id = _text(meta.get("run_id")) if isinstance(meta, dict) else None
+    out = []
+    skipped = []
+    for entry in _load(record, "L4.json", []):
+        if not isinstance(entry, dict):
+            continue
+        raw_fix = entry.get("fix_id")
+        fix_id = raw_fix if isinstance(raw_fix, str) else ""
+        finding = entry.get("finding") or entry.get("finding_id") or fix_id
+        # The id becomes a memo filename, and L4 comes from untrusted places.
+        if (not isinstance(finding, str) or not _SAFE_ID.fullmatch(finding)
+                or not finding.strip(".")):
+            continue
+        reason = _not_fixed(entry, fix_id, card)
+        if reason is not None:
+            skipped.append(f"{finding} {reason}")
+            continue
+        found = l2.get(finding, {})
+        out.append((BugRow(
+            project=merge.repo.split("/", 1)[1], repo=merge.repo, finding_id=finding,
+            fix_commit=merge.sha, date=merge.date, files=_files(entry.get("files")),
+            summary=(_text(found.get("claim")) or _text(entry.get("summary"))
+                     or "(no description recorded)"),
+            severity=_text(found.get("priority")), category=_text(found.get("category")),
+            auditor=_text(found.get("auditor")), run_id=run_id,
+            evidence={
+                "confirmed_l25": EVIDENCED if l25.get(finding) == "CONFIRMED" else ABSENT,
+                "fixed": EVIDENCED,
+                "l6_approved": _architect(card, fix_id),
+                "red_proof": _proof(proofs, finding, fix_id),
+            },
+            sources=[f"run:{merge.repo}:{run_id}", f"pr:{merge.repo}#{merge.pr}",
+                     f"git:{merge.sha}"],
+        ), fix_id))
+    return out, skipped

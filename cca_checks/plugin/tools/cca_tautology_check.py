@@ -242,6 +242,40 @@ def _planned_p1() -> int:
     return sum(1 for row in mine if str(row.get("priority", "")).upper() == "P1")
 
 
+def _save_proofs(results: list[ProofResult]) -> None:
+    """Keep each proof's verdict beside the run's other outputs: runs/<run_id>/L5.6.json.
+
+    Merged into the file a previous `verify --record` of this run wrote: a proof re-run
+    now replaces its earlier entry, and one not re-run keeps it.
+
+    The L5.6 entry holds only counts and run-state.json is deleted at close, so without
+    this file nothing after the run can tell which finding was proved red (the bug ledger
+    needs exactly that). Under .claude/audits/, so the tree fingerprint ignores it.
+    Best-effort: a failure warns and never blocks the record.
+    """
+    try:
+        from cca_checks import deferred, pipeline_state
+        state = pipeline_state.load(".")
+        if state is None:
+            return
+        path = deferred.runs_dir(".") / state.run_id / "L5.6.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [{"finding": r.finding, "nodeid": r.nodeid, "verdict": r.verdict}
+                for r in results]
+        # A REVISE cycle may re-run only some proofs: keep the earlier verdicts of the rest.
+        rerun = {r.finding for r in results}
+        try:
+            earlier = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        except ValueError:
+            earlier = []
+        if isinstance(earlier, list):
+            rows = [e for e in earlier
+                    if isinstance(e, dict) and e.get("finding") not in rerun] + rows
+        path.write_text(json.dumps(rows, indent=1) + "\n", encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 (see the docstring)
+        print(f"warning: could not save the L5.6 proof file ({exc})", file=sys.stderr)
+
+
 def _record(status: str, detail: str) -> int:
     try:
         from cca_checks import pipeline_state
@@ -330,6 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     # Non-zero if any claimed proof is not a proof — this is a gate.
     exit_code = 1 if any(r.verdict != RED for r in results) else 0
     if a.record:
+        _save_proofs(results)
         status, detail = _l5_6_entry(results)
         recorded = _record(status, detail)
         if recorded:

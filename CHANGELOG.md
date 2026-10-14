@@ -6,6 +6,16 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+### Added
+- The bug ledger now grows by itself. `pipeline close` saves a run that fixed something to `~/.claude/cca-bugs/pending/<run_id>__<commit>/` (its L2, L2.5, L4 and L5.6 files, its scorecard rows and its summary), outside the worktree, so deleting the worktree loses nothing. A failure to save only warns; it never refuses the close.
+- `python -m cca_checks bugs resolve --write` asks GitHub, through `gh`, whether the pull request holding the run's commit merged into the default branch. A merged run becomes ledger rows keyed by the merge commit; a record moves to `abandoned/` only when every pull request listing its commit has been closed unmerged for more than 24 hours, so a pull request closed and reopened within a day is not lost; anything else waits. A commit GitHub never received (rebased or amended before the first push) waits rather than failing. A record kept in pending longer than 14 days, whether waiting, unknown or incomplete, is listed as stale. A record is built in a `.tmp-` folder and renamed into place, so no reader sees half of one. Squash merges work because GitHub keeps a pull request's commits. Two runs of one merge keep separate rows, and a rerun appends nothing new. A bug a backfill already recorded under the same merge commit (by the finding id, or by the fix id's number) is skipped and listed under `already_backfilled`, so it is not counted twice.
+- A record captured without a GitHub origin (a Codex close on VPS2) is matched by a pull request search for its commit (`is:pr user:<owner>`), once per owner listed in `CCA_BUGS_OWNERS` or, when that is unset, for the `gh` login. GitHub's commit search covers only default branches, which a squash merge never puts the run's own commit on. Every repository the search finds is judged: a repository that only mentions the commit is skipped, the first merge wins, and the record is abandoned only when every repository holding the commit abandoned it, so a pull request a stranger opens and closes in another repository cannot end the record. A repository named in the record must belong to an allowed owner too, or the record is reported unknown.
+- A run closed before its fixes were committed (HEAD at close equals the base commit) is marked `commit_is_base` and reported under `incomplete`, never attributed to the earlier pull request that merged that commit; a pull request merged before the run closed is ignored.
+- A record whose `meta.json` is missing or malformed, or whose run files cannot be read, is reported under `incomplete` and left in pending. A finding id that is not a plain identifier gets no row, because it would name a memo file; GitHub's merge sha must be 40 hex characters. `resolve` exits 3 only when `gh` could not answer.
+- `cca_tautology_check.py verify --record` writes `runs/<run_id>/L5.6.json`, each proof's verdict by finding. The L5.6 entry holds only counts, so without this file no run could ever be recorded as proved.
+
 ## [0.11.0] - 2026-10-12
 
 ### Changed
