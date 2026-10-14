@@ -6,15 +6,102 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.12.0] - 2026-10-14
 
-### Added
-- The bug ledger now grows by itself. `pipeline close` saves a run that fixed something to `~/.claude/cca-bugs/pending/<run_id>__<commit>/` (its L2, L2.5, L4 and L5.6 files, its scorecard rows and its summary), outside the worktree, so deleting the worktree loses nothing. A failure to save only warns; it never refuses the close.
-- `python -m cca_checks bugs resolve --write` asks GitHub, through `gh`, whether the pull request holding the run's commit merged into the default branch. A merged run becomes ledger rows keyed by the merge commit; a record moves to `abandoned/` only when every pull request listing its commit has been closed unmerged for more than 24 hours, so a pull request closed and reopened within a day is not lost; anything else waits. A commit GitHub never received (rebased or amended before the first push) waits rather than failing. A record kept in pending longer than 14 days, whether waiting, unknown or incomplete, is listed as stale. A record is built in a `.tmp-` folder and renamed into place, so no reader sees half of one. Squash merges work because GitHub keeps a pull request's commits. Two runs of one merge keep separate rows, and a rerun appends nothing new. A bug a backfill already recorded under the same merge commit (by the finding id, or by the fix id's number) is skipped and listed under `already_backfilled`, so it is not counted twice.
-- A record captured without a GitHub origin (a Codex close on VPS2) is matched by a pull request search for its commit (`is:pr user:<owner>`), once per owner listed in `CCA_BUGS_OWNERS` or, when that is unset, for the `gh` login. GitHub's commit search covers only default branches, which a squash merge never puts the run's own commit on. Every repository the search finds is judged: a repository that only mentions the commit is skipped, the first merge wins, and the record is abandoned only when every repository holding the commit abandoned it, so a pull request a stranger opens and closes in another repository cannot end the record. A repository named in the record must belong to an allowed owner too, or the record is reported unknown.
-- A run closed before its fixes were committed (HEAD at close equals the base commit) is marked `commit_is_base` and reported under `incomplete`, never attributed to the earlier pull request that merged that commit; a pull request merged before the run closed is ignored.
-- A record whose `meta.json` is missing or malformed, or whose run files cannot be read, is reported under `incomplete` and left in pending. A finding id that is not a plain identifier gets no row, because it would name a memo file; GitHub's merge sha must be 40 hex characters. `resolve` exits 3 only when `gh` could not answer.
-- `cca_tautology_check.py verify --record` writes `runs/<run_id>/L5.6.json`, each proof's verdict by finding. The L5.6 entry holds only counts, so without this file no run could ever be recorded as proved.
+**The bug ledger now records every CCA run by itself.** CCA keeps a cross-project ledger of the
+bugs it fixed (`~/.claude/cca-bugs`), and until this release it grew only when someone ran
+`bugs backfill`, which reads CCA fix commits on the default branch. A squash merge leaves neither
+the run's own commit nor its CCA message on that branch, so a project that squash-merges stopped
+adding bugs after its first backfill. From 0.12.0, every run that fixes something is recorded once
+its pull request merges, from the evidence the run itself produced, with nothing to remember.
+
+### How it works
+
+Recording happens in two stages, because a run closes before its pull request merges, and the
+worktree it ran in is often gone by then.
+
+1. **Saved at close.** `pipeline close` copies a run that fixed something into
+   `~/.claude/cca-bugs/pending/<run_id>__<commit>/`: its findings (L2), verdicts (L2.5), fixes
+   (L4), red proofs (L5.6), scorecard rows and summary. The record lives outside the worktree, so
+   deleting the worktree loses nothing. It is built in a temporary folder and renamed into place,
+   so nothing ever reads half a record. A failure to save only warns: it never refuses the close.
+2. **Recorded at merge.** `python -m cca_checks bugs resolve --write` asks GitHub, through `gh`,
+   whether the pull request holding each saved run's commit merged into the default branch.
+   A merged run becomes ledger rows keyed by the merge commit, with one memo per bug for the
+   RE-call tenant. Squash merges work, because GitHub keeps a pull request's commits after the
+   squash. Anything not yet merged waits for the next call.
+
+`resolve` does not schedule itself. Call it wherever suits you: a session close hook, a scheduled
+task, or by hand. Without `--write` it only reports.
+
+### What a row proves
+
+A bug is `proved` only when four things hold, each read from the run's own files: an independent
+verifier confirmed it (L2.5), its fix merged into the default branch, the architect approved the
+fix (L6), and its regression test failed against the pre-fix code (L5.6). Anything less is
+`historical`. To make the last condition checkable, `cca_tautology_check.py verify --record` now
+keeps each proof's verdict in `runs/<run_id>/L5.6.json`; the L5.6 entry itself holds only counts.
+A later `verify --record` in the same run merges into that file instead of replacing it.
+
+### Built to be trusted
+
+The ledger is append-only, so a wrong row is permanent. `resolve` is built around that:
+
+- **Only fixes that landed.** A fix the pipeline later parked or reverted gets no row and is listed
+  under `not_fixed`. A run closed before its fixes were committed is marked `commit_is_base` and
+  reported as incomplete, never credited to the earlier pull request that merged that commit, and
+  a pull request merged before the run closed is ignored.
+- **Never counted twice.** Running `resolve` again appends nothing new, including after a crash
+  halfway through. Two runs that land in one merge keep separate rows. A bug that `backfill`
+  already recorded for the same merge commit is skipped and listed under `already_backfilled`.
+- **Nothing silently lost.** A record whose files are missing or malformed is reported under
+  `incomplete` and left in place. A commit GitHub has not received yet (a branch not pushed, or
+  rewritten before its first push) waits rather than failing. Any record still pending after
+  14 days is listed under `stale` (`--stale-days` changes the window).
+- **Abandoned only when it really was.** A record moves to `abandoned/` only when every pull
+  request holding its commit has been closed without merging for more than 24 hours, so a pull
+  request closed and reopened the same day still counts.
+- **Untrusted input stays out.** The run's files come from repositories under audit and the
+  merge details come from GitHub, so both are checked before they reach the ledger: every field is
+  type-checked, a finding id that is not a plain identifier gets no row (it would name a memo
+  file), a merge commit must be 40 hexadecimal characters, and a repository name must be a plain
+  `owner/name`.
+
+### Codex runs
+
+Codex can close a run in a copy of the repository on another host, where the record has no GitHub
+origin to name its repository. `resolve` then finds the pull request by searching for the commit
+(GitHub's commit search covers only default branches, which a squash merge never puts the run's
+commit on). The search is limited to the owners in `CCA_BUGS_OWNERS`, a comma separated list, or
+to your `gh` login when it is unset, and a repository counts only if GitHub's own list of pull
+requests for that commit names the hit. A pull request that merely mentions the commit, or one a
+stranger opens elsewhere, can neither credit a merge nor end the record. A repository named in a
+record must belong to an allowed owner too.
+
+### Using it
+
+```bash
+python -m cca_checks bugs resolve                 # report what would be recorded
+python -m cca_checks bugs resolve --write --json  # record merged runs; JSON for automation
+```
+
+The report lists `recorded`, `abandoned`, `waiting`, `unknown`, `stale`, `incomplete`,
+`already_backfilled` and `not_fixed`, with `rows_written` and `memos_written`. It exits 0, or 3
+when `gh` could not answer for some record. `gh` must be installed and logged in.
+`CCA_BUGS_DIR` moves the ledger away from `~/.claude/cca-bugs`. `resolve` takes no lock, so run
+one at a time.
+
+### Upgrading from 0.11.x
+
+- `pip install -U cca-audit`, then `cca-audit install` and `cca-audit install-codex`, so the copies
+  in `.claude/` and the Codex skill match the package (`pipeline start` warns about any that do
+  not).
+- Runs closed under 0.11.x were not saved. A run whose files still exist can be saved by hand with
+  `python -c "from cca_checks.bugs.pending import capture; capture('<repo root>', '<run_id>')"`.
+  Those runs never kept their per-proof L5.6 verdicts, so they can be recorded as `historical` at
+  most.
+- Nothing else changes: the pipeline layers, the commit guard and `bugs backfill` behave as in
+  0.11.0.
 
 ## [0.11.0] - 2026-10-12
 
