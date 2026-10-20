@@ -1,9 +1,13 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
+python -m cca_checks.bugs prior --files F [F ...] [--repo-name OWNER/NAME] [--root PATH]
+    [--before YYYY-MM-DD] [--limit N] [--similar PATH [PATH ...]] [--cross-repo] [--json]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
-be asked about some record (the hourly worker retries), otherwise 0.
+be asked about some record (the hourly worker retries), otherwise 0. `prior` is read-only
+and exits 0 on any data or environment problem (a missing ledger or origin prints the empty
+block), and 2 on a usage error (argparse).
 """
 from __future__ import annotations
 
@@ -15,7 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .backfill import backfill, summarize
+from .github import owners_from_env
 from .gitread import GitError
+from .model import _printable
 from .store import bugs_dir, write
 
 
@@ -31,14 +37,107 @@ def _bind_arg(spec: str) -> tuple[str, str]:
     return sha.lower(), run
 
 
-_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+def _date_arg(value: str) -> str:
+    # The filters compare dates as strings, so only the zero padded form orders correctly.
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}") from None
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}")
+    return value
 
 
-def _printable(text: str) -> str:
-    # Commit subjects come from repositories the author may not control. A raw ESC or
-    # BEL in one could rewrite or hide what the terminal shows, so control characters
-    # are replaced before printing. --json is already safe: json.dumps escapes them.
-    return _CONTROL.sub("�", text)
+def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
+    # Saved RE-call answers: an unreadable or malformed file is skipped and named, never fatal.
+    responses: list[dict] = []
+    errors: list[str] = []
+    for path in paths:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError, RecursionError) as exc:
+            errors.append(f"{path}: {type(exc).__name__}")
+            continue
+        if not isinstance(value, dict):
+            errors.append(f"{path}: {type(value).__name__} is not an object")
+            continue
+        responses.append(value)
+    return responses, "; ".join(errors) or None
+
+
+def _emit(text: str) -> None:
+    # A piped stdout on Windows is cp1252 with strict errors: write only what it can encode.
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, errors="replace").decode(encoding))
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"expected an integer of at least 1, got {value!r}")
+    return number
+
+
+def _owners(repo: str | None) -> set[str]:
+    named = set(owners_from_env())
+    if named:
+        return named
+    return {repo.split("/", 1)[0].lower()} if repo else set()
+
+
+def _prior(a: argparse.Namespace) -> int:
+    from . import prior
+    from .gitread import remote_repo
+    from .store import LEDGER
+
+    ledger = bugs_dir() / LEDGER
+    repo = a.repo_name
+    reason = None
+    if repo is None:
+        try:
+            repo = remote_repo(a.root)
+        except (OSError, GitError):
+            repo = None
+        if repo is None:
+            reason = "no origin remote"
+    rows: list[dict] = []
+    if reason is None:
+        if ledger.is_file():
+            rows = prior.load_rows(ledger)
+        else:
+            reason = "no ledger"
+    selected = []
+    if repo is not None and rows:
+        selected = prior.select(rows, repo, a.files, before=a.before, limit=a.limit)
+    near: list[tuple[dict, list[str]]] | None = None
+    unjoined = 0
+    similar_error = None
+    if a.similar is not None:
+        responses, similar_error = _responses(a.similar)
+        near = []
+        if repo is not None and rows:
+            exclude = {str(row.get("bug_id")) for row, _ in selected}
+            near, unjoined = prior.similar(rows, responses, repo, _owners(repo), a.cross_repo,
+                                           a.before, exclude, limit=min(a.limit, prior.SIMILAR_MAX))
+    if a.json:
+        keys = ("bug_id", "finding_id", "severity", "date", "tier", "fix_commit", "summary")
+        out = [{**{k: row.get(k) for k in keys}, "files": overlap} for row, overlap in selected]
+        data: dict = {"repo": repo, "reason": reason, "rows": out}
+        if near is not None:
+            data["similar"] = [{**{k: row.get(k) for k in keys}, "repo": row.get("repo"),
+                                "files": files} for row, files in near]
+            data["unjoined"] = unjoined
+            if similar_error:
+                data["similar_error"] = similar_error
+        print(json.dumps(data, indent=2))
+    elif near is None:
+        _emit(prior.render(selected, reason))
+    else:
+        _emit(prior.render(selected, reason, similar_rows=near, repo=repo or ""))
+    return 0
 
 
 def _render(summary: dict) -> str:
@@ -79,7 +178,22 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--write", action="store_true", help="append rows and move records")
     r.add_argument("--json", action="store_true")
     r.add_argument("--stale-days", type=int, default=14)
+    q = sub.add_parser("prior", help="print the prior fixes recorded for a set of files")
+    q.add_argument("--files", nargs="+", required=True)
+    q.add_argument("--repo-name", metavar="OWNER/NAME",
+                   help="the repository; when absent it is read from --root's origin")
+    q.add_argument("--root", type=Path, default=Path("."))
+    q.add_argument("--before", type=_date_arg, metavar="YYYY-MM-DD")
+    q.add_argument("--limit", type=_positive_int, default=8)
+    q.add_argument("--similar", nargs="+", action="extend", type=Path, metavar="PATH",
+                   help="saved recall_search responses to join to the ledger")
+    q.add_argument("--cross-repo", action="store_true",
+                   help="let --similar show rows of other repositories of the allowed owners")
+    q.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+
+    if a.cmd == "prior":
+        return _prior(a)
 
     if a.cmd == "resolve":
         from dataclasses import asdict

@@ -80,6 +80,16 @@ class BugRow:
         }
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _printable(text: str) -> str:
+    # Commit subjects come from repositories the author may not control. A raw ESC or
+    # BEL in one could rewrite or hide what the terminal shows, so control characters
+    # are replaced before printing. --json is already safe: json.dumps escapes them.
+    return _CONTROL.sub("�", text)
+
+
 def memo_filename(bug_id: str) -> str:
     # ':' is not a legal filename character on Windows.
     return bug_id.replace(":", "__") + ".md"

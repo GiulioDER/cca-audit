@@ -81,10 +81,15 @@ def cached(run: Runner) -> Runner:
     return wrapped
 
 
+def owners_from_env() -> list[str]:
+    """`CCA_BUGS_OWNERS`: comma separated, stripped, lower-cased, empties dropped."""
+    raw = os.environ.get("CCA_BUGS_OWNERS", "")
+    return [o.strip().lower() for o in raw.split(",") if o.strip()]
+
+
 def _owners(run: Runner) -> list[str]:
     """Owners whose repositories a searched commit may be attributed to."""
-    raw = os.environ.get("CCA_BUGS_OWNERS", "")
-    owners = [o.strip().lower() for o in raw.split(",") if o.strip()]
+    owners = owners_from_env()
     if owners:
         return owners
     login = json.loads(run(["api", "user"]))["login"]
