@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .ledgers import fix_number
-from .model import ABSENT, CLAIMED, EVIDENCED, BugRow
+from .model import ABSENT, CLAIMED, EVIDENCED, NOT_REQUIRED, BugRow
 
 _SAFE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
 
@@ -62,10 +62,21 @@ def _architect(rows: list[dict], fix_id: str) -> str:
     return CLAIMED
 
 
-def _proof(proofs: list[dict], finding: str, fix_id: str) -> str:
+# The pipeline asks for a red proof only for a P1 fix (audit-fix Step 5.6).
+_PROOF_OPTIONAL = ("P2", "P3")
+
+
+def _proof(proofs: list[dict], finding: str, fix_id: str, priority: str | None) -> str:
+    """EVIDENCED when every proof is RED; NOT_REQUIRED for a P2 or P3 with no proof entry.
+
+    A proof that exists and is not RED stays ABSENT whatever the priority, and so does a
+    P1, or a finding with no known priority, that has none.
+    """
     verdicts = [str(p.get("verdict", "")).upper() for p in proofs
                 if _same(str(p.get("finding", "")), fix_id) or p.get("finding") == finding]
-    return EVIDENCED if verdicts and all(v == "RED" for v in verdicts) else ABSENT
+    if not verdicts:
+        return NOT_REQUIRED if priority in _PROOF_OPTIONAL else ABSENT
+    return EVIDENCED if all(v == "RED" for v in verdicts) else ABSENT
 
 
 def _files(value) -> list[str]:
@@ -140,18 +151,19 @@ def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]]
             skipped.append(f"{finding} {reason}")
             continue
         found = l2.get(finding, {})
+        severity = _text(found.get("priority"))
         out.append((BugRow(
             project=merge.repo.split("/", 1)[1], repo=merge.repo, finding_id=finding,
             fix_commit=merge.sha, date=merge.date, files=_files(entry.get("files")),
             summary=(_text(found.get("claim")) or _text(entry.get("summary"))
                      or "(no description recorded)"),
-            severity=_text(found.get("priority")), category=_text(found.get("category")),
+            severity=severity, category=_text(found.get("category")),
             auditor=_text(found.get("auditor")), run_id=run_id,
             evidence={
                 "confirmed_l25": EVIDENCED if l25.get(finding) == "CONFIRMED" else ABSENT,
                 "fixed": EVIDENCED,
                 "l6_approved": _architect(card, fix_id),
-                "red_proof": _proof(proofs, finding, fix_id),
+                "red_proof": _proof(proofs, finding, fix_id, severity),
             },
             sources=[f"run:{merge.repo}:{run_id}", f"pr:{merge.repo}#{merge.pr}",
                      f"git:{merge.sha}"],

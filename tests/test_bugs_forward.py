@@ -2,7 +2,7 @@
 import json
 
 from cca_checks.bugs.forward import Merge, rows_for
-from cca_checks.bugs.model import ABSENT, CLAIMED, EVIDENCED
+from cca_checks.bugs.model import ABSENT, CLAIMED, EVIDENCED, NOT_REQUIRED
 
 MERGE = Merge(repo="acme/widgets", sha="c" * 40, date="2026-10-14", pr=12)
 
@@ -37,6 +37,8 @@ def test_a_merged_red_proved_fix_is_proved(tmp_path):
     `assert bug.fix_commit == MERGE.sha`.
     Red 2026-10-13: mutation making red_proof always ABSENT; failed at
     `assert bug.tier == "proved"`.
+    Red 2026-10-20: `_proof` returning ABSENT whenever there is no proof (pre-change);
+    failed at `assert doc.evidence["red_proof"] == NOT_REQUIRED and ...`.
     """
     rec = make_record(tmp_path, proofs=[{"finding": "FIX-001", "nodeid": "t::a",
                                          "verdict": "RED"}])
@@ -45,7 +47,9 @@ def test_a_merged_red_proved_fix_is_proved(tmp_path):
     assert bug.bug_id == f"widgets:{'c' * 12}:BUG-001"
     assert bug.tier == "proved"
     assert bug.summary == "dry run creates the file" and bug.severity == "P1"
-    assert doc.evidence["red_proof"] == ABSENT and doc.evidence["l6_approved"] == CLAIMED
+    # DOC-001 is a P2 with no proof entry, so its red proof is not required; the
+    # architect never approved it, so it stays historical.
+    assert doc.evidence["red_proof"] == NOT_REQUIRED and doc.evidence["l6_approved"] == CLAIMED
     assert doc.tier == "historical"
 
 
@@ -182,3 +186,77 @@ def test_untrusted_field_types_never_reach_the_row(tmp_path):
     assert bug.severity is None and bug.category is None and bug.auditor is None
     assert bug.files == ["abc"]
     assert doc.summary == "from L4" and doc.severity == "P2" and doc.files == ["b.py"]
+
+
+def _approve_both(rec, priority=None):
+    """Approve FIX-001 and FIX-002; optionally set DOC-001's L2 priority (None drops it)."""
+    lines = [{"run_id": "r1", "fix_id": f, "architect_verdict": "APPROVED"}
+             for f in ("FIX-001", "FIX-002")]
+    (rec / "scorecard.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+    if priority != "P2":
+        l2 = json.loads((rec / "L2.json").read_text())
+        if priority is None:
+            del l2[1]["priority"]
+        else:
+            l2[1]["priority"] = priority
+        (rec / "L2.json").write_text(json.dumps(l2))
+    return rec
+
+
+def test_a_p2_fix_with_no_proof_entry_is_proved(tmp_path):
+    """Invariant: a confirmed, merged, approved P2 with no proof entry is proved, its red
+    proof not_required, because the pipeline asks for red proofs only for P1 fixes.
+
+    Red 2026-10-20: unchanged code (red_proof ABSENT whenever no RED proof); failed at
+    `assert doc.evidence["red_proof"] == NOT_REQUIRED`.
+    """
+    _, doc = rows_for(_approve_both(make_record(tmp_path), "P2"), MERGE)
+    assert doc.evidence["red_proof"] == NOT_REQUIRED
+    assert doc.tier == "proved"
+
+
+def test_a_p3_fix_with_no_proof_entry_is_proved(tmp_path):
+    """Red 2026-10-20: mutation `_PROOF_OPTIONAL = ("P2",)`; failed at
+    `assert doc.evidence["red_proof"] == NOT_REQUIRED`.
+    """
+    _, doc = rows_for(_approve_both(make_record(tmp_path), "P3"), MERGE)
+    assert doc.evidence["red_proof"] == NOT_REQUIRED
+    assert doc.tier == "proved"
+
+
+def test_a_p1_fix_with_no_proof_is_historical(tmp_path):
+    """Invariant: a P1 still needs a RED proof to be proved.
+
+    Red 2026-10-20: mutation `_PROOF_OPTIONAL = ("P1", "P2", "P3")`; failed at
+    `assert bug.evidence["red_proof"] == ABSENT`.
+    """
+    bug, _ = rows_for(_approve_both(make_record(tmp_path), "P2"), MERGE)
+    assert bug.severity == "P1"
+    assert bug.evidence["red_proof"] == ABSENT
+    assert bug.tier == "historical"
+
+
+def test_a_p2_whose_proof_is_not_red_is_historical(tmp_path):
+    """Invariant: a failed proof is never excused, whatever the priority.
+
+    Red 2026-10-20: mutation `if not verdicts or priority in _PROOF_OPTIONAL:` in `_proof`
+    (priority checked before the verdicts); failed at
+    `assert doc.evidence["red_proof"] == ABSENT`.
+    """
+    rec = make_record(tmp_path, proofs=[{"finding": "FIX-002", "nodeid": "t",
+                                         "verdict": "TAUTOLOGICAL"}])
+    _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"
+
+
+def test_a_finding_with_no_priority_and_no_proof_is_historical(tmp_path):
+    """Invariant: fail closed when the priority is unknown.
+
+    Red 2026-10-20: mutation `priority not in ("P1",)` in place of
+    `priority in _PROOF_OPTIONAL`; failed at `assert doc.evidence["red_proof"] == ABSENT`.
+    """
+    _, doc = rows_for(_approve_both(make_record(tmp_path), None), MERGE)
+    assert doc.severity is None
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"
