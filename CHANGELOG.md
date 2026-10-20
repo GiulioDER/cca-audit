@@ -36,7 +36,9 @@ FIXES block unchecked. A project memory tool, when present, is also queried once
 decisions, which auditors see as context without a join, inside a backtick fence longer than the
 longest backtick run in the quoted memos, and at most 1,500 characters per memo. A hunt runs
 none of these queries, because it targets someone else's repository. Without these servers the
-brief is built from the ledger alone, as before. The effect is not yet measured.
+brief is built from the ledger alone, as before. `--similar` accepts a saved response in either
+form an MCP client may keep: the SearchResult itself, or the structured result that carries it as
+JSON text under `result`. The effect is not yet measured.
 
 ## [0.12.1] - 2026-10-20
 

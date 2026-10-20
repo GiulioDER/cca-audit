@@ -143,6 +143,7 @@ def _hits(responses: list) -> list[dict]:
     # trusted, non abstained answer; its text never reaches the brief.
     hits: list[dict] = []
     for response in responses:
+        response = _unwrap(response)
         if (not isinstance(response, dict) or response.get("abstained") is not False
                 or response.get("trust_state") != "trusted"
                 or not isinstance(response.get("hits"), list)):
@@ -152,6 +153,33 @@ def _hits(responses: list) -> list[dict]:
     # Best score first across responses; the sort is stable, so ties keep hit order.
     hits.sort(key=lambda h: -score if (score := _score(h)) is not None else float("inf"))
     return hits
+
+
+def _unwrapped(response: object) -> tuple[object, str | None]:
+    # The one parsing path. An MCP structured result carries the SearchResult as JSON text under
+    # "result" (seen from the recall-cca server, 2026-10-20). Returns (value, reason): the inner
+    # object, or the input unchanged with a reason when it is a wrapper that cannot be unwrapped.
+    if isinstance(response, dict) and set(response) == {"result"}:
+        text = response["result"]
+        if not isinstance(text, str):
+            return response, None
+        try:
+            inner = json.loads(text.removeprefix("\N{ZERO WIDTH NO-BREAK SPACE}"))
+        except (ValueError, RecursionError) as exc:
+            return response, f"result is not valid JSON ({type(exc).__name__})"
+        if not isinstance(inner, dict):
+            return response, "result is not a JSON object"
+        return inner, None
+    return response, None
+
+
+def _unwrap(response: object) -> object:
+    return _unwrapped(response)[0]
+
+
+def unwrap_error(response: object) -> str | None:
+    """Why `response` is a {"result": str} wrapper that cannot be unwrapped, else None."""
+    return _unwrapped(response)[1]
 
 
 def _score(hit: dict) -> float | None:

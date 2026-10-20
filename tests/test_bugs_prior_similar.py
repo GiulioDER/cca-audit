@@ -1,10 +1,16 @@
 """Tests for `prior.similar` and `bugs prior --similar`.
 
 The fixture `fixtures/recall_search_cca.json` is hand written in the shape of RE-call's
-`SearchResult` (recall_mcp/models.py) until Task 5 captures a real one.
+`SearchResult` (recall_mcp/models.py); `fixtures/recall_search_cca_wrapped.json` is a real
+response from the recall-cca server (2026-10-20), redacted, in the wrapped form MCP returns.
 
 Red proof (user rule, 2026-09-08). Each mutation was applied, the named test run, and the
 code restored; every failure is an AssertionError in the test body.
+
+* Wrapped responses (2026-10-20): `test_real_wrapped_response_is_unwrapped_and_joined` failed
+  against the pre-fix code (no `_unwrap`), `assert [] == ['RE-call:e3e...d314253:P1-4']`.
+  `test_malformed_wrapper_contributes_nothing`: mutation `except (ValueError, RecursionError)`
+  to `except ValueError` in `prior._unwrap` raises RecursionError in the test body.
 
 * Skip the owner check in `prior.similar` (`not (cross_repo and ... in owners)` becomes
   `not cross_repo`): `test_cross_repo_needs_flag_and_owner`, failing
@@ -65,6 +71,13 @@ every row, and again with the mutation `_superseded` ignoring `before`:
 `assert [] == ['RE-call:0357b6dbaac2:P1-1']`. ENV-001: with `_owners` in `__main__` ignoring
 `owners_from_env()`, `test_cli_cross_repo_uses_target_owner_or_env` fails
 `assert ['o:other:1:A'] == ['p:q:1:B']`, so the shared helper stays guarded.
+
+BUG-001 and DAT-002 of the wrapper (deferred run, 2026-10-20), baseline = the code before
+`prior.unwrap_error` and the BOM strip:
+`tests/test_bugs_prior_similar.py::test_unparsable_wrapper_is_named_in_similar_error`, failing
+at `data["similar_error"]` with KeyError (the key was absent, the wrapper was dropped silently).
+`tests/test_bugs_prior_similar.py::test_wrapper_with_a_bom_in_result_is_unwrapped`, failing
+`assert [] == ['RE-call:...:P1-1']` (json.loads rejected the BOM, the response was dropped).
 """
 from __future__ import annotations
 
@@ -344,3 +357,54 @@ def test_deeply_nested_response_is_skipped_and_named(tmp_path, monkeypatch, caps
     rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(deep), "--json"])
     assert rc == 0
     assert "deep.json" in json.loads(capsys.readouterr().out)["similar_error"]
+
+
+WRAPPED = Path(__file__).parent / "fixtures" / "recall_search_cca_wrapped.json"
+
+
+def test_real_wrapped_response_is_unwrapped_and_joined(tmp_path, monkeypatch, capsys):
+    # A real `recall_search` structured result, captured 2026-10-20 from the recall-cca server
+    # and redacted (query and memo text): the SearchResult arrives as JSON text under "result".
+    ids = ["RE-call:e3ee162054ac:DAT-002", "RE-call:05d36d314253:P1-4"]
+    _ledger(tmp_path, monkeypatch, [_row(i, repo="GiulioDER/RE-call", files=["z.py"]) for i in ids])
+    main(["prior", "--repo-name", "GiulioDER/RE-call", "--files", "a.py",
+          "--similar", str(WRAPPED), "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert [r["bug_id"] for r in data["similar"]] == ids
+    assert "similar_error" not in data
+
+
+def test_malformed_wrapper_contributes_nothing(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["z.py"])])
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"result": "[" * 100_000}), encoding="utf-8")
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({"result": "not json", "extra": 1}), encoding="utf-8")
+    assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
+                 "--similar", str(bad), str(other), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["similar"] == []
+
+
+def test_unparsable_wrapper_is_named_in_similar_error(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["z.py"])])
+    text = tmp_path / "text.json"
+    text.write_text(json.dumps({"result": "not json"}), encoding="utf-8")
+    listed = tmp_path / "listed.json"
+    listed.write_text(json.dumps({"result": "[1, 2]"}), encoding="utf-8")
+    assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
+                 "--similar", str(text), str(listed), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "text.json" in data["similar_error"] and "listed.json" in data["similar_error"]
+    assert data["similar"] == []
+
+
+def test_wrapper_with_a_bom_in_result_is_unwrapped(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["z.py"])])
+    wrapped = tmp_path / "wrapped.json"
+    wrapped.write_text(json.dumps({"result": "\ufeff" + json.dumps(_resp(_hit(FIRST)))}),
+                       encoding="utf-8")
+    assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
+                 "--similar", str(wrapped), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [r["bug_id"] for r in data["similar"]] == [FIRST]
+    assert "similar_error" not in data
