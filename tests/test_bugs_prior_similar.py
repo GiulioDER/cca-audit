@@ -71,6 +71,13 @@ every row, and again with the mutation `_superseded` ignoring `before`:
 `assert [] == ['RE-call:0357b6dbaac2:P1-1']`. ENV-001: with `_owners` in `__main__` ignoring
 `owners_from_env()`, `test_cli_cross_repo_uses_target_owner_or_env` fails
 `assert ['o:other:1:A'] == ['p:q:1:B']`, so the shared helper stays guarded.
+
+BUG-001 and DAT-002 of the wrapper (deferred run, 2026-10-20), baseline = the code before
+`prior.unwrap_error` and the BOM strip:
+`tests/test_bugs_prior_similar.py::test_unparsable_wrapper_is_named_in_similar_error`, failing
+at `data["similar_error"]` with KeyError (the key was absent, the wrapper was dropped silently).
+`tests/test_bugs_prior_similar.py::test_wrapper_with_a_bom_in_result_is_unwrapped`, failing
+`assert [] == ['RE-call:...:P1-1']` (json.loads rejected the BOM, the response was dropped).
 """
 from __future__ import annotations
 
@@ -376,3 +383,28 @@ def test_malformed_wrapper_contributes_nothing(tmp_path, monkeypatch, capsys):
     assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
                  "--similar", str(bad), str(other), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["similar"] == []
+
+
+def test_unparsable_wrapper_is_named_in_similar_error(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["z.py"])])
+    text = tmp_path / "text.json"
+    text.write_text(json.dumps({"result": "not json"}), encoding="utf-8")
+    listed = tmp_path / "listed.json"
+    listed.write_text(json.dumps({"result": "[1, 2]"}), encoding="utf-8")
+    assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
+                 "--similar", str(text), str(listed), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "text.json" in data["similar_error"] and "listed.json" in data["similar_error"]
+    assert data["similar"] == []
+
+
+def test_wrapper_with_a_bom_in_result_is_unwrapped(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["z.py"])])
+    wrapped = tmp_path / "wrapped.json"
+    wrapped.write_text(json.dumps({"result": "\ufeff" + json.dumps(_resp(_hit(FIRST)))}),
+                       encoding="utf-8")
+    assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
+                 "--similar", str(wrapped), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [r["bug_id"] for r in data["similar"]] == [FIRST]
+    assert "similar_error" not in data

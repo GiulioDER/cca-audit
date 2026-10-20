@@ -50,6 +50,8 @@ def _date_arg(value: str) -> str:
 
 def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
     # Saved RE-call answers: an unreadable or malformed file is skipped and named, never fatal.
+    from . import prior
+
     responses: list[dict] = []
     errors: list[str] = []
     for path in paths:
@@ -60,6 +62,9 @@ def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
             continue
         if not isinstance(value, dict):
             errors.append(f"{path}: {type(value).__name__} is not an object")
+            continue
+        if reason := prior.unwrap_error(value):
+            errors.append(f"{path}: {reason}")
             continue
         responses.append(value)
     return responses, "; ".join(errors) or None
