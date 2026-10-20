@@ -10,23 +10,29 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 **Every Layer 1 auditor now sees the bugs already fixed in the files it audits.** Step 1 of the
 pipeline runs `python -m cca_checks bugs prior --files <FILES>` once per run and pastes its whole
-output into each auditor prompt as a PRIOR FIXES block, in DIFF and HUNT modes. The deferred
-pass dispatches no L1 auditors and skips it. Every line of the block is a row of the local bug ledger: it lists fixes recorded for the same
-repository as the target, and RE-call, when used, only chooses which further rows its similar
-bugs part shows. The prompt rules tell the auditor to treat it as context: a listed bug is
-reported only if the code under audit reintroduces it, and the block is a cue to look for the same
-class of bug elsewhere. A host without a ledger, such as Codex working on a remote copy, gets the
-empty block and the audit proceeds as before. The Codex skill builds its prompts the same way.
-The effect on what auditors find is not yet measured.
+output into each Layer 1 auditor prompt as a PRIOR FIXES block, in DIFF and HUNT modes; the
+verifier, differential and architect prompts do not get it, and the deferred pass dispatches no
+Layer 1 auditors and skips it. Every line of the block is a row of the local bug ledger: it lists
+fixes recorded for the same repository as the target, and RE-call, when used, only chooses which
+further rows its similar bugs part shows. In HUNT mode the run passes `--root` with the git top
+level of the hunted paths, so the rows come from the hunted repository and never from the checkout
+the run started in. The prompt rules tell the auditor to treat the block as context: a listed bug
+is reported only if the code under audit reintroduces it, and the block is a cue to look for the
+same class of bug elsewhere. A host without a ledger, such as Codex working on a remote copy, gets
+the empty block, pasted as is, and the audit proceeds as before. The Codex skill builds the block
+the same way, once per run before it dispatches any role. The effect on what auditors find is not
+yet measured.
 
-**The brief can also draw on RE-call, optionally.** When a `recall-cca` server is
-available, Step 1 runs up to three one sentence queries, saves the raw responses
-under `.claude/audits/out/` and passes them to `bugs prior --similar`, which discards any response that is not trusted or that abstained (with `--cross-repo` in DIFF
-mode only, never in a hunt). `cca_checks` joins each hit to a ledger row in code and drops any hit
-that does not join, so no similar bug text reaches the PRIOR FIXES block unchecked. In DIFF mode a project
-memory tool, when present, is also queried once for settled decisions, which auditors see as
-context, without a join. Without these servers the brief is built from the ledger alone, as before. The effect is
-not yet measured.
+**The brief can also draw on RE-call, optionally, in DIFF mode only.** When a `recall-cca` server
+is available, Step 1 runs up to three one sentence queries, saves the raw responses under
+`.claude/audits/out/` and passes them to `bugs prior --similar` with `--cross-repo`; `bugs prior`
+discards any response that is not trusted or that abstained. `cca_checks` joins each hit to a
+ledger row in code and drops any hit that does not join, so no similar bug text reaches the PRIOR
+FIXES block unchecked. A project memory tool, when present, is also queried once for settled
+decisions, which auditors see as context without a join, inside a fence no quoted memo can close
+and at most 1,500 characters per memo. A hunt runs none of these queries, because it targets
+someone else's repository. Without these servers the brief is built from the ledger alone, as
+before. The effect is not yet measured.
 
 ## [0.12.1] - 2026-10-20
 
