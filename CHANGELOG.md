@@ -10,8 +10,8 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 **Every Layer 1 auditor now sees the bugs already fixed in the files it audits.** Step 1 of the
 pipeline runs `python -m cca_checks bugs prior --files <FILES>` once per run and pastes its whole
-output into each auditor prompt as a PRIOR FIXES block, in DIFF and HUNT modes and in the deferred
-pass. The block comes from the local bug ledger only and lists fixes recorded for the same
+output into each auditor prompt as a PRIOR FIXES block, in DIFF and HUNT modes. The deferred
+pass dispatches no L1 auditors and skips it. The block comes from the local bug ledger only and lists fixes recorded for the same
 repository as the target. The prompt rules tell the auditor to treat it as context: a listed bug is
 reported only if the code under audit reintroduces it, and the block is a cue to look for the same
 class of bug elsewhere. A host without a ledger, such as Codex working on a remote copy, gets the

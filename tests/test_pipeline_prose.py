@@ -660,3 +660,8 @@ def test_prior_fixes_rule_in_both_modes():
 
 def test_codex_builds_prompts_with_prior_bugs():
     assert "bugs prior --files" in CODEX
+
+
+def test_deferred_pass_does_not_run_bugs_prior():
+    step1 = PIPELINE.split("## Step 1", 1)[1].split("### Generic auditors", 1)[0]
+    assert "deferred findings" not in step1

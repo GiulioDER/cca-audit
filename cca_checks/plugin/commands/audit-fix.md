@@ -362,8 +362,8 @@ Dedup key = `(file, line, category)`. This makes consolidation deterministic ins
 Launch ALL applicable auditors (per the tier table) in a SINGLE message — parallel Agent calls, never
 sequential. Each agent gets the same FILES, DIFF_CMD, LANGUAGES, and the Findings Schema above.
 
-Before launching, run once per run (DIFF and HUNT modes alike; in the deferred pass, use the files
-named by the deferred findings):
+Before launching, run once per run (DIFF and HUNT modes alike; the deferred pass skips this because
+it dispatches no L1 auditors):
 
 ```bash
 python -m cca_checks bugs prior --files <FILES>
