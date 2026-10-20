@@ -143,6 +143,7 @@ def _hits(responses: list) -> list[dict]:
     # trusted, non abstained answer; its text never reaches the brief.
     hits: list[dict] = []
     for response in responses:
+        response = _unwrap(response)
         if (not isinstance(response, dict) or response.get("abstained") is not False
                 or response.get("trust_state") != "trusted"
                 or not isinstance(response.get("hits"), list)):
@@ -152,6 +153,20 @@ def _hits(responses: list) -> list[dict]:
     # Best score first across responses; the sort is stable, so ties keep hit order.
     hits.sort(key=lambda h: -score if (score := _score(h)) is not None else float("inf"))
     return hits
+
+
+def _unwrap(response: object) -> object:
+    # An MCP structured result carries the SearchResult as JSON text under "result" (seen from
+    # the recall-cca server, 2026-10-20). Anything that does not parse to an object stays as it
+    # is, and the checks in _hits then drop it.
+    if isinstance(response, dict) and set(response) == {"result"} \
+            and isinstance(response["result"], str):
+        try:
+            inner = json.loads(response["result"])
+        except (ValueError, RecursionError):
+            return response
+        return inner if isinstance(inner, dict) else response
+    return response
 
 
 def _score(hit: dict) -> float | None:

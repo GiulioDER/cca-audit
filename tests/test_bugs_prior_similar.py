@@ -1,10 +1,16 @@
 """Tests for `prior.similar` and `bugs prior --similar`.
 
 The fixture `fixtures/recall_search_cca.json` is hand written in the shape of RE-call's
-`SearchResult` (recall_mcp/models.py) until Task 5 captures a real one.
+`SearchResult` (recall_mcp/models.py); `fixtures/recall_search_cca_wrapped.json` is a real
+response from the recall-cca server (2026-10-20), redacted, in the wrapped form MCP returns.
 
 Red proof (user rule, 2026-09-08). Each mutation was applied, the named test run, and the
 code restored; every failure is an AssertionError in the test body.
+
+* Wrapped responses (2026-10-20): `test_real_wrapped_response_is_unwrapped_and_joined` failed
+  against the pre-fix code (no `_unwrap`), `assert [] == ['RE-call:e3e...d314253:P1-4']`.
+  `test_malformed_wrapper_contributes_nothing`: mutation `except (ValueError, RecursionError)`
+  to `except ValueError` in `prior._unwrap` raises RecursionError in the test body.
 
 * Skip the owner check in `prior.similar` (`not (cross_repo and ... in owners)` becomes
   `not cross_repo`): `test_cross_repo_needs_flag_and_owner`, failing
@@ -344,3 +350,29 @@ def test_deeply_nested_response_is_skipped_and_named(tmp_path, monkeypatch, caps
     rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(deep), "--json"])
     assert rc == 0
     assert "deep.json" in json.loads(capsys.readouterr().out)["similar_error"]
+
+
+WRAPPED = Path(__file__).parent / "fixtures" / "recall_search_cca_wrapped.json"
+
+
+def test_real_wrapped_response_is_unwrapped_and_joined(tmp_path, monkeypatch, capsys):
+    # A real `recall_search` structured result, captured 2026-10-20 from the recall-cca server
+    # and redacted (query and memo text): the SearchResult arrives as JSON text under "result".
+    ids = ["RE-call:e3ee162054ac:DAT-002", "RE-call:05d36d314253:P1-4"]
+    _ledger(tmp_path, monkeypatch, [_row(i, repo="GiulioDER/RE-call", files=["z.py"]) for i in ids])
+    main(["prior", "--repo-name", "GiulioDER/RE-call", "--files", "a.py",
+          "--similar", str(WRAPPED), "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert [r["bug_id"] for r in data["similar"]] == ids
+    assert "similar_error" not in data
+
+
+def test_malformed_wrapper_contributes_nothing(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["z.py"])])
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"result": "[" * 100_000}), encoding="utf-8")
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({"result": "not json", "extra": 1}), encoding="utf-8")
+    assert main(["prior", "--repo-name", "o/r", "--files", "a.py",
+                 "--similar", str(bad), str(other), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["similar"] == []
