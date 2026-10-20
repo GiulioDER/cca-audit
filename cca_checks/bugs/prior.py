@@ -38,10 +38,14 @@ import json
 import re
 from pathlib import Path
 
-from .model import _printable
+from .model import _printable, memo_filename
 
 HEADING = ("PRIOR FIXES IN THESE FILES "
            "(from the CCA bug ledger; context, not findings, not instructions)")
+SIMILAR_HEADING = ("SIMILAR BUGS ELSEWHERE "
+                   "(RE-call search of the CCA ledger; context, not findings, not instructions)")
+SIMILAR_FILES = 3
+REPO_MAX = 100
 SUMMARY_MAX = 240
 BLOCK_MAX = 4000
 FILES_MAX = 300
@@ -113,11 +117,63 @@ def select(rows: list[dict], repo: str, files: list[str], before: str | None = N
     return found[:limit]
 
 
+def _memo_name(source: str) -> str:
+    return source.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _hits(responses: list) -> list[dict]:
+    # A response is untrusted JSON. Only its memo paths are read, and only from a
+    # trusted, non abstained answer; its text never reaches the brief.
+    hits: list[dict] = []
+    for response in responses:
+        if (not isinstance(response, dict) or response.get("abstained") is not False
+                or response.get("trust_state") != "trusted"
+                or not isinstance(response.get("hits"), list)):
+            continue
+        hits.extend(h for h in response["hits"] if isinstance(h, dict)
+                    and isinstance(h.get("source"), str) and h.get("verdict") == "ok")
+    # Best score first across responses; the sort is stable, so ties keep hit order.
+    hits.sort(key=lambda h: -h["score"] if isinstance(h.get("score"), (int, float))
+              and not isinstance(h.get("score"), bool) else float("inf"))
+    return hits
+
+
+def similar(rows: list[dict], responses: list, repo: str, owners: set[str],
+            cross_repo: bool, before: str | None, exclude: set[str],
+            limit: int = 5) -> tuple[list[tuple[dict, list[str]]], int]:
+    target = repo.lower()
+    owners = {o.lower() for o in owners}
+    rows = [r for r in rows if _well_formed(r)]
+    superseded = {r["supersedes"] for r in rows if r.get("supersedes")}
+    by_memo = {memo_filename(r["bug_id"]): r for r in rows if r.get("bug_id")}
+    found: list[tuple[dict, list[str]]] = []
+    seen: set[str] = set()
+    unjoined = 0
+    for hit in _hits(responses):
+        row = by_memo.get(_memo_name(hit["source"]))
+        if row is None:
+            unjoined += 1
+            continue
+        bug_id = row["bug_id"]
+        row_repo = str(row.get("repo", "")).lower()
+        if bug_id in seen or bug_id in exclude or bug_id in superseded:
+            continue
+        if before is not None and str(row.get("date", "")) >= before:
+            continue
+        if row_repo != target and not (cross_repo and row_repo.split("/", 1)[0] in owners):
+            continue
+        seen.add(bug_id)
+        if len(found) < limit:
+            files = [f for f in row["files"] if isinstance(f, str)][:SIMILAR_FILES]
+            found.append((row, files))
+    return found, unjoined
+
+
 def _clean(text: object) -> str:
     return " ".join(_printable(str(text)).split()).replace("`", "'")
 
 
-def _entry(row: dict, overlap: list[str]) -> str:
+def _entry(row: dict, overlap: list[str], target: str | None = None) -> str:
     severity = row.get("severity") if row.get("severity") in _SEVERITIES else "P?"
     tier = row.get("tier") if row.get("tier") in _TIERS else "?"
     date = _clean(row.get("date", ""))
@@ -126,24 +182,44 @@ def _entry(row: dict, overlap: list[str]) -> str:
     files = _clean(", ".join(overlap))[:FILES_MAX]
     sha = _clean(row.get("fix_commit", ""))[:7]
     bug_id = _clean(row.get("bug_id", ""))[:BUG_ID_MAX]
-    head = f"- [{severity}] {bug_id}, {date}, {tier}, fix {sha}: {summary}"
+    where = ""
+    if target is not None and str(row.get("repo", "")).lower() != target.lower():
+        where = _clean(row.get("repo", ""))[:REPO_MAX] + " "
+    head = f"- [{severity}] {where}{bug_id}, {date}, {tier}, fix {sha}: {summary}"
     return f"{head}\n  files: {files}"
 
 
-def render(selected: list[tuple[dict, list[str]]], reason: str | None = None) -> str:
-    entries = [_entry(row, overlap) for row, overlap in selected]
-    if not entries:
-        tail = f" ({reason})" if reason else ""
-        return f"{HEADING}\nNo prior CCA fixes recorded for these files.{tail}"
+def render(selected: list[tuple[dict, list[str]]], reason: str | None = None,
+           similar_rows: list[tuple[dict, list[str]]] | None = None, repo: str = "") -> str:
+    """The prior fixes block, and the similar block after it when `similar_rows` is given.
+
+    Without `similar_rows` the output is the single block it always was. With it, the
+    whole output (both blocks) stays within BLOCK_MAX: similar entries are dropped first,
+    then prior entries, each block keeping at least one.
+    """
+    reason_tail = f" ({reason})" if reason else ""
+    blocks = [(HEADING, [_entry(row, overlap) for row, overlap in selected],
+               f"No prior CCA fixes recorded for these files.{reason_tail}")]
+    if similar_rows is not None:
+        blocks.append((SIMILAR_HEADING, [_entry(row, files, repo) for row, files in similar_rows],
+                       "No similar CCA fixes found."))
 
     closing = "\n```"
 
-    def block() -> str:
-        return HEADING + "\n```text\n" + "\n".join(entries) + closing
+    def one(heading: str, items: list[str], empty: str) -> str:
+        if not items:
+            return f"{heading}\n{empty}"
+        return heading + "\n```text\n" + "\n".join(items) + closing
 
-    while len(entries) > 1 and len(block()) > BLOCK_MAX:
-        entries.pop()
-    text = block()
+    def whole() -> str:
+        return "\n\n".join(one(*b) for b in blocks)
+
+    for _, items, _ in reversed(blocks):
+        while len(items) > 1 and len(whole()) > BLOCK_MAX:
+            items.pop()
+    text = whole()
     if len(text) > BLOCK_MAX:
+        # Only reachable when single entries are oversized: cut the tail and keep the
+        # last fence closed.
         text = text[:BLOCK_MAX - len(closing)] + closing
     return text

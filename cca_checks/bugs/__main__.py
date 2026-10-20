@@ -1,7 +1,7 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
 python -m cca_checks.bugs prior --files F [F ...] [--repo OWNER/NAME] [--root PATH]
-    [--before YYYY-MM-DD] [--limit N] [--json]
+    [--before YYYY-MM-DD] [--limit N] [--similar PATH [PATH ...]] [--cross-repo] [--json]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -43,6 +44,31 @@ def _date_arg(value: str) -> str:
     return value
 
 
+def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
+    # Saved RE-call answers: an unreadable or malformed file is skipped and named, never fatal.
+    responses: list[dict] = []
+    errors: list[str] = []
+    for path in paths:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            errors.append(f"{path}: {type(exc).__name__}")
+            continue
+        if not isinstance(value, dict):
+            errors.append(f"{path}: {type(value).__name__} is not an object")
+            continue
+        responses.append(value)
+    return responses, "; ".join(errors) or None
+
+
+def _owners(repo: str | None) -> set[str]:
+    named = {o.strip().lower() for o in os.environ.get("CCA_BUGS_OWNERS", "").split(",")}
+    named.discard("")
+    if named:
+        return named
+    return {repo.split("/", 1)[0].lower()} if repo else set()
+
+
 def _prior(a: argparse.Namespace) -> int:
     from . import prior
     from .gitread import remote_repo
@@ -67,12 +93,31 @@ def _prior(a: argparse.Namespace) -> int:
     selected = []
     if repo is not None and rows:
         selected = prior.select(rows, repo, a.files, before=a.before, limit=a.limit)
+    near: list[tuple[dict, list[str]]] | None = None
+    unjoined = 0
+    similar_error = None
+    if a.similar is not None:
+        responses, similar_error = _responses(a.similar)
+        near = []
+        if repo is not None and rows:
+            exclude = {str(row.get("bug_id")) for row, _ in selected}
+            near, unjoined = prior.similar(rows, responses, repo, _owners(repo), a.cross_repo,
+                                           a.before, exclude)
     if a.json:
         keys = ("bug_id", "finding_id", "severity", "date", "tier", "fix_commit", "summary")
         out = [{**{k: row.get(k) for k in keys}, "files": overlap} for row, overlap in selected]
-        print(json.dumps({"repo": repo, "reason": reason, "rows": out}, indent=2))
-    else:
+        data: dict = {"repo": repo, "reason": reason, "rows": out}
+        if near is not None:
+            data["similar"] = [{**{k: row.get(k) for k in keys}, "repo": row.get("repo"),
+                                "files": files} for row, files in near]
+            data["unjoined"] = unjoined
+            if similar_error:
+                data["similar_error"] = similar_error
+        print(json.dumps(data, indent=2))
+    elif near is None:
         print(prior.render(selected, reason))
+    else:
+        print(prior.render(selected, reason, similar_rows=near, repo=repo or ""))
     return 0
 
 
@@ -120,6 +165,10 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--root", type=Path, default=Path("."))
     q.add_argument("--before", type=_date_arg, metavar="YYYY-MM-DD")
     q.add_argument("--limit", type=int, default=8)
+    q.add_argument("--similar", nargs="+", action="extend", type=Path, metavar="PATH",
+                   help="saved recall_search responses to join to the ledger")
+    q.add_argument("--cross-repo", action="store_true",
+                   help="let --similar show rows of other repositories of the allowed owners")
     q.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
