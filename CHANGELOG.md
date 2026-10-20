@@ -18,9 +18,11 @@ further rows its similar bugs part shows. In HUNT mode the run passes `--root` w
 level of the hunted paths, so the rows come from the hunted repository and never from the checkout
 the run started in; when that top level cannot be resolved, or is the checkout the run started
 in, the hunt pastes the empty block instead of running `bugs prior`. The prompt rules tell
-the auditor to treat the block as context: a listed bug is reported only if the code under
-audit reintroduces it, and the block is a cue to look for the
-same class of bug elsewhere. A host without a ledger, such as Codex working on a remote copy, gets
+the auditor to treat the block as context and as a cue to look for the same class of bug in the
+code under audit; it never narrows what the auditor reports, and only a listed bug the code has
+not reintroduced is left out. An earlier wording ("never report a listed bug unless...") was
+measured in a replay to cost as many confirmed findings as the whole block, within run to run
+noise, and was softened before release. A host without a ledger, such as Codex working on a remote copy, gets
 the empty block, pasted as is, and the audit proceeds as before; so does a run where `bugs prior`
 exits non-zero, such as an older installed `cca_checks` without the verb. The ledger and a saved
 `--similar` response are read as UTF-8 with an optional BOM, so a BOM no longer drops the first row. The Codex skill builds the block
