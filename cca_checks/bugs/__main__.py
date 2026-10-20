@@ -53,7 +53,7 @@ def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
     errors: list[str] = []
     for path in paths:
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
+            value = json.loads(path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError, RecursionError) as exc:
             errors.append(f"{path}: {type(exc).__name__}")
             continue

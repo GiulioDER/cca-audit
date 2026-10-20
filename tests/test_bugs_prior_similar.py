@@ -54,9 +54,14 @@ Final review, run 2026-10-20, same procedure:
 
 * `render` joins the two blocks with one newline instead of a blank line:
   `test_empty_similar_block_shape`, failing its `assert text == (...)` equality.
+
+DAT-002, baseline = `_responses` reading with `utf-8` before the `utf-8-sig` fix:
+`test_response_with_a_bom_is_read`, failing `assert 'similar_error' not in {...}` (the file was
+skipped as bad JSON).
 """
 from __future__ import annotations
 
+import codecs
 import copy
 import json
 from pathlib import Path
@@ -278,6 +283,17 @@ def test_cli_bad_similar_file_is_recorded_not_fatal(tmp_path, monkeypatch, capsy
     assert "missing.json" in err and "FileNotFoundError" in err
     assert "bad.json" in err and "JSONDecodeError" in err
     assert "list.json" in err
+    assert [r["bug_id"] for r in data["similar"]] == [SECOND]
+
+
+def test_response_with_a_bom_is_read(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(SECOND, files=["z.py"])])
+    bommed = tmp_path / "bom.json"
+    bommed.write_bytes(codecs.BOM_UTF8 + FIXTURE.read_bytes())
+    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(bommed), "--json"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "similar_error" not in data
     assert [r["bug_id"] for r in data["similar"]] == [SECOND]
 
 

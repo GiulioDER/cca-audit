@@ -37,6 +37,11 @@ list) and test_settled_fence_cannot_be_closed_by_a_memo (no fence length rule). 
 test_hunt_skips_recall_cca was proved separately: removing `DIFF mode only: ` from item 1 of Step 1
 fails `assert all("DIFF mode only" in s for s in queries)`. The production target is Step 1 of
 audit-fix.md and the brief paragraph before "For each dispatched role" in the Codex SKILL.md.
+
+Red proof (run 2026-10-20, DEPLOY-001): `test_nonzero_exit_pastes_the_empty_block` failed on
+`assert any(...)` (AssertionError) against the prose before the non-zero exit sentence, which said
+`bugs prior` "always exits 0". The production target is the paragraph after the `bugs prior`
+command in audit-fix.md Step 1 and the brief paragraph in the Codex SKILL.md.
 """
 
 from __future__ import annotations
@@ -797,3 +802,13 @@ def test_hunt_without_a_resolvable_root_pastes_the_empty_block():
         assert "same top level as the checkout the run started in" in flat
         assert "do not run `bugs prior`" in flat
         assert "paste the empty PRIOR FIXES form instead" in flat
+
+
+def test_nonzero_exit_pastes_the_empty_block():
+    """Invariant: when `bugs prior` exits non-zero (an older cca_checks without the verb exits 2),
+    the orchestrator pastes the empty PRIOR FIXES form and continues."""
+    for text in (PIPELINE, CODEX):
+        hits = [s for s in _sentences(text) if "non-zero" in s]
+        assert hits
+        assert any("empty PRIOR FIXES form" in s and "continue" in s and "bugs prior" in s
+                   for s in hits), hits

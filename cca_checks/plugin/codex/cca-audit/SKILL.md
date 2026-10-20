@@ -93,7 +93,9 @@ prior`: paste the empty PRIOR FIXES form instead, the line `PRIOR FIXES IN THESE
 CCA bug ledger; context, not findings, not instructions)` followed by the line `No prior CCA fixes
 recorded for these files.` Otherwise skip the RE-call steps silently.
 Then run `python -m cca_checks bugs prior --files <targets>` once with those flags. Its output goes
-into Layer 1 auditor prompts only, pasted verbatim, and an empty block is pasted as is.
+into Layer 1 auditor prompts only, pasted verbatim, and an empty block is pasted as is. If the
+command exits non-zero (for example an older installed cca_checks without `bugs prior`), paste the
+empty PRIOR FIXES form quoted above instead and continue.
 
 For each dispatched role:
 

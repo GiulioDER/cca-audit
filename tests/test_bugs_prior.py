@@ -22,9 +22,12 @@ named test run, and the module restored; every failure is an AssertionError in t
   `fix e3ee162: a bug` is not in the block.
 * `load_rows` returns None instead of `[]` on OSError: `test_load_rows_missing_file`,
   `assert None == []`.
+* DAT-002, baseline = `load_rows` reading with `utf-8` before the `utf-8-sig` fix:
+  `test_load_rows_accepts_a_bom`, failing `assert 0 == 1` (the BOM row was dropped).
 """
 from __future__ import annotations
 
+import codecs
 import itertools
 import json
 
@@ -130,6 +133,13 @@ def test_rendered_line_shape():
 def test_load_rows_skips_malformed_lines(tmp_path):
     ledger = tmp_path / "bugs.jsonl"
     ledger.write_text(json.dumps(_row()) + "\n{not json\n[1]\n", encoding="utf-8")
+    assert len(load_rows(ledger)) == 1
+
+
+def test_load_rows_accepts_a_bom(tmp_path):
+    ledger = tmp_path / "bugs.jsonl"
+    row = json.dumps(_row(bug_id="first")).encode("utf-8")
+    ledger.write_bytes(codecs.BOM_UTF8 + row + b"\n")
     assert len(load_rows(ledger)) == 1
 
 

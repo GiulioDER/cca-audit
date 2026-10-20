@@ -21,7 +21,9 @@ in, the hunt pastes the empty block instead of running `bugs prior`. The prompt 
 the auditor to treat the block as context: a listed bug is reported only if the code under
 audit reintroduces it, and the block is a cue to look for the
 same class of bug elsewhere. A host without a ledger, such as Codex working on a remote copy, gets
-the empty block, pasted as is, and the audit proceeds as before. The Codex skill builds the block
+the empty block, pasted as is, and the audit proceeds as before; so does a run where `bugs prior`
+exits non-zero, such as an older installed `cca_checks` without the verb. The ledger and a saved
+`--similar` response are read as UTF-8 with an optional BOM, so a BOM no longer drops the first row. The Codex skill builds the block
 the same way, once per run before it dispatches any role. The effect on what auditors find is not
 yet measured.
 

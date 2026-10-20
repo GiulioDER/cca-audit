@@ -57,7 +57,7 @@ _TIERS = ("proved", "historical")
 
 def load_rows(ledger: Path) -> list[dict]:
     try:
-        text = ledger.read_text(encoding="utf-8", errors="replace")
+        text = ledger.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return []
     rows: list[dict] = []

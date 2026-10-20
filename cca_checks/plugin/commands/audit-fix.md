@@ -399,9 +399,11 @@ and `--cross-repo` in DIFF mode only):
 python -m cca_checks bugs prior --files <FILES> [--root <git top level of TARGETS>] [--similar .claude/audits/out/similar-1.json ...] [--cross-repo]
 ```
 
-It prints the PRIOR FIXES block from the local bug ledger, or its empty form, and always exits 0.
+It prints the PRIOR FIXES block from the local bug ledger, or its empty form, and exits 0 on its own.
 Paste its whole output verbatim as `{PRIOR_BUGS}` into every auditor prompt below, the empty form
-included. Do not edit, summarise or filter it.
+included. Do not edit, summarise or filter it. If the command exits non-zero (for example an older
+installed cca_checks without `bugs prior`, which exits 2), paste the empty PRIOR FIXES form quoted
+above instead and continue.
 
 ### Generic auditors
 
