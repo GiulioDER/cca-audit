@@ -260,3 +260,86 @@ def test_a_finding_with_no_priority_and_no_proof_is_historical(tmp_path):
     assert doc.severity is None
     assert doc.evidence["red_proof"] == ABSENT
     assert doc.tier == "historical"
+
+
+def test_a_p2_whose_failed_proof_is_keyed_lowercase_is_historical(tmp_path):
+    """Invariant: a non-RED proof keyed by the finding id in another case is still this
+    finding's proof, so it is never read as "no proof" and excused.
+
+    Red 2026-10-20: HEAD da7e1c0 `_proof` (exact match only); failed at
+    `assert doc.evidence["red_proof"] == ABSENT` (got not_required).
+    """
+    rec = make_record(tmp_path, proofs=[{"finding": "doc-001", "verdict": "TAUTOLOGICAL"}])
+    _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"
+
+
+def test_a_p2_whose_failed_proof_is_keyed_with_padding_is_historical(tmp_path):
+    """Red 2026-10-20: HEAD da7e1c0 `_proof` (exact match only); failed at
+    `assert doc.evidence["red_proof"] == ABSENT` (got not_required).
+    """
+    rec = make_record(tmp_path, proofs=[{"finding": " DOC-001", "verdict": "TAUTOLOGICAL"}])
+    _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"
+
+
+def test_an_unattributable_proof_excuses_no_p2(tmp_path):
+    """Invariant: a proof no L4 entry can claim might be this finding's failed proof, so
+    no P2 or P3 in that run is not_required.
+
+    Red 2026-10-20: HEAD da7e1c0 `_proof` (no orphan check); failed at
+    `assert doc.evidence["red_proof"] == ABSENT` (got not_required).
+    """
+    rec = make_record(tmp_path, proofs=[{"finding": "FIX-001", "verdict": "RED"},
+                                        {"finding": "XYZ-9", "verdict": "RED"}])
+    _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"
+
+
+def test_proofs_attributable_to_other_findings_still_excuse_a_p2(tmp_path):
+    """Control: proofs that all belong to other findings leave a P2 without one excused.
+
+    Red 2026-10-20: mutation `orphaned = bool(proofs)` in `rows_and_skips` (every proof
+    treated as unattributable); failed at `assert doc.evidence["red_proof"] == NOT_REQUIRED`.
+    """
+    rec = make_record(tmp_path, proofs=[{"finding": "fix-001", "verdict": "RED"},
+                                        {"finding": "BUG-001", "verdict": "RED"}])
+    bug, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert bug.evidence["red_proof"] == EVIDENCED
+    assert doc.evidence["red_proof"] == NOT_REQUIRED
+    assert doc.tier == "proved"
+
+
+def test_a_proof_file_that_is_not_a_list_excuses_no_p2(tmp_path):
+    """Invariant: a proof file that is not a list of entries counts as unattributable, so
+    no P2 or P3 in that run is excused.
+
+    Red 2026-10-20: uncommitted forward.py before the `malformed` check (a dict iterates
+    as its keys, read as no proofs); failed at `assert doc.evidence["red_proof"] == ABSENT`
+    (got not_required).
+    """
+    rec = make_record(tmp_path)
+    (rec / "L5.6.json").write_text(json.dumps(
+        {"proofs": [{"finding": "FIX-002", "verdict": "TAUTOLOGICAL"}]}))
+    _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"
+
+
+def test_a_non_dict_proof_entry_excuses_no_p2(tmp_path):
+    """Invariant: a proof entry that is not an object cannot be attributed, so no P2 or P3
+    in that run is excused.
+
+    Red 2026-10-20: uncommitted forward.py before the `malformed` check (non-dict entries
+    dropped silently); failed at `assert doc.evidence["red_proof"] == ABSENT`
+    (got not_required).
+    """
+    rec = make_record(tmp_path)
+    (rec / "L5.6.json").write_text(json.dumps(
+        [{"finding": "FIX-001", "verdict": "RED"}, "FIX-002=TAUTOLOGICAL"]))
+    _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert doc.evidence["red_proof"] == ABSENT
+    assert doc.tier == "historical"

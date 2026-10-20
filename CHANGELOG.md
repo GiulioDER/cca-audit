@@ -18,8 +18,10 @@ confirmed, merged and approved. That was a mismatch between two definitions, not
 no proof entry for it at all, and such a row is `proved` when the other three conditions are
 evidenced. Nothing else is excused. A proof that exists but is not RED still counts as absent at
 any priority, a P1 still needs its RED proof, and a finding whose priority is missing or unknown
-is treated as needing one. Backfill rows are unchanged. The memo shows the value as "not required
-(not a P1 fix)".
+is treated as needing one. A proof that cannot be attributed to any finding of the run means no
+P2 or P3 in that run is excused. A proof file that is not a list of entries counts as
+unattributable, so no P2 or P3 in that run is excused. Backfill rows are unchanged. The memo shows the value as "not
+required (not a P1 fix)".
 
 Rows already in the ledger keep the tier they were written with, because the ledger is
 append-only: only rows written from now on use the new rule.

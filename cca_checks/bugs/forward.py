@@ -66,16 +66,27 @@ def _architect(rows: list[dict], fix_id: str) -> str:
 _PROOF_OPTIONAL = ("P2", "P3")
 
 
-def _proof(proofs: list[dict], finding: str, fix_id: str, priority: str | None) -> str:
+def _attributed(proof: dict, finding: str, fix_id: str) -> bool:
+    """Whether a proof entry names this finding or its fix, ignoring case and padding."""
+    key = str(proof.get("finding", "")).strip()
+    return bool(key) and (key.upper() in (finding.strip().upper(), fix_id.strip().upper())
+                          or _same(key, fix_id))
+
+
+def _proof(proofs: list[dict], finding: str, fix_id: str, priority: str | None,
+           orphaned: bool) -> str:
     """EVIDENCED when every proof is RED; NOT_REQUIRED for a P2 or P3 with no proof entry.
 
     A proof that exists and is not RED stays ABSENT whatever the priority, and so does a
-    P1, or a finding with no known priority, that has none.
+    P1, or a finding with no known priority, that has none. When the run holds a proof
+    that no L4 entry can claim (`orphaned`), no finding is excused: it might be this one's.
+    A proof file that is not a list of entries counts as unattributable, so no P2 or P3 in
+    that run is excused.
     """
     verdicts = [str(p.get("verdict", "")).upper() for p in proofs
-                if _same(str(p.get("finding", "")), fix_id) or p.get("finding") == finding]
+                if _attributed(p, finding, fix_id)]
     if not verdicts:
-        return NOT_REQUIRED if priority in _PROOF_OPTIONAL else ABSENT
+        return NOT_REQUIRED if priority in _PROOF_OPTIONAL and not orphaned else ABSENT
     return EVIDENCED if all(v == "RED" for v in verdicts) else ABSENT
 
 
@@ -131,14 +142,18 @@ def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]]
     l2 = {f.get("id"): f for f in _load(record, "L2.json", []) if isinstance(f, dict)}
     l25 = {v.get("id"): v.get("verdict") for v in _load(record, "L2.5.json", [])
            if isinstance(v, dict)}
-    proofs = [p for p in _load(record, "L5.6.json", []) if isinstance(p, dict)]
+    raw_proofs = _load(record, "L5.6.json", [])
+    proofs = [p for p in raw_proofs if isinstance(p, dict)] if isinstance(raw_proofs, list) else []
+    malformed = not isinstance(raw_proofs, list) or len(proofs) != len(raw_proofs)
     card = _scorecard(record)
+    entries = [e for e in _load(record, "L4.json", []) if isinstance(e, dict)]
+    claims = [(str(e.get("finding") or e.get("finding_id") or ""), str(e.get("fix_id") or ""))
+              for e in entries]
+    orphaned = malformed or any(not any(_attributed(p, f, x) for f, x in claims) for p in proofs)
     run_id = _text(meta.get("run_id")) if isinstance(meta, dict) else None
     out = []
     skipped = []
-    for entry in _load(record, "L4.json", []):
-        if not isinstance(entry, dict):
-            continue
+    for entry in entries:
         raw_fix = entry.get("fix_id")
         fix_id = raw_fix if isinstance(raw_fix, str) else ""
         finding = entry.get("finding") or entry.get("finding_id") or fix_id
@@ -163,7 +178,7 @@ def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]]
                 "confirmed_l25": EVIDENCED if l25.get(finding) == "CONFIRMED" else ABSENT,
                 "fixed": EVIDENCED,
                 "l6_approved": _architect(card, fix_id),
-                "red_proof": _proof(proofs, finding, fix_id, severity),
+                "red_proof": _proof(proofs, finding, fix_id, severity, orphaned),
             },
             sources=[f"run:{merge.repo}:{run_id}", f"pr:{merge.repo}#{merge.pr}",
                      f"git:{merge.sha}"],
