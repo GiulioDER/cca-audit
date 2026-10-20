@@ -5,6 +5,11 @@
 * Drop the "no origin remote" reason (pass `reason=None` when `remote_repo` is None):
   `test_no_origin_without_repo_flag`, failing assertion
   `assert out.rstrip().endswith("(no origin remote)")`.
+* Remove the `except (OSError, GitError)` around `remote_repo` in `_prior`:
+  `test_missing_git_binary_prints_empty_block` fails with FileNotFoundError raised inside
+  `main` in the test body. `test_unreadable_root_prints_empty_block` stays green under this
+  mutation: `git -C <missing>` exits 128, which `remote_repo` already maps to None, so
+  it is a regression guard, not the red proof.
 Each was applied, the test run, and the code restored. Both failures are assertions.
 """
 from __future__ import annotations
@@ -48,6 +53,25 @@ def test_no_origin_without_repo_flag(tmp_path, monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert out.rstrip().endswith("(no origin remote)")
+
+
+def test_unreadable_root_prints_empty_block(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch)
+    rc = main(["prior", "--root", str(tmp_path / "missing"), "--files", "a.py"])
+    assert rc == 0
+    assert capsys.readouterr().out.rstrip().endswith("(no origin remote)")
+
+
+def test_missing_git_binary_prints_empty_block(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch)
+
+    def no_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr("cca_checks.bugs.gitread.subprocess.run", no_git)
+    rc = main(["prior", "--root", str(tmp_path), "--files", "a.py"])
+    assert rc == 0
+    assert capsys.readouterr().out.rstrip().endswith("(no origin remote)")
 
 
 def test_json_shape(tmp_path, monkeypatch, capsys):

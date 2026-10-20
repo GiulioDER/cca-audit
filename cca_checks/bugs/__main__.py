@@ -52,7 +52,10 @@ def _prior(a: argparse.Namespace) -> int:
     repo = a.repo
     reason = None
     if repo is None:
-        repo = remote_repo(a.root)
+        try:
+            repo = remote_repo(a.root)
+        except (OSError, GitError):
+            repo = None
         if repo is None:
             reason = "no origin remote"
     rows: list[dict] = []
