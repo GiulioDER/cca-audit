@@ -76,8 +76,9 @@ and final reporting in the primary agent. Delegate the independent audit and rev
 For each dispatched role:
 
 1. Build the prompt from the complete matching file in `references/agents/`, the shared target list,
-   diff command or hunt scope, detected languages, project context, role scope, prefix, and canonical
-   findings schema.
+   diff command or hunt scope, detected languages, project context, the output of
+   `python -m cca_checks bugs prior --files <targets>` (pasted verbatim), role scope, prefix, and
+   canonical findings schema.
 2. Require the subagent to inspect scoped repository instructions before analysis.
 3. Require read only behavior. Audit, verification, differential review, and architect agents must
    not edit the workspace or create audit trail files.

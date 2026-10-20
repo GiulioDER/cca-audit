@@ -6,6 +6,18 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**Every Layer 1 auditor now sees the bugs already fixed in the files it audits.** Step 1 of the
+pipeline runs `python -m cca_checks bugs prior --files <FILES>` once per run and pastes its whole
+output into each auditor prompt as a PRIOR FIXES block, in DIFF and HUNT modes and in the deferred
+pass. The block comes from the local bug ledger only and lists fixes recorded for the same
+repository as the target. The prompt rules tell the auditor to treat it as context: a listed bug is
+reported only if the code under audit reintroduces it, and the block is a cue to look for the same
+class of bug elsewhere. A host without a ledger, such as Codex working on a remote copy, gets the
+empty block and the audit proceeds as before. The Codex skill builds its prompts the same way.
+The effect on what auditors find is not yet measured.
+
 ## [0.12.1] - 2026-10-20
 
 **A P2 or P3 fix can now be proved without a red proof.** Until now a ledger row was `proved`
