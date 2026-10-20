@@ -18,6 +18,15 @@ class of bug elsewhere. A host without a ledger, such as Codex working on a remo
 empty block and the audit proceeds as before. The Codex skill builds its prompts the same way.
 The effect on what auditors find is not yet measured.
 
+**The brief can also draw on RE-call, optionally.** When a `recall-cca` server reports
+`trust_state` `trusted`, Step 1 runs up to three one sentence queries, saves the raw responses
+under `.claude/audits/out/` and passes them to `bugs prior --similar` (with `--cross-repo` in DIFF
+mode only, never in a hunt). `cca_checks` joins each hit to a ledger row in code and drops any hit
+that does not join, so RE-call text never reaches an auditor unchecked. In DIFF mode a project
+memory tool, when present, is also queried once for settled decisions, which auditors see as
+context. Without these servers the brief is built from the ledger alone, as before. The effect is
+not yet measured.
+
 ## [0.12.1] - 2026-10-20
 
 **A P2 or P3 fix can now be proved without a red proof.** Until now a ledger row was `proved`

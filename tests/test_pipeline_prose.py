@@ -16,6 +16,13 @@ test_step1_runs_bugs_prior_once, test_prior_fixes_rule_in_both_modes and
 test_codex_builds_prompts_with_prior_bugs each failed on their `assert` (AssertionError, no
 collection error). The production target is the prose of audit-fix.md Step 1 and its prompt
 template, and Orchestrate subagents item 1 of the Codex SKILL.md.
+
+Red proof (run 2026-10-20, before the RE-call prose edit): `python -m pytest
+tests/test_pipeline_prose.py -q -p no:cacheprovider` gave 4 failed, 46 passed, each on its `assert` (AssertionError): test_step1_queries_recall_cca_when_trusted,
+test_hunt_never_passes_cross_repo (assert sentences: no sentence names --cross-repo yet),
+test_settled_decisions_are_context_inside_a_fence and test_codex_mentions_recall_cca. The production
+target is the Step 1 paragraph of audit-fix.md and item 1 of Orchestrate subagents in the Codex
+SKILL.md.
 """
 
 from __future__ import annotations
@@ -665,3 +672,36 @@ def test_codex_builds_prompts_with_prior_bugs():
 def test_deferred_pass_does_not_run_bugs_prior():
     step1 = PIPELINE.split("## Step 1", 1)[1].split("### Generic auditors", 1)[0]
     assert "deferred findings" not in step1
+
+
+def _step1():
+    return PIPELINE.split("## Step 1", 1)[1].split("### Generic auditors", 1)[0]
+
+
+def test_step1_queries_recall_cca_when_trusted():
+    step1 = _step1()
+    for needle in ("recall-cca", "recall_search", "trust_state", "--similar", "--cross-repo",
+                   ".claude/audits/out/similar-"):
+        assert needle in step1, needle
+    assert step1.count("python -m cca_checks bugs prior") == 1
+
+
+def test_hunt_never_passes_cross_repo():
+    step1 = _step1()
+    sentences = [s for s in re.split(r"(?<=[.])\s", step1) if "--cross-repo" in s]
+    assert sentences
+    assert all("DIFF" in s and "HUNT" in s for s in sentences)
+    hunt_rules = PIPELINE.split("IF MODE == HUNT", 2)[-1]
+    assert "--cross-repo" not in hunt_rules.split("## Step", 1)[0]
+
+
+def test_settled_decisions_are_context_inside_a_fence():
+    step1 = _step1()
+    assert "recall-memory" in step1
+    assert "SETTLED" in step1
+    assert "context" in step1 and "```text" in step1
+
+
+def test_codex_mentions_recall_cca():
+    assert "recall-cca" in CODEX
+    assert "--similar" in CODEX

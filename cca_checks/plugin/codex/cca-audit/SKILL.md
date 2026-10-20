@@ -79,6 +79,14 @@ For each dispatched role:
    diff command or hunt scope, detected languages, project context, the output of
    `python -m cca_checks bugs prior --files <targets>` (pasted verbatim), role scope, prefix, and
    canonical findings schema.
+   If the `recall_search` tool of the `recall-cca` server is available and its response reads
+   `trust_state` `trusted`, first run at most 3 one sentence queries describing what a changed area
+   does (never code or a file path), save each raw response as
+   `.claude/audits/out/similar-<n>.json`, and pass them all to `bugs prior` with `--similar`, adding
+   `--cross-repo` in DIFF mode only, never in HUNT mode. If the project's own RE-call memory tool
+   is available and the mode is DIFF, add one query for settled decisions, given to the subagent
+   as context inside a labelled fence. Otherwise skip both silently and build the brief from the
+   ledger alone.
 2. Require the subagent to inspect scoped repository instructions before analysis.
 3. Require read only behavior. Audit, verification, differential review, and architect agents must
    not edit the workspace or create audit trail files.
