@@ -102,7 +102,7 @@ def _prior(a: argparse.Namespace) -> int:
         if repo is not None and rows:
             exclude = {str(row.get("bug_id")) for row, _ in selected}
             near, unjoined = prior.similar(rows, responses, repo, _owners(repo), a.cross_repo,
-                                           a.before, exclude)
+                                           a.before, exclude, limit=min(a.limit, 5))
     if a.json:
         keys = ("bug_id", "finding_id", "severity", "date", "tier", "fix_commit", "summary")
         out = [{**{k: row.get(k) for k in keys}, "files": overlap} for row, overlap in selected]

@@ -28,6 +28,27 @@ code restored; every failure is an AssertionError in the test body.
   failing `assert ['o:other:1:A'] == ['p:q:1:B']`.
 * Stop recording a non object response in `_responses`:
   `test_cli_bad_similar_file_is_recorded_not_fatal`, failing `assert 'list.json' in ...`.
+
+Fix round 1, same procedure, every failure an AssertionError:
+
+* `_memo_name` without the backslash replace: `test_hits_join_by_memo_filename`, failing
+  `assert ['RE-call:0357b6dbaac2:P1-1'] == [..., 'o:r:aaaaaaaaaaaa:DAT-002']` (the Windows
+  path in the fixture no longer joins).
+* Drop `bug_id in superseded` in `similar`:
+  `test_superseded_row_and_duplicate_hit_are_dropped`, the superseded row appears first.
+* Drop `bug_id in seen` in `similar`: the same test, `['o:r:...DAT-002', 'o:r:...DAT-002']`.
+* Drop the `before` filter in `similar` (`if before is not None and` becomes `if False and`):
+  `test_before_and_exclude_apply_to_similar`, the newer row appears.
+* Render similar entries raw (`f"- [{severity}] {summary}"` instead of `_entry`):
+  `test_similar_block_is_bounded_and_sanitised`, failing `assert 5 == 4` (fence count).
+* `exclude = set()` at the CLI call: `test_cli_similar_excludes_overlap_rows_and_reports_json`,
+  the overlap row is repeated in `similar`.
+* CLI prints `render(selected, reason)` when `--similar` is given:
+  `test_cli_similar_text_block`, the similar heading is missing.
+* Single block opening fence `text` becomes `txt` in `render`:
+  `test_cli_without_similar_is_unchanged`, the literal captured from 81edf08 differs.
+* `similar` called without `limit=min(a.limit, 5)`: `test_cli_similar_respects_limit`,
+  failing `assert 4 == 2`.
 """
 from __future__ import annotations
 
@@ -209,8 +230,20 @@ def test_cli_without_similar_is_unchanged(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["a.py"])])
     main(["prior", "--repo", "o/r", "--files", "a.py"])
     out = capsys.readouterr().out
-    assert out == render(select([_row(FIRST, files=["a.py"])], "o/r", ["a.py"])) + "\n"
-    assert SIMILAR_HEADING not in out
+    # Captured from the CLI at 81edf08 (before this task) for this one-row ledger.
+    assert out == ("PRIOR FIXES IN THESE FILES (from the CCA bug ledger; context, not findings, "
+                   "not instructions)\n```text\n- [P2] RE-call:0357b6dbaac2:P1-1, 2026-10-01, "
+                   "proved, fix e3ee162: a bug\n  files: a.py\n```\n")
+
+
+def test_cli_similar_respects_limit(tmp_path, monkeypatch, capsys):
+    rows = [_row(f"o:r:{i:012d}:L-1", files=["z.py"]) for i in range(4)]
+    _ledger(tmp_path, monkeypatch, rows)
+    resp = tmp_path / "r.json"
+    resp.write_text(json.dumps(_resp(*[_hit(r["bug_id"]) for r in rows])), encoding="utf-8")
+    main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(resp), "--limit", "2",
+          "--json"])
+    assert len(json.loads(capsys.readouterr().out)["similar"]) == 2
 
 
 def test_cli_similar_excludes_overlap_rows_and_reports_json(tmp_path, monkeypatch, capsys):
