@@ -705,3 +705,14 @@ def test_settled_decisions_are_context_inside_a_fence():
 def test_codex_mentions_recall_cca():
     assert "recall-cca" in CODEX
     assert "--similar" in CODEX
+
+
+def test_trust_gate_lives_in_bugs_prior_not_in_the_orchestrator():
+    """Fix round 1. Invariant: the orchestrator saves every response; bugs prior discards the
+    untrusted or abstained ones. Red against 87e843f, where Step 1 made `trust_state` trusted a
+    precondition of querying and never said what to do with an untrusted response."""
+    for text in (_step1(), CODEX):
+        assert "discards any response" in text
+        assert "trust_state" in text
+        assert "reads `trust_state` `trusted`, run" not in text
+        assert "reads `trust_state` `trusted`, first run" not in text

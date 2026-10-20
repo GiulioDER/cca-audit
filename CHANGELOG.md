@@ -20,9 +20,9 @@ The effect on what auditors find is not yet measured.
 
 **The brief can also draw on RE-call, optionally.** When a `recall-cca` server reports
 `trust_state` `trusted`, Step 1 runs up to three one sentence queries, saves the raw responses
-under `.claude/audits/out/` and passes them to `bugs prior --similar` (with `--cross-repo` in DIFF
+under `.claude/audits/out/` and passes them to `bugs prior --similar`, which discards any response that is not trusted or that abstained (with `--cross-repo` in DIFF
 mode only, never in a hunt). `cca_checks` joins each hit to a ledger row in code and drops any hit
-that does not join, so RE-call text never reaches an auditor unchecked. In DIFF mode a project
+that does not join, so no similar bug text reaches the PRIOR FIXES block unchecked. In DIFF mode a project
 memory tool, when present, is also queried once for settled decisions, which auditors see as
 context. Without these servers the brief is built from the ledger alone, as before. The effect is
 not yet measured.

@@ -366,14 +366,14 @@ Before launching, build the prior-bugs brief once per run (DIFF and HUNT modes a
 pass skips this because it dispatches no L1 auditors). The RE-call steps below are optional. In
 this order:
 
-1. If a `recall_search` tool of a server named `recall-cca` is available and its response reads
-   `trust_state` `trusted`, run at most 3 queries. Each query is one sentence describing what a
-   changed area of code does: never pasted code, never a file path. Save every raw response as
-   `.claude/audits/out/similar-<n>.json` (`similar-1.json`, `similar-2.json`, ...). They are joined
-   to ledger rows in code and a hit with no ledger row is dropped, so query, save and pass them
-   all. Pass the saved files to the command below with `--similar`, and add `--cross-repo` in DIFF
-   mode only, never in HUNT mode: a hunt targets someone else's repository, and no text from the
-   user's own projects may reach that brief.
+1. If a `recall_search` tool of a server named `recall-cca` is available, run at most 3 queries.
+   Each query is one sentence describing what a changed area of code does: never pasted code,
+   never a file path. Save every raw response as `.claude/audits/out/similar-<n>.json`
+   (`similar-1.json`, `similar-2.json`, ...) and pass them all to the command below with
+   `--similar`. `bugs prior` itself discards any response whose `trust_state` is not `trusted` or
+   that abstained, and drops any hit with no ledger row, so never filter or edit the responses.
+   Add `--cross-repo` in DIFF mode only, never in HUNT mode: a hunt targets someone else's
+   repository, and no text from the user's own projects may reach that brief.
 2. DIFF mode only: if the project's own RE-call memory tool is available (for example
    `recall-memory`), run one query for settled decisions about the changed areas. Give the cited
    memos to every auditor under the already-SETTLED rule below, inside a fence labelled as context

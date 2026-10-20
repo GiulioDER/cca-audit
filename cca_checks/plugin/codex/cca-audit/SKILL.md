@@ -79,10 +79,11 @@ For each dispatched role:
    diff command or hunt scope, detected languages, project context, the output of
    `python -m cca_checks bugs prior --files <targets>` (pasted verbatim), role scope, prefix, and
    canonical findings schema.
-   If the `recall_search` tool of the `recall-cca` server is available and its response reads
-   `trust_state` `trusted`, first run at most 3 one sentence queries describing what a changed area
-   does (never code or a file path), save each raw response as
-   `.claude/audits/out/similar-<n>.json`, and pass them all to `bugs prior` with `--similar`, adding
+   If the `recall_search` tool of the `recall-cca` server is available, first run at most 3 one
+   sentence queries describing what a changed area does (never code or a file path), save every
+   raw response as `.claude/audits/out/similar-<n>.json`, and pass them all to `bugs prior` with
+   `--similar`; `bugs prior` itself discards any response whose `trust_state` is not `trusted` or
+   that abstained, so never filter them. Add
    `--cross-repo` in DIFF mode only, never in HUNT mode. If the project's own RE-call memory tool
    is available and the mode is DIFF, add one query for settled decisions, given to the subagent
    as context inside a labelled fence. Otherwise skip both silently and build the brief from the
