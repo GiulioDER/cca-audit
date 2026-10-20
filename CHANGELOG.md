@@ -6,6 +6,26 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**A P2 or P3 fix can now be proved without a red proof.** Until now a ledger row was `proved`
+only when all four conditions were evidenced, the red proof included. The pipeline, though, asks
+for a red proof only when it fixes a CONFIRMED P1 (Step 5.6 of audit-fix allows
+`verify --no-proofs` otherwise), so a P2 or P3 fix could never reach `proved`, however well it was
+confirmed, merged and approved. That was a mismatch between two definitions, not a missing proof.
+
+`bugs resolve` now records the red proof of a P2 or P3 finding as `not_required` when the run holds
+no proof entry for it at all, and such a row is `proved` when the other three conditions are
+evidenced. Nothing else is excused. A proof that exists but is not RED still counts as absent at
+any priority, a P1 still needs its RED proof, and a finding whose priority is missing or unknown
+is treated as needing one. A proof that cannot be attributed to any finding of the run means no
+P2 or P3 in that run is excused. A proof file that is not a list of entries counts as
+unattributable, so no P2 or P3 in that run is excused. Backfill rows are unchanged. The memo shows the value as "not
+required (not a P1 fix)".
+
+Rows already in the ledger keep the tier they were written with, because the ledger is
+append-only: only rows written from now on use the new rule.
+
 ## [0.12.0] - 2026-10-14
 
 **The bug ledger now records every CCA run by itself.** CCA keeps a cross-project ledger of the

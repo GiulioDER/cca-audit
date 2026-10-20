@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 EVIDENCED = "evidenced"
 CLAIMED = "claimed"
 ABSENT = "absent"
+# A red proof the pipeline never asks for: audit-fix requires one only for a CONFIRMED
+# P1 fix, so a P2 or P3 fix with no proof entry at all is not missing anything. Only
+# forward rows set it, and only for red_proof.
+NOT_REQUIRED = "not_required"
 CONDITIONS = ("confirmed_l25", "fixed", "l6_approved", "red_proof")
 SHA_LEN = 12
 # A full commit sha as git prints it. Lowercase only: GitHub answers in lowercase, and
@@ -48,7 +52,9 @@ class BugRow:
 
     @property
     def tier(self) -> str:
-        if all(self.evidence.get(c) == EVIDENCED for c in CONDITIONS):
+        if all(self.evidence.get(c) == EVIDENCED
+               or (c == "red_proof" and self.evidence.get(c) == NOT_REQUIRED)
+               for c in CONDITIONS):
             return "proved"
         return "historical"
 
@@ -81,6 +87,9 @@ def memo_filename(bug_id: str) -> str:
 
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+_LABELS = {NOT_REQUIRED: "not required (not a P1 fix)"}
 
 
 def render_memo(row: BugRow, modified: str) -> str:
@@ -116,7 +125,8 @@ def render_memo(row: BugRow, modified: str) -> str:
         "",
         "| Condition | Value |",
         "|---|---|",
-        *[f"| {c} | {row.evidence.get(c, ABSENT)} |" for c in CONDITIONS],
+        *[f"| {c} | {_LABELS.get(v, v)} |"
+          for c in CONDITIONS for v in [row.evidence.get(c, ABSENT)]],
         "",
         "Sources: " + ", ".join(f"`{s}`" for s in row.sources),
         "",

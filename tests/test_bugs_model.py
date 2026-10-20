@@ -4,6 +4,7 @@ from cca_checks.bugs.model import (
     CLAIMED,
     CONDITIONS,
     EVIDENCED,
+    NOT_REQUIRED,
     BugRow,
     memo_filename,
     render_memo,
@@ -61,3 +62,25 @@ def test_memo_quotes_the_summary_and_carries_front_matter():
     assert body.startswith("\ndelete and bump ran as two statements; +test\n")
     assert "| red_proof | evidenced |" in text
     assert "`src/store.py`" in text
+
+
+def test_a_not_required_red_proof_still_proves_but_nothing_else_is_excused():
+    """Invariant: red_proof may be not_required; every other condition must be evidenced.
+
+    Red 2026-10-20: unchanged tier (only EVIDENCED counts); failed at
+    `assert _row(red_proof=NOT_REQUIRED).tier == "proved"`.
+    Red 2026-10-20: mutation dropping `c == "red_proof" and` from tier; failed at
+    `assert _row(red_proof=NOT_REQUIRED, fixed=NOT_REQUIRED).tier == "historical"`.
+    """
+    assert _row(red_proof=NOT_REQUIRED).tier == "proved"
+    assert _row(red_proof=NOT_REQUIRED, fixed=CLAIMED).tier == "historical"
+    assert _row(red_proof=NOT_REQUIRED, fixed=NOT_REQUIRED).tier == "historical"
+
+
+def test_memo_renders_not_required_readably():
+    """Red 2026-10-20: mutation `_LABELS = {}` in model; failed at
+    `assert "| red_proof | not required (not a P1 fix) |" in text`.
+    """
+    text = render_memo(_row(red_proof=NOT_REQUIRED), "2026-10-20T00:00:00Z")
+    assert "| red_proof | not required (not a P1 fix) |" in text
+    assert "Tier: **proved**." in text
