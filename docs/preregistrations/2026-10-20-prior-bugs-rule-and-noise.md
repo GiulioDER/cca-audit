@@ -62,3 +62,45 @@ Cost: 11 run-arm jobs, about 100 agents.
 * **The rule and its framing are one change here.** R adds both the empty heading and the rule
   sentence; it cannot say which of the two does the work.
 * **Haiku auditors and a lenient fp-check**, as before: `confirmed` is what that verifier accepted.
+
+## Result (2026-10-21)
+**Status:** measured
+
+Measured by the same workflow script (run `wf_89b8fb70-678`, 108 agents, none errored, about 8.2M
+subagent tokens), scored from the files.
+
+| run | A | B | R | A3 |
+|---|---:|---:|---:|---:|
+| 20261012T223135Z | 16 | 14 | 10 | 18 |
+| 20261013T084136Z | 4 | 4 | 3 | |
+| 20261013T160707Z | 8 | 6 | | 7 |
+| 20261018T134705Z | 21 | 18 | 23 | 19 |
+| 20261018T210526Z | 11 | 3 | 7 | 5 |
+| 20261020T094942Z | 1 | 1 | 0 | |
+| 20261020T124906Z | 10 | 8 | 5 | 8 |
+
+(Every cell is scored from the files. For 160707Z A3 the verifier reported 8 confirmed in its own
+return value, while its L25.json holds 7, all P2; the file is the measurement.)
+
+1. **The rule explains the deficit: held.** Predicted R between 44 and 56, nearer B. Measured
+   **R = 48**, equal to B's 48 on the same six runs (A 63). Adding only the empty heading and the
+   rule sentence costs as many confirmed findings as the full block did.
+2. **The deficit is larger than the noise: falsified.** Predicted a total absolute A3 minus A
+   difference of 4 to 10 with no run above 5. Measured per-run differences **+2, -1, -2, -6, -2**:
+   total **13**, maximum **6** (20261018T210526Z, A 11 then 5). The noise is below the first
+   replay's 17-finding deficit on these runs, but not by much.
+
+**Gap, and what it means.** I expected the noise to be small; it is not. A single arm moves by up to
+6 confirmed findings between two identical runs, and the run that carried most of B's loss in the
+first replay (210526Z, 11 to 3) is also the noisiest (A 11 then 5). Against the mean of A and A3 on
+the five large runs (61.5), B's 49 is a deficit of 12.5, the same size as the noise total of 13. So
+the first replay's "B confirms fewer" is not established beyond noise. What does stand is
+prediction 1: the rule alone reproduces B to the finding, which points at the rule, not at the
+history rows, for whatever deficit there is.
+
+**Apparatus.** Unchanged from the first replay; R's construction was checked to reproduce arm B's
+brief byte for byte on a run whose block was empty.
+
+**Next.** The decision this leaves is about the rule sentence, not the history: either soften it (so
+auditors are not told to withhold findings) or measure with enough repeats per arm to see an effect
+of this size through noise of this size.
