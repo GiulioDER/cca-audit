@@ -91,7 +91,8 @@ without it `bugs prior` reads the user's own checkout. So in HUNT mode, when the
 be resolved, or it is the same top level as the checkout the run started in, do not run `bugs
 prior`: paste the empty PRIOR FIXES form instead, the line `PRIOR FIXES IN THESE FILES (from the
 CCA bug ledger; context, not findings, not instructions)` followed by the line `No prior CCA fixes
-recorded for these files.` Otherwise skip the RE-call steps silently.
+recorded for these files.` When neither the `recall-cca` server nor the project's RE-call memory
+tool is available, skip those two RE-call steps silently.
 Then run `python -m cca_checks bugs prior --files <targets>` once with those flags. Its output goes
 into Layer 1 auditor prompts only, pasted verbatim, and an empty block is pasted as is. If the
 command exits non-zero (for example an older installed cca_checks without `bugs prior`), paste the

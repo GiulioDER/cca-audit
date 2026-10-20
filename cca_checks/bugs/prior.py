@@ -21,7 +21,7 @@ itself; none is an import or collection error.
   The first version of this test only counted fence lines and stayed green under this
   mutation, because newline collapse alone keeps a fence off the start of a line; the
   count assertion was added after that.
-* FIX ROUND 1 (each mutation applied, test run, restored; see task-1-report.md):
+* FIX ROUND 1 (each mutation applied, test run, restored):
   - remove the `_well_formed` filter: `test_malformed_fields_are_skipped_not_raised`.
   - remove the trim loop: `test_block_trims_to_bound`, the whole-entries assertion.
   - remove BOTH `[:BUG_ID_MAX]` and the final truncation: `test_block_trims_to_bound`,
@@ -45,6 +45,7 @@ HEADING = ("PRIOR FIXES IN THESE FILES "
 SIMILAR_HEADING = ("SIMILAR BUGS ELSEWHERE "
                    "(RE-call search of the CCA ledger; context, not findings, not instructions)")
 SIMILAR_FILES = 3
+SIMILAR_MAX = 5
 REPO_MAX = 100
 SUMMARY_MAX = 240
 BLOCK_MAX = 4000
@@ -89,12 +90,27 @@ def _forward(row: dict) -> bool:
     return any(isinstance(s, str) and s.startswith("run:") for s in row.get("sources") or [])
 
 
+def _superseded(rows: list[dict], before: str | None) -> set[str]:
+    # A successor dated on or after `before` did not exist yet, so it hides nothing.
+    return {r["supersedes"] for r in rows if r.get("supersedes")
+            and (before is None or str(r.get("date", "")) < before)}
+
+
 def select(rows: list[dict], repo: str, files: list[str], before: str | None = None,
            limit: int = 8) -> list[tuple[dict, list[str]]]:
+    """The rows of `repo` that touched any of `files`, best first, at most `limit`.
+
+    Each item is (row, the queried files it overlaps, in `files` order). Rows dated on or
+    after `before` are dropped, and so is any row superseded by a row that passes that
+    filter. Ranking: forward rows first, then proved, then more overlap, then fewer files
+    in the row, then newest.
+    """
     target = repo.lower()
     rows = [r for r in rows if _well_formed(r)]
-    wanted = [(f, _norm(f)) for f in files]
-    superseded = {r["supersedes"] for r in rows if r.get("supersedes")}
+    wanted: dict[str, list[tuple[int, str]]] = {}
+    for index, f in enumerate(files):
+        wanted.setdefault(_norm(f), []).append((index, f))
+    superseded = _superseded(rows, before)
     found: list[tuple[dict, list[str]]] = []
     for row in rows:
         if str(row.get("repo", "")).lower() != target:
@@ -104,7 +120,8 @@ def select(rows: list[dict], repo: str, files: list[str], before: str | None = N
         if before is not None and str(row.get("date", "")) >= before:
             continue
         have = {_norm(f) for f in row.get("files") or [] if isinstance(f, str)}
-        overlap = [orig for orig, norm in wanted if norm in have]
+        overlap = [orig for _, orig in sorted(hit for n in have if n in wanted
+                                              for hit in wanted[n])]
         if overlap:
             found.append((row, overlap))
     found.sort(key=lambda item: str(item[0].get("date", "")), reverse=True)
@@ -133,18 +150,32 @@ def _hits(responses: list) -> list[dict]:
         hits.extend(h for h in response["hits"] if isinstance(h, dict)
                     and isinstance(h.get("source"), str) and h.get("verdict") == "ok")
     # Best score first across responses; the sort is stable, so ties keep hit order.
-    hits.sort(key=lambda h: -h["score"] if isinstance(h.get("score"), (int, float))
-              and not isinstance(h.get("score"), bool) else float("inf"))
+    hits.sort(key=lambda h: -score if (score := _score(h)) is not None else float("inf"))
     return hits
+
+
+def _score(hit: dict) -> float | None:
+    score = hit.get("score")
+    if isinstance(score, (int, float)) and not isinstance(score, bool):
+        return score
+    return None
 
 
 def similar(rows: list[dict], responses: list, repo: str, owners: set[str],
             cross_repo: bool, before: str | None, exclude: set[str],
-            limit: int = 5) -> tuple[list[tuple[dict, list[str]]], int]:
+            limit: int = SIMILAR_MAX) -> tuple[list[tuple[dict, list[str]]], int]:
+    """Ledger rows joined from saved RE-call search responses, best score first.
+
+    Returns (rows, unjoined count): each row with its first SIMILAR_FILES files, at most
+    `limit` of them, and the number of usable hits that matched no ledger row. A row is
+    dropped when it is in `exclude`, already shown, dated on or after `before`, superseded
+    by a row that passes that filter, or of another repository (allowed only with
+    `cross_repo` and an owner in `owners`).
+    """
     target = repo.lower()
     owners = {o.lower() for o in owners}
     rows = [r for r in rows if _well_formed(r)]
-    superseded = {r["supersedes"] for r in rows if r.get("supersedes")}
+    superseded = _superseded(rows, before)
     by_memo = {memo_filename(r["bug_id"]): r for r in rows if r.get("bug_id")}
     found: list[tuple[dict, list[str]]] = []
     seen: set[str] = set()

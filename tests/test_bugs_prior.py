@@ -24,6 +24,10 @@ named test run, and the module restored; every failure is an AssertionError in t
   `assert None == []`.
 * DAT-002, baseline = `load_rows` reading with `utf-8` before the `utf-8-sig` fix:
   `test_load_rows_accepts_a_bom`, failing `assert 0 == 1` (the BOM row was dropped).
+* DAT-003 (deferred run 20261020T133337Z), baseline = `select` building the superseded set
+  from every row, and again with the mutation `_superseded` ignoring `before`:
+  `tests/test_bugs_prior.py::test_superseded_only_by_rows_before_the_cutoff`, failing
+  `assert [] == ['A']` (a successor dated on the cutoff hid A).
 """
 from __future__ import annotations
 
@@ -97,6 +101,14 @@ def test_superseded_row_is_hidden():
     rows = [_row(bug_id="A"), _row(bug_id="B", supersedes="A")]
     got = select(rows, "o/r", ["a.py"])
     assert [r["bug_id"] for r, _ in got] == ["B"]
+
+
+def test_superseded_only_by_rows_before_the_cutoff():
+    # A successor dated on or after `before` did not exist yet, so it hides nothing.
+    rows = [_row(bug_id="A", date="2026-10-01"),
+            _row(bug_id="B", supersedes="A", date="2026-10-10")]
+    assert _ids_of(select(rows, "o/r", ["a.py"], before="2026-10-10")) == ["A"]
+    assert _ids_of(select(rows, "o/r", ["a.py"])) == ["B"]
 
 
 def test_limit_and_size_bounds():

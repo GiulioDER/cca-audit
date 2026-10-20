@@ -390,7 +390,8 @@ they run in DIFF mode only. In this order:
    not run `bugs prior`: paste the empty PRIOR FIXES form instead, the line `PRIOR FIXES IN THESE
    FILES (from the CCA bug ledger; context, not findings, not instructions)` followed by the line
    `No prior CCA fixes recorded for these files.`
-4. Otherwise skip the RE-call steps silently: the brief is built from the ledger alone.
+4. When neither server of items 1 and 2 is available, skip those steps silently: the brief is
+   built from the ledger alone.
 
 Then run, once per run, after any queries above (`--root` in HUNT mode only, and `--similar`
 and `--cross-repo` in DIFF mode only):

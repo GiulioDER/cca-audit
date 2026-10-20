@@ -58,6 +58,13 @@ Final review, run 2026-10-20, same procedure:
 DAT-002, baseline = `_responses` reading with `utf-8` before the `utf-8-sig` fix:
 `test_response_with_a_bom_is_read`, failing `assert 'similar_error' not in {...}` (the file was
 skipped as bad JSON).
+
+DAT-003 (deferred run 20261020T133337Z), baseline = `similar` building the superseded set from
+every row, and again with the mutation `_superseded` ignoring `before`:
+`tests/test_bugs_prior_similar.py::test_superseded_only_by_rows_before_the_cutoff`, failing
+`assert [] == ['RE-call:0357b6dbaac2:P1-1']`. ENV-001: with `_owners` in `__main__` ignoring
+`owners_from_env()`, `test_cli_cross_repo_uses_target_owner_or_env` fails
+`assert ['o:other:1:A'] == ['p:q:1:B']`, so the shared helper stays guarded.
 """
 from __future__ import annotations
 
@@ -178,6 +185,14 @@ def test_superseded_row_and_duplicate_hit_are_dropped():
     assert _ids(got) == [SECOND]
 
 
+def test_superseded_only_by_rows_before_the_cutoff():
+    # A successor dated on or after `before` did not exist yet, so it hides nothing.
+    rows = [_row(FIRST, date="2026-10-01"), _row(SECOND, supersedes=FIRST, date="2026-10-10")]
+    response = _resp(_hit(FIRST), _hit(SECOND))
+    got, _ = _run(rows, [response], before="2026-10-10")
+    assert _ids(got) == [FIRST]
+
+
 def test_hits_across_responses_rank_by_score():
     rows = [_row(FIRST), _row(SECOND)]
     got, _ = _run(rows, [_resp(_hit(FIRST, score=0.4)), _resp(_hit(SECOND, score=0.9))])
@@ -238,7 +253,7 @@ def _ledger(tmp_path, monkeypatch, rows):
 
 def test_cli_without_similar_is_unchanged(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["a.py"])])
-    main(["prior", "--repo", "o/r", "--files", "a.py"])
+    main(["prior", "--repo-name", "o/r", "--files", "a.py"])
     out = capsys.readouterr().out
     # Captured from the CLI at 81edf08 (before this task) for this one-row ledger.
     assert out == ("PRIOR FIXES IN THESE FILES (from the CCA bug ledger; context, not findings, "
@@ -251,14 +266,14 @@ def test_cli_similar_respects_limit(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, rows)
     resp = tmp_path / "r.json"
     resp.write_text(json.dumps(_resp(*[_hit(r["bug_id"]) for r in rows])), encoding="utf-8")
-    main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(resp), "--limit", "2",
+    main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(resp), "--limit", "2",
           "--json"])
     assert len(json.loads(capsys.readouterr().out)["similar"]) == 2
 
 
 def test_cli_similar_excludes_overlap_rows_and_reports_json(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, [_row(FIRST, files=["a.py"]), _row(SECOND, files=["z.py"])])
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(FIXTURE), "--json"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(FIXTURE), "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert [r["bug_id"] for r in data["rows"]] == [FIRST]
@@ -275,7 +290,7 @@ def test_cli_bad_similar_file_is_recorded_not_fatal(tmp_path, monkeypatch, capsy
     listed = tmp_path / "list.json"
     listed.write_text("[1]", encoding="utf-8")
     missing = tmp_path / "missing.json"
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(missing), str(bad),
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(missing), str(bad),
                str(listed), str(FIXTURE), "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
@@ -290,7 +305,7 @@ def test_response_with_a_bom_is_read(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, [_row(SECOND, files=["z.py"])])
     bommed = tmp_path / "bom.json"
     bommed.write_bytes(codecs.BOM_UTF8 + FIXTURE.read_bytes())
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(bommed), "--json"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(bommed), "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert "similar_error" not in data
@@ -302,7 +317,7 @@ def test_cli_cross_repo_uses_target_owner_or_env(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, rows)
     resp = tmp_path / "r.json"
     resp.write_text(json.dumps(_resp(_hit("o:other:1:A"), _hit("p:q:1:B"))), encoding="utf-8")
-    args = ["prior", "--repo", "O/R", "--files", "a.py", "--similar", str(resp), "--json"]
+    args = ["prior", "--repo-name", "O/R", "--files", "a.py", "--similar", str(resp), "--json"]
     monkeypatch.delenv("CCA_BUGS_OWNERS", raising=False)
     main(args)
     assert json.loads(capsys.readouterr().out)["similar"] == []
@@ -315,7 +330,7 @@ def test_cli_cross_repo_uses_target_owner_or_env(tmp_path, monkeypatch, capsys):
 
 def test_cli_similar_text_block(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, [_row(SECOND, files=["z.py"])])
-    main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(FIXTURE)])
+    main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(FIXTURE)])
     out = capsys.readouterr().out
     assert out.startswith("PRIOR FIXES IN THESE FILES")
     assert f"\n\n{SIMILAR_HEADING}\n```text\n- [P2] {SECOND}," in out
@@ -326,6 +341,6 @@ def test_deeply_nested_response_is_skipped_and_named(tmp_path, monkeypatch, caps
     _ledger(tmp_path, monkeypatch, [_row(SECOND, files=["z.py"])])
     deep = tmp_path / "deep.json"
     deep.write_text("[" * 100_000, encoding="utf-8")
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(deep), "--json"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--similar", str(deep), "--json"])
     assert rc == 0
     assert "deep.json" in json.loads(capsys.readouterr().out)["similar_error"]

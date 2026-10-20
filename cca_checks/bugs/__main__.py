@@ -1,26 +1,27 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
-python -m cca_checks.bugs prior --files F [F ...] [--repo OWNER/NAME] [--root PATH]
+python -m cca_checks.bugs prior --files F [F ...] [--repo-name OWNER/NAME] [--root PATH]
     [--before YYYY-MM-DD] [--limit N] [--similar PATH [PATH ...]] [--cross-repo] [--json]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
 be asked about some record (the hourly worker retries), otherwise 0. `prior` is read-only
-and always exits 0 (a missing ledger or origin prints the empty block).
+and exits 0 on any data or environment problem (a missing ledger or origin prints the empty
+block), and 2 on a usage error (argparse).
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .backfill import backfill, summarize
+from .github import owners_from_env
 from .gitread import GitError
-from .model import _CONTROL, _printable  # noqa: F401  (the names stay importable from here)
+from .model import _printable
 from .store import bugs_dir, write
 
 
@@ -70,9 +71,18 @@ def _emit(text: str) -> None:
     print(text.encode(encoding, errors="replace").decode(encoding))
 
 
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"expected an integer of at least 1, got {value!r}")
+    return number
+
+
 def _owners(repo: str | None) -> set[str]:
-    named = {o.strip().lower() for o in os.environ.get("CCA_BUGS_OWNERS", "").split(",")}
-    named.discard("")
+    named = set(owners_from_env())
     if named:
         return named
     return {repo.split("/", 1)[0].lower()} if repo else set()
@@ -84,7 +94,7 @@ def _prior(a: argparse.Namespace) -> int:
     from .store import LEDGER
 
     ledger = bugs_dir() / LEDGER
-    repo = a.repo
+    repo = a.repo_name
     reason = None
     if repo is None:
         try:
@@ -111,7 +121,7 @@ def _prior(a: argparse.Namespace) -> int:
         if repo is not None and rows:
             exclude = {str(row.get("bug_id")) for row, _ in selected}
             near, unjoined = prior.similar(rows, responses, repo, _owners(repo), a.cross_repo,
-                                           a.before, exclude, limit=min(a.limit, 5))
+                                           a.before, exclude, limit=min(a.limit, prior.SIMILAR_MAX))
     if a.json:
         keys = ("bug_id", "finding_id", "severity", "date", "tier", "fix_commit", "summary")
         out = [{**{k: row.get(k) for k in keys}, "files": overlap} for row, overlap in selected]
@@ -170,10 +180,11 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--stale-days", type=int, default=14)
     q = sub.add_parser("prior", help="print the prior fixes recorded for a set of files")
     q.add_argument("--files", nargs="+", required=True)
-    q.add_argument("--repo", help="OWNER/NAME; when absent it is read from --root's origin")
+    q.add_argument("--repo-name", metavar="OWNER/NAME",
+                   help="the repository; when absent it is read from --root's origin")
     q.add_argument("--root", type=Path, default=Path("."))
     q.add_argument("--before", type=_date_arg, metavar="YYYY-MM-DD")
-    q.add_argument("--limit", type=int, default=8)
+    q.add_argument("--limit", type=_positive_int, default=8)
     q.add_argument("--similar", nargs="+", action="extend", type=Path, metavar="PATH",
                    help="saved recall_search responses to join to the ledger")
     q.add_argument("--cross-repo", action="store_true",

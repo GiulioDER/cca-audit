@@ -22,6 +22,17 @@ Final review, run 2026-10-20, same procedure, each failure in the test body:
   RAISE SystemExit`.
 * Ignore `--repo` in `_prior` (`repo = a.repo` becomes `repo = None`):
   `test_prints_block_for_matching_rows`, `assert '- [P2]' in ...` (the empty block prints).
+  The flag is `--repo-name` since the deferred run below; the proof stands for it.
+
+Deferred run 20261020T133337Z, same procedure, each failure in the test body:
+
+* BUG-005, baseline = the pre-fix `--limit` (`type=int`), test run with `--repo` before the
+  rename: `tests/test_bugs_prior_cli.py::test_limit_must_be_positive`, `Failed: DID NOT RAISE
+  SystemExit` for `--limit 0`. Rerun after the rename with the mutation `type=_positive_int`
+  becomes `type=int`: the same failure.
+* ENV-002, mutation = the prior flag back to `--repo` (`dest="repo_name"`, the pre-fix
+  spelling): `tests/test_bugs_prior_cli.py::test_prior_flag_is_repo_name`, `assert 2 == 0`
+  (argparse refuses `--repo-name`).
 """
 from __future__ import annotations
 
@@ -45,14 +56,14 @@ def _ledger(tmp_path, monkeypatch, files=("a.py",)):
 
 def test_prints_block_for_matching_rows(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch)
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py"])
     assert rc == 0
     assert "- [P2]" in capsys.readouterr().out
 
 
 def test_missing_ledger_prints_empty_block(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("CCA_BUGS_DIR", str(tmp_path / "none"))
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py"])
     assert rc == 0
     assert capsys.readouterr().out.rstrip().endswith("(no ledger)")
 
@@ -89,7 +100,7 @@ def test_missing_git_binary_prints_empty_block(tmp_path, monkeypatch, capsys):
 
 def test_json_shape(tmp_path, monkeypatch, capsys):
     _ledger(tmp_path, monkeypatch, files=("a.py", "b.py"))
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--json"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)
     assert data["repo"] == "o/r"
@@ -100,14 +111,14 @@ def test_json_shape(tmp_path, monkeypatch, capsys):
 
 def test_before_flag_is_validated():
     with pytest.raises(SystemExit) as exc:
-        main(["prior", "--repo", "o/r", "--files", "a.py", "--before", "2026-13-40"])
+        main(["prior", "--repo-name", "o/r", "--files", "a.py", "--before", "2026-13-40"])
     assert exc.value.code == 2
 
 
 def test_before_requires_zero_padded_date():
     # The filter compares strings, so `2026-2-1` would sort after `2026-10-01`.
     with pytest.raises(SystemExit) as exc:
-        main(["prior", "--repo", "o/r", "--files", "a.py", "--before", "2026-2-1"])
+        main(["prior", "--repo-name", "o/r", "--files", "a.py", "--before", "2026-2-1"])
     assert exc.value.code == 2
 
 
@@ -123,7 +134,25 @@ def test_text_output_survives_a_narrow_stdout_encoding(tmp_path, monkeypatch):
     raw = io.BytesIO()
     stream = io.TextIOWrapper(raw, encoding="cp1252")
     monkeypatch.setattr(sys, "stdout", stream)
-    rc = main(["prior", "--repo", "o/r", "--files", "a.py"])
+    rc = main(["prior", "--repo-name", "o/r", "--files", "a.py"])
     stream.flush()
     assert rc == 0
     assert "- [P2] B1, 2026-10-01" in raw.getvalue().decode("cp1252")
+
+
+def test_limit_must_be_positive():
+    for bad in ("0", "-1"):
+        with pytest.raises(SystemExit) as exc:
+            main(["prior", "--repo-name", "o/r", "--files", "a.py", "--limit", bad])
+        assert exc.value.code == 2
+
+
+def test_prior_flag_is_repo_name(tmp_path, monkeypatch, capsys):
+    # `backfill --repo` takes a path, so `prior` names its OWNER/NAME `--repo-name`.
+    _ledger(tmp_path, monkeypatch)
+    try:
+        rc = main(["prior", "--repo-name", "o/r", "--files", "a.py", "--json"])
+    except SystemExit as exc:
+        rc = exc.code
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out)["repo"] == "o/r"
