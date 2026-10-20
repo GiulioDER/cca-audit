@@ -23,6 +23,20 @@ test_hunt_never_passes_cross_repo (assert sentences: no sentence names --cross-r
 test_settled_decisions_are_context_inside_a_fence and test_codex_mentions_recall_cca. The production
 target is the Step 1 paragraph of audit-fix.md and item 1 of Orchestrate subagents in the Codex
 SKILL.md.
+
+test_deferred_pass_does_not_run_bugs_prior failed on its `assert` against 5fb56d1, whose Step 1
+told the deferred pass to run `bugs prior` over the deferred findings (rerun 2026-10-20 on a
+`git archive 5fb56d1` copy with this file: 1 failed, AssertionError).
+
+Red proof (run 2026-10-20, final review): this file was copied into a `git archive fbe4dd8` copy and
+run with `python -m pytest tests/test_pipeline_prose.py -q -p no:cacheprovider`: 4 failed, 51
+passed, each on its `assert` (AssertionError): test_hunt_passes_root_of_targets (no sentence names
+`--root <git top level of TARGETS>`), test_hunt_skips_recall_cca (no skip clause),
+test_codex_builds_the_brief_once_before_the_role_list (the brief sat inside item 1 of the role
+list) and test_settled_fence_cannot_be_closed_by_a_memo (no fence length rule). The second half of
+test_hunt_skips_recall_cca was proved separately: removing `DIFF mode only: ` from item 1 of Step 1
+fails `assert all("DIFF mode only" in s for s in queries)`. The production target is Step 1 of
+audit-fix.md and the brief paragraph before "For each dispatched role" in the Codex SKILL.md.
 """
 
 from __future__ import annotations
@@ -716,3 +730,57 @@ def test_trust_gate_lives_in_bugs_prior_not_in_the_orchestrator():
         assert "trust_state" in text
         assert "reads `trust_state` `trusted`, run" not in text
         assert "reads `trust_state` `trusted`, first run" not in text
+
+
+def _codex_brief():
+    return CODEX.split("## Orchestrate subagents", 1)[1].split("For each dispatched role:", 1)[0]
+
+
+def _sentences(text):
+    return re.split(r"(?<=[.;])\s", " ".join(text.split()))
+
+
+def test_hunt_passes_root_of_targets():
+    """Final review item 2. Invariant: a hunt reads the ledger rows of the repository that holds
+    the hunted paths, never the user's checkout. Red against fbe4dd8: neither text names `--root`."""
+    for text in (_step1(), _codex_brief()):
+        hits = [s for s in _sentences(text) if "--root <git top level of TARGETS>" in s]
+        assert hits, text[:80]
+        assert all("HUNT" in s for s in hits)
+        assert "rev-parse --show-toplevel" in " ".join(text.split())
+
+
+def test_hunt_skips_recall_cca():
+    """Final review item 2. Invariant: no RE-call query runs in a hunt, and the query
+    instruction applies to DIFF only. Red against fbe4dd8: no "no saved responses" clause, and
+    the `recall_search` sentence names no mode."""
+    for text in (_step1(), _codex_brief()):
+        flat = " ".join(text.split())
+        assert "skip the `recall-cca` step entirely (no queries, no saved responses, no `--similar`)" in flat
+        queries = [s for s in _sentences(text) if "recall_search" in s]
+        assert queries
+        assert all("DIFF mode only" in s for s in queries)
+
+
+def test_codex_builds_the_brief_once_before_the_role_list():
+    """Final review item 1. Invariant: the brief is built once per run, before the per role
+    list, and goes into Layer 1 auditor prompts only. Red against fbe4dd8: the `bugs prior` and
+    `recall-cca` sentences sat inside item 1 of the per role list."""
+    brief = _codex_brief().strip().split("\n\n")[-1]
+    assert brief.startswith("Once per run, before dispatching Layer 1 auditors")
+    for needle in ("bugs prior --files", "recall-cca", "--similar", "Layer 1 auditor prompts only",
+                   "an empty block is pasted as is"):
+        assert needle in " ".join(brief.split()), needle
+    roles = CODEX.split("For each dispatched role:", 1)[1].split("\n2. ", 1)[0]
+    assert "bugs prior" not in roles and "recall-cca" not in roles
+    assert "for a Layer 1 auditor role the" in " ".join(roles.split())
+
+
+def test_settled_fence_cannot_be_closed_by_a_memo():
+    """Final review item 5. Invariant: a quoted memo cannot close the settled decisions fence,
+    and each memo is bounded. Red against fbe4dd8: the text asked for a plain ```text fence."""
+    for text in (_step1(), _codex_brief()):
+        flat = " ".join(text.split())
+        assert "more backticks than the longest backtick run in the quoted memos" in flat
+        assert "`~~~~text` fence" in flat
+        assert "1,500 characters per memo" in flat
