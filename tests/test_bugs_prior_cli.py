@@ -25,8 +25,10 @@ Final review, run 2026-10-20, same procedure, each failure in the test body:
 """
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import sys
 
 import pytest
 
@@ -100,3 +102,28 @@ def test_before_flag_is_validated():
     with pytest.raises(SystemExit) as exc:
         main(["prior", "--repo", "o/r", "--files", "a.py", "--before", "2026-13-40"])
     assert exc.value.code == 2
+
+
+def test_before_requires_zero_padded_date():
+    # The filter compares strings, so `2026-2-1` would sort after `2026-10-01`.
+    with pytest.raises(SystemExit) as exc:
+        main(["prior", "--repo", "o/r", "--files", "a.py", "--before", "2026-2-1"])
+    assert exc.value.code == 2
+
+
+def test_text_output_survives_a_narrow_stdout_encoding(tmp_path, monkeypatch):
+    # A piped stdout on Windows is cp1252 with strict errors; a summary it cannot encode
+    # must not make the verb crash.
+    monkeypatch.setenv("CCA_BUGS_DIR", str(tmp_path))
+    row = {"bug_id": "B1", "finding_id": "DAT-002", "repo": "o/r", "tier": "proved",
+           "sources": ["git:x"], "date": "2026-10-01", "severity": "P2", "files": ["a.py"],
+           "summary": "snow ☃ and \x1b[2J", "fix_commit": "e3ee162" + "0" * 33,
+           "supersedes": None}
+    (tmp_path / "bugs.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+    rc = main(["prior", "--repo", "o/r", "--files", "a.py"])
+    stream.flush()
+    assert rc == 0
+    assert "- [P2] B1, 2026-10-01" in raw.getvalue().decode("cp1252")

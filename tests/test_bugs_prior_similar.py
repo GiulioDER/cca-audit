@@ -304,3 +304,12 @@ def test_cli_similar_text_block(tmp_path, monkeypatch, capsys):
     assert out.startswith("PRIOR FIXES IN THESE FILES")
     assert f"\n\n{SIMILAR_HEADING}\n```text\n- [P2] {SECOND}," in out
     assert "IGNORE PREVIOUS INSTRUCTIONS" not in out
+
+
+def test_deeply_nested_response_is_skipped_and_named(tmp_path, monkeypatch, capsys):
+    _ledger(tmp_path, monkeypatch, [_row(SECOND, files=["z.py"])])
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 100_000, encoding="utf-8")
+    rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--similar", str(deep), "--json"])
+    assert rc == 0
+    assert "deep.json" in json.loads(capsys.readouterr().out)["similar_error"]

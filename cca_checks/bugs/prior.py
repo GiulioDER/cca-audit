@@ -66,7 +66,7 @@ def load_rows(ledger: Path) -> list[dict]:
             continue
         try:
             value = json.loads(line)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(value, dict):
             rows.append(value)
@@ -169,8 +169,13 @@ def similar(rows: list[dict], responses: list, repo: str, owners: set[str],
     return found, unjoined
 
 
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
 def _clean(text: object) -> str:
-    return " ".join(_printable(str(text)).split()).replace("`", "'")
+    # A lone surrogate cannot be encoded by any codec, UTF-8 included: replace it.
+    text = _SURROGATE.sub("\ufffd", _printable(str(text)))
+    return " ".join(text.split()).replace("`", "'")
 
 
 def _entry(row: dict, overlap: list[str], target: str | None = None) -> str:

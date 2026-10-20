@@ -37,10 +37,13 @@ def _bind_arg(spec: str) -> tuple[str, str]:
 
 
 def _date_arg(value: str) -> str:
+    # The filters compare dates as strings, so only the zero padded form orders correctly.
     try:
         datetime.strptime(value, "%Y-%m-%d")
     except ValueError:
         raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}") from None
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}")
     return value
 
 
@@ -51,7 +54,7 @@ def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
     for path in paths:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             errors.append(f"{path}: {type(exc).__name__}")
             continue
         if not isinstance(value, dict):
@@ -59,6 +62,12 @@ def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
             continue
         responses.append(value)
     return responses, "; ".join(errors) or None
+
+
+def _emit(text: str) -> None:
+    # A piped stdout on Windows is cp1252 with strict errors: write only what it can encode.
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(text.encode(encoding, errors="replace").decode(encoding))
 
 
 def _owners(repo: str | None) -> set[str]:
@@ -115,9 +124,9 @@ def _prior(a: argparse.Namespace) -> int:
                 data["similar_error"] = similar_error
         print(json.dumps(data, indent=2))
     elif near is None:
-        print(prior.render(selected, reason))
+        _emit(prior.render(selected, reason))
     else:
-        print(prior.render(selected, reason, similar_rows=near, repo=repo or ""))
+        _emit(prior.render(selected, reason, similar_rows=near, repo=repo or ""))
     return 0
 
 

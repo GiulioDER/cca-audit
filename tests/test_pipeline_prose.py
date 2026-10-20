@@ -782,5 +782,18 @@ def test_settled_fence_cannot_be_closed_by_a_memo():
     for text in (_step1(), _codex_brief()):
         flat = " ".join(text.split())
         assert "more backticks than the longest backtick run in the quoted memos" in flat
-        assert "`~~~~text` fence" in flat
+        # A memo line of four or more tildes closes a tilde fence, so none is offered.
+        assert "~~~~" not in flat
         assert "1,500 characters per memo" in flat
+
+
+def test_hunt_without_a_resolvable_root_pastes_the_empty_block():
+    """CCA run 20261020T124906Z, FIX-007. Invariant: a hunt never falls back to the default
+    `--root .`, so the user's own fixes cannot reach a stranger's hunt brief. Red before the
+    edit: neither text says what to do when the top level cannot be resolved."""
+    for text in (_step1(), _codex_brief()):
+        flat = " ".join(text.split())
+        assert "HUNT mode, when the top level cannot be resolved" in flat
+        assert "same top level as the checkout the run started in" in flat
+        assert "do not run `bugs prior`" in flat
+        assert "paste the empty PRIOR FIXES form instead" in flat

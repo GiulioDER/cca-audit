@@ -163,3 +163,16 @@ def test_unknown_field_values_render_as_placeholders():
     line = next(ln for ln in render(select(rows, "o/r", ["a.py"])).splitlines()
                 if ln.startswith("- ["))
     assert line.startswith("- [P?] ") and ", ?, ?, fix " in line
+
+
+def test_lone_surrogate_is_replaced():
+    text = render(select([_row(summary="a\ud800b")], "o/r", ["a.py"]))
+    assert "a�b" in text
+    assert not any(0xD800 <= ord(c) <= 0xDFFF for c in text)
+
+
+def test_deeply_nested_line_is_skipped(tmp_path):
+    ledger = tmp_path / "bugs.jsonl"
+    ledger.write_text("[" * 100_000 + "\n" + json.dumps(_row(bug_id="ok")) + "\n",
+                      encoding="utf-8")
+    assert [r["bug_id"] for r in load_rows(ledger)] == ["ok"]
