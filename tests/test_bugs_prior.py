@@ -1,4 +1,28 @@
-"""Tests for cca_checks.bugs.prior. Red proof is recorded in that module's docstring."""
+"""Tests for cca_checks.bugs.prior.
+
+Red proof for the first tests is recorded in that module's docstring. Final review, run
+2026-10-20 (user rule, 2026-09-08): each mutation was applied to cca_checks/bugs/prior.py, the
+named test run, and the module restored; every failure is an AssertionError in the test body.
+
+* Drop the forward key (`0 if _forward(item[0]) else 1`) from the sort in `select`:
+  `test_ranking_order`, `assert ['fp', 'b1', 'fh', 'b8'] == ['fp', 'fh', 'b1', 'b8']`.
+* Drop `-len(item[1])` from the sort in `select`: `test_more_overlap_wins_within_a_class`,
+  `assert ['one', 'two'] == ['two', 'one']`.
+* Drop the `before` filter in `select` (`if before is not None and` becomes `if False and`):
+  `test_before_drops_rows_on_or_after_the_date`, `assert ['d11', 'd10', 'd9'] == ['d9']`.
+* `return found` without `[:limit]` in `select`: `test_limit_and_size_bounds`,
+  `assert 12 == 8` (the block trim alone keeps 12 entries).
+* Drop `[:SUMMARY_MAX]` in `_entry`: `test_limit_and_size_bounds`, `assert 3 == 8` (the
+  oversized entries crowd the block).
+* Drop the reason tail in `render` (`reason_tail = ""`): `test_empty_render_states_reason`,
+  the `endswith(... (no ledger))` assertion is False.
+* Drop the `isinstance(value, dict)` check in `load_rows`:
+  `test_load_rows_skips_malformed_lines`, `assert 2 == 1` (the `[1]` line is kept).
+* Short sha `[:7]` becomes `[:12]` in `_entry`: `test_rendered_line_shape`, the expected line
+  `fix e3ee162: a bug` is not in the block.
+* `load_rows` returns None instead of `[]` on OSError: `test_load_rows_missing_file`,
+  `assert None == []`.
+"""
 from __future__ import annotations
 
 import itertools

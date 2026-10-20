@@ -11,6 +11,17 @@
   mutation: `git -C <missing>` exits 128, which `remote_repo` already maps to None, so
   it is a regression guard, not the red proof.
 Each was applied, the test run, and the code restored. Both failures are assertions.
+
+Final review, run 2026-10-20, same procedure, each failure in the test body:
+
+* `"files": overlap` becomes `"files": row.get("files")` in the `--json` output:
+  `test_json_shape`, `assert ['a.py', 'b.py'] == ['a.py']`. Its fixture row names two files
+  and the query one, so the overlap differs from the row's files; with one file each (the
+  version before this review) the test could not go red under this mutation.
+* Drop `type=_date_arg` from `--before`: `test_before_flag_is_validated`, `Failed: DID NOT
+  RAISE SystemExit`.
+* Ignore `--repo` in `_prior` (`repo = a.repo` becomes `repo = None`):
+  `test_prints_block_for_matching_rows`, `assert '- [P2]' in ...` (the empty block prints).
 """
 from __future__ import annotations
 
@@ -22,10 +33,10 @@ import pytest
 from cca_checks.bugs.__main__ import main
 
 
-def _ledger(tmp_path, monkeypatch):
+def _ledger(tmp_path, monkeypatch, files=("a.py",)):
     monkeypatch.setenv("CCA_BUGS_DIR", str(tmp_path))
     row = {"bug_id": "B1", "finding_id": "DAT-002", "repo": "o/r", "tier": "proved",
-           "sources": ["git:x"], "date": "2026-10-01", "severity": "P2", "files": ["a.py"],
+           "sources": ["git:x"], "date": "2026-10-01", "severity": "P2", "files": list(files),
            "summary": "a bug", "fix_commit": "e3ee162" + "0" * 33, "supersedes": None}
     (tmp_path / "bugs.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
 
@@ -75,7 +86,7 @@ def test_missing_git_binary_prints_empty_block(tmp_path, monkeypatch, capsys):
 
 
 def test_json_shape(tmp_path, monkeypatch, capsys):
-    _ledger(tmp_path, monkeypatch)
+    _ledger(tmp_path, monkeypatch, files=("a.py", "b.py"))
     rc = main(["prior", "--repo", "o/r", "--files", "a.py", "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)

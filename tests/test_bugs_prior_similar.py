@@ -49,6 +49,11 @@ Fix round 1, same procedure, every failure an AssertionError:
   `test_cli_without_similar_is_unchanged`, the literal captured from 81edf08 differs.
 * `similar` called without `limit=min(a.limit, 5)`: `test_cli_similar_respects_limit`,
   failing `assert 4 == 2`.
+
+Final review, run 2026-10-20, same procedure:
+
+* `render` joins the two blocks with one newline instead of a blank line:
+  `test_empty_similar_block_shape`, failing its `assert text == (...)` equality.
 """
 from __future__ import annotations
 
