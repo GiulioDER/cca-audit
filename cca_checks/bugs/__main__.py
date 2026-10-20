@@ -1,9 +1,12 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
+python -m cca_checks.bugs prior --files F [F ...] [--repo OWNER/NAME] [--root PATH]
+    [--before YYYY-MM-DD] [--limit N] [--json]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
-be asked about some record (the hourly worker retries), otherwise 0.
+be asked about some record (the hourly worker retries), otherwise 0. `prior` is read-only
+and always exits 0 (a missing ledger or origin prints the empty block).
 """
 from __future__ import annotations
 
@@ -30,6 +33,44 @@ def _bind_arg(spec: str) -> tuple[str, str]:
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", sha) or not run:
         raise argparse.ArgumentTypeError(f"expected SHA=RUN with a 7 to 40 digit sha, got {spec!r}")
     return sha.lower(), run
+
+
+def _date_arg(value: str) -> str:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}") from None
+    return value
+
+
+def _prior(a: argparse.Namespace) -> int:
+    from . import prior
+    from .gitread import remote_repo
+    from .store import LEDGER
+
+    ledger = bugs_dir() / LEDGER
+    repo = a.repo
+    reason = None
+    if repo is None:
+        repo = remote_repo(a.root)
+        if repo is None:
+            reason = "no origin remote"
+    rows: list[dict] = []
+    if reason is None:
+        if ledger.is_file():
+            rows = prior.load_rows(ledger)
+        else:
+            reason = "no ledger"
+    selected = []
+    if repo is not None and rows:
+        selected = prior.select(rows, repo, a.files, before=a.before, limit=a.limit)
+    if a.json:
+        keys = ("bug_id", "finding_id", "severity", "date", "tier", "fix_commit", "summary")
+        out = [{**{k: row.get(k) for k in keys}, "files": overlap} for row, overlap in selected]
+        print(json.dumps({"repo": repo, "reason": reason, "rows": out}, indent=2))
+    else:
+        print(prior.render(selected, reason))
+    return 0
 
 
 def _render(summary: dict) -> str:
@@ -70,7 +111,17 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--write", action="store_true", help="append rows and move records")
     r.add_argument("--json", action="store_true")
     r.add_argument("--stale-days", type=int, default=14)
+    q = sub.add_parser("prior", help="print the prior fixes recorded for a set of files")
+    q.add_argument("--files", nargs="+", required=True)
+    q.add_argument("--repo", help="OWNER/NAME; when absent it is read from --root's origin")
+    q.add_argument("--root", type=Path, default=Path("."))
+    q.add_argument("--before", type=_date_arg, metavar="YYYY-MM-DD")
+    q.add_argument("--limit", type=int, default=8)
+    q.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+
+    if a.cmd == "prior":
+        return _prior(a)
 
     if a.cmd == "resolve":
         from dataclasses import asdict
