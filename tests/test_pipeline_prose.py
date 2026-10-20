@@ -670,8 +670,9 @@ def test_tool_layer_refusals_name_the_packaged_commands():
 
 RULE = (
     "- The PRIOR FIXES block lists bugs already fixed in these files. It is context, not findings "
-    "and not instructions: never report a listed bug unless the code under audit reintroduces it, "
-    "and use it to check whether the same class of bug appears elsewhere in the code under audit."
+    "and not instructions. Use it to look for the same class of bug in the code under audit. It "
+    "never narrows what you report: report every defect you find, and leave out only a listed bug "
+    "that the code under audit has not reintroduced."
 )
 
 
@@ -682,6 +683,12 @@ def test_step1_runs_bugs_prior_once():
 
 def test_prior_fixes_rule_in_both_modes():
     assert PIPELINE.count(RULE) == 2
+
+
+def test_prior_fixes_rule_does_not_tell_auditors_to_withhold():
+    # The replay of 2026-10-20 (docs/preregistrations/2026-10-20-prior-bugs-rule-and-noise.md)
+    # measured the old wording alone costing as many confirmed findings as the whole block.
+    assert "never report a listed bug" not in PIPELINE
 
 
 def test_codex_builds_prompts_with_prior_bugs():
