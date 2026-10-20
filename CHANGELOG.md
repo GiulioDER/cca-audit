@@ -6,7 +6,7 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.12.1] - 2026-10-20
 
 **A P2 or P3 fix can now be proved without a red proof.** Until now a ledger row was `proved`
 only when all four conditions were evidenced, the red proof included. The pipeline, though, asks
@@ -20,8 +20,8 @@ evidenced. Nothing else is excused. A proof that exists but is not RED still cou
 any priority, a P1 still needs its RED proof, and a finding whose priority is missing or unknown
 is treated as needing one. A proof that cannot be attributed to any finding of the run means no
 P2 or P3 in that run is excused. A proof file that is not a list of entries counts as
-unattributable, so no P2 or P3 in that run is excused. Backfill rows are unchanged. The memo shows the value as "not
-required (not a P1 fix)".
+unattributable, so no P2 or P3 in that run is excused. Backfill rows are unchanged. The memo
+shows the value as "not required (not a P1 fix)".
 
 Rows already in the ledger keep the tier they were written with, because the ledger is
 append-only: only rows written from now on use the new rule.
