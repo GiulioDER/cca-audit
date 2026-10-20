@@ -111,3 +111,31 @@ def test_load_rows_skips_malformed_lines(tmp_path):
 
 def test_load_rows_missing_file(tmp_path):
     assert load_rows(tmp_path / "nope.jsonl") == []
+
+
+def test_malformed_fields_are_skipped_not_raised():
+    rows = [_row(bug_id="bad1", supersedes=["x"]), _row(bug_id={"a": 1}),
+            _row(bug_id="bad3", files=7), _row(bug_id="good")]
+    assert _ids_of(select(rows, "o/r", ["a.py"])) == ["good"]
+
+
+def test_block_trims_to_bound():
+    names = [f"d/{'n' * 200}{i}.py" for i in range(6)]
+    rows = [_row(files=names, summary="y" * 240) for _ in range(8)]
+    text = render(select(rows, "o/r", names))
+    assert len(text) <= 4000
+    assert text.endswith("\n```")
+    shown = [ln for ln in text.splitlines() if ln.startswith("- [")]
+    assert len(shown) < 8
+    # whole entries are dropped; the last kept one is not cut in half
+    assert len([ln for ln in text.splitlines() if ln.startswith("  files: ")]) == len(shown)
+    one = render(select([_row(bug_id="B" * 5000)], "o/r", ["a.py"]))
+    assert len(one) <= 4000
+    assert one.endswith("\n```")
+
+
+def test_unknown_field_values_render_as_placeholders():
+    rows = [_row(severity="P9", tier="x`y", date="not a date")]
+    line = next(ln for ln in render(select(rows, "o/r", ["a.py"])).splitlines()
+                if ln.startswith("- ["))
+    assert line.startswith("- [P?] ") and ", ?, ?, fix " in line
