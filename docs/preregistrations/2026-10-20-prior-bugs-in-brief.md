@@ -111,3 +111,72 @@ Cost: 26 audit runs, about 260 agents.
 * **Ledger dating.** `--before` filters by the date of a row's merge, so a fix merged before the
   run date but written for a later change could still appear; rows are few enough to inspect.
 * **Corpus skew.** Six of eight runs are RE-call; a result may not carry to other repositories.
+
+## Result (2026-10-20)
+**Status:** measured
+
+Measured by the workflow `prior-bugs-replay` (run `wf_bc599911-a13`, 242 agents, none errored, about
+16.2M subagent tokens), scored from the files by a script, not from the agents' own counts.
+
+| run | A | B | C | A′ |
+|---|---:|---:|---:|---:|
+| 20261012T223135Z | 16 | 14 | 10 | |
+| 20261013T084136Z | 4 | 4 | 3 | 4 |
+| 20261013T112241Z | 0 | 0 | 2 | 0 |
+| 20261013T160707Z | 8 | 6 | 7 | |
+| 20261018T134705Z | 21 | 18 | 25 | |
+| 20261018T210526Z | 11 | 3 | 2 | |
+| 20261020T094942Z | 1 | 1 | 1 | |
+| 20261020T124906Z | 10 | 8 | 5 | |
+| **confirmed** | **71** | **54** | **55** | 4 |
+| fp_rate | 3/81 = 3.7% | 1/60 = 1.7% | 6/66 = 9.1% | 1/5 |
+| raw findings | 246 | 209 | 230 | 20 |
+| leaked | | 0 | 0 | |
+
+Scored prediction by prediction:
+
+1. **B beats A: falsified, in the opposite direction.** Predicted +2 to +6; measured B minus A =
+   **minus 17**, and B ahead in **0 of 8** runs (predicted 3 to 5). B produced fewer raw findings
+   (209 against 246) and fewer P1 plus P2 to verify (60 against 81).
+2. **C adds little over B: held.** Predicted minus 1 to plus 1; measured C minus B = **plus 1**.
+   The reason I gave was wrong: the similar block was non-empty in 6 of 8 runs, not mostly empty
+   (the probes before the run were not representative of diff-written queries).
+3. **No precision cost: held for B, falsified for C.** B's rate is 2.0 points below A's; C's is 5.4
+   points above, over the 5-point bound.
+4. **No leakage: held.** 0 leaked findings in B and in C.
+5. **Noise small: held,** on the two smallest runs only: A′ equals A exactly (4 and 4, 0 and 0).
+   The spread on the large runs, where the B deficit is concentrated, is not measured.
+
+**Gap, and what it means.** I predicted the history would make auditors find more; it made them
+report less. The likeliest mechanism, not measured: the rule paired with the block ("never report a
+listed bug unless the code reintroduces it") makes auditors suppress anything resembling a listed
+bug, so they file fewer findings overall, including real ones. Run 20261018T210526Z carries most of
+the loss (11 to 3). Fewer confirmations is not shown to be worse auditing: `confirmed` counts what a
+haiku fp-check accepted, not bugs proved real, and the fp-check here was lenient (3.7% false
+positives in A, against 15% in the original runs). What the data does support is narrow: with this
+pipeline text, the block does not increase confirmed findings, and it does not improve them enough
+to show in this metric.
+
+**Apparatus checks.**
+* B block non-empty: **6 of 8** runs, not 8 (the plan's check failed). 20261013T112241Z and
+  20261013T160707Z have no older ledger rows for their own diff files; my corpus check had matched
+  on the files of the findings instead. In those two runs B differs from A only by the empty block
+  and its rule text, yet 160707Z still moved 8 to 6, which is a hint that noise on larger runs is
+  bigger than A′ shows.
+* C similar block non-empty: 6 of 8 runs (5, 1, 1, 3, 4 rows and 0, 0 where all three queries
+  abstained).
+* Auditor set equal across arms by construction (from tier and diff); audited diff stats match the
+  table above.
+
+**Deviations from the plan, all applied to every arm alike.**
+* Every agent ran on haiku (the user's instruction for this run), including the verifier.
+* Layer 2.5 was one fp-check per run and arm: no adversarial 2-of-3 panel on high-stakes P1s.
+* Priorities were the auditors' own, merged by highest; no orchestrator re-map.
+* Orchestration was a script (L1 auditors, a deterministic consolidation script, fp-check, leakage
+  check), not the `/audit-fix` skill run 26 times.
+* Run 1's auditors were dispatched by hand, the other seven runs' by the workflow, with identical
+  prompts.
+
+**Next.** Before treating the block as harmful, two things would separate the explanations: the
+rule text without the block (to test the suppression mechanism), and A repeated on the large runs
+(to measure the noise the B deficit sits inside).
