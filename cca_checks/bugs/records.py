@@ -405,19 +405,18 @@ class RerenderReport:
     stray: list[str] = field(default_factory=list)
 
 
-def rerender_all(root: Path, modified: str) -> RerenderReport:
-    """Rewrite every memo under `root` from its ledger row. The ledger is only read.
+def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
+    """Every row of the ledger under `root` by id, and "line N: reason" for each unreadable line.
 
-    This is the one sanctioned overwrite of memos (`store.write` never overwrites one): the
-    ledger is the system of record, and a memo is a rendering of it. The first line of an id
-    wins, as in `store.existing_ids`.
+    The first line of an id wins, as in `store.existing_ids`. Lines are split on LF only, so a
+    line separator inside a value written before `one_line` existed cannot split a row.
     """
-    from .store import LEDGER, MEMOS
+    from .store import LEDGER
 
-    report = RerenderReport()
     ledger = root / LEDGER
     lines = ledger.read_text(encoding="utf-8").split("\n") if ledger.exists() else []
     rows: dict[str, Row] = {}
+    skipped: list[str] = []
     for number, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -425,9 +424,22 @@ def rerender_all(root: Path, modified: str) -> RerenderReport:
             row = row_from_ledger(json.loads(line))
             row_id = row.id
         except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as exc:
-            report.skipped.append(f"line {number}: {type(exc).__name__}: {exc}")
+            skipped.append(f"line {number}: {type(exc).__name__}: {exc}")
             continue
         rows.setdefault(row_id, row)
+    return rows, skipped
+
+
+def rerender_all(root: Path, modified: str) -> RerenderReport:
+    """Rewrite every memo under `root` from its ledger row. The ledger is only read.
+
+    This is the one sanctioned overwrite of memos (`store.write` never overwrites one): the
+    ledger is the system of record, and a memo is a rendering of it.
+    """
+    from .store import MEMOS
+
+    rows, skipped = read_ledger(root)
+    report = RerenderReport(skipped=skipped)
     memos = root / MEMOS
     memos.mkdir(parents=True, exist_ok=True)
     for row_id, row in rows.items():

@@ -28,7 +28,7 @@ from .forward import Merge, rows_and_skips
 from .ledgers import fix_number
 from .model import SHA40, SHA_LEN, BugRow, render_memo
 from .pending import ABANDONED, PENDING, RECORDED, TMP_PREFIX
-from .store import LEDGER
+from .store import LEDGER, bug_rows
 from .store import write as write_rows
 
 DEFAULT_RUNNER = github.gh
@@ -250,11 +250,12 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
             _stale(report, folder, meta, "waiting", now, stale_days)
     ordinals = _Ordinals(root / LEDGER)
     backfilled = _Backfilled(root / LEDGER)
+    known_rows = bug_rows(root / LEDGER)  # caused_by: the earlier fixes a row's lines came from
     batch = []
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     for folder, merge in merged:
         try:
-            pairs, skipped = rows_and_skips(folder, merge)
+            pairs, skipped = rows_and_skips(folder, merge, known_rows)
             for row, _ in pairs:  # a memo that cannot render must fail here, not mid-write
                 render_memo(row, stamp)
         except Exception as exc:  # one bad record must not stop the others

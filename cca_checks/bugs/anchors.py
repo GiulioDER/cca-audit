@@ -157,6 +157,30 @@ def anchor_for(repo_root: Path, file: str, line: int) -> Anchor:
     return anchor_at(relative, read_source(Path(repo_root) / relative), line)
 
 
+def fixed_anchor(repo_root: Path, base: str, head: str, file: str, line: int) -> Anchor | None:
+    """The anchor of a finding at `file:line` of `base`, hashed over the fixed code at `head`.
+
+    L2 cites base lines, which the fix may shift, so the symbol is resolved in `base` and its
+    span hashed in `head`. A symbol the fix removed or renamed anchors at file level; a file the
+    fix deleted, or one outside the repository, has no anchor.
+    """
+    from .gitread import GitError, git
+
+    try:
+        relative = _relative(Path(repo_root), file)
+        fixed = git(Path(repo_root), "show", f"{head}:{relative}")
+    except (ValueError, GitError):
+        return None
+    if relative.endswith(".py") and line > 0:
+        try:
+            symbol = enclosing_symbol(git(Path(repo_root), "show", f"{base}:{relative}"), line)
+            if symbol is not None:
+                return Anchor(relative, symbol, symbol_sha(fixed, symbol))
+        except (GitError, SyntaxError, KeyError):
+            pass
+    return Anchor(relative, None, code_sha(fixed))
+
+
 def anchors_for_findings(repo_root: Path, findings: list[dict]) -> list[Anchor]:
     """One anchor per finding whose `file` and `line` resolve, in order, without duplicates.
 

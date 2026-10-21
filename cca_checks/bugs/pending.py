@@ -14,6 +14,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import run_facts
 from .gitread import remote_repo
 from .store import bugs_dir
 
@@ -47,6 +48,25 @@ def _own_rows(root: Path, run_id: str) -> str:
     return "".join(f"{line}\n" for line in keep)
 
 
+def _write_facts(root: Path, run_dir: Path, summary: dict, fixes: list, dest: Path) -> None:
+    """Anchors and blamed commits of the fixed findings (run_facts.py), from this checkout.
+
+    Never fails a capture: a run whose facts could not be computed is still kept, and the
+    reason is written in their place.
+    """
+    commit, base = summary.get("commit"), summary.get("base_commit")
+    if not (isinstance(base, str) and base and isinstance(commit, str)) or base == commit:
+        return
+    try:
+        l2_path = run_dir / "L2.json"
+        l2 = json.loads(l2_path.read_text(encoding="utf-8-sig")) if l2_path.exists() else []
+        facts = run_facts.compute(root, base, commit, l2 if isinstance(l2, list) else [],
+                                  fixes if isinstance(fixes, list) else [])
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        facts = {"schema": run_facts.SCHEMA, "error": f"{type(exc).__name__}: {exc}"}
+    (dest / run_facts.NAME).write_text(json.dumps(facts, indent=1) + "\n", encoding="utf-8")
+
+
 def capture(root, run_id: str) -> Path | None:
     root = Path(root)
     run_dir = root / ".claude" / "audits" / "runs" / run_id
@@ -70,6 +90,7 @@ def capture(root, run_id: str) -> Path | None:
                 shutil.copy2(run_dir / name, tmp / name)
         (tmp / "scorecard.jsonl").write_text(_own_rows(root, run_id), encoding="utf-8",
                                              newline="\n")
+        _write_facts(root, run_dir, summary, fixes, tmp)
         meta = {
             "schema": 1, "run_id": run_id, "commit": commit,
             "repo": remote_repo(root), "branch": _branch(root),

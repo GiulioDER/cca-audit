@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
-from .model import memo_filename
+from .model import BugRow, memo_filename
 from .records import Row, ledger_line, one_line, render_memo
 
 LEDGER = "bugs.jsonl"
@@ -39,7 +40,22 @@ def existing_ids(ledger: Path) -> set[str]:
     return ids
 
 
-def write(rows: list[Row], root: Path, modified: str) -> tuple[int, int]:
+def bug_rows(ledger: Path) -> list[BugRow]:
+    """Every bug row the ledger holds; a line that does not read is skipped, as above."""
+    if not ledger.exists():
+        return []
+    rows = []
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            value = json.loads(line)
+            if value.get("kind", "bug") == "bug":
+                rows.append(BugRow.from_json(value))
+        except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+            continue
+    return rows
+
+
+def write(rows: Sequence[Row], root: Path, modified: str) -> tuple[int, int]:
     memos = root / MEMOS
     memos.mkdir(parents=True, exist_ok=True)
     ledger = root / LEDGER

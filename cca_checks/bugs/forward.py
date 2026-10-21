@@ -11,10 +11,14 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .anchors import Anchor
+from .caused_by import bugs_for_commits
 from .ledgers import fix_number
 from .model import ABSENT, CLAIMED, EVIDENCED, NOT_REQUIRED, BugRow
 
 _SAFE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_SHA40 = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclass(frozen=True)
@@ -123,21 +127,52 @@ def _not_fixed(entry: dict, fix_id: str, card: list[dict]) -> str | None:
     return None
 
 
-def rows_for(record: Path, merge: Merge) -> list[BugRow]:
-    return [row for row, _ in rows_with_fix_ids(record, merge)]
+def _anchors(facts: dict) -> list[Anchor]:
+    """The finding's anchors from run_facts.json, keeping only well-formed ones."""
+    out = []
+    raw = facts.get("anchors")
+    for a in raw if isinstance(raw, list) else []:
+        if not isinstance(a, dict):
+            continue
+        file, symbol, sha = a.get("file"), a.get("symbol"), a.get("code_sha")
+        if (isinstance(file, str) and file and "\\" not in file
+                and (symbol is None or isinstance(symbol, str) and symbol)
+                and isinstance(sha, str) and _SHA256.fullmatch(sha)):
+            out.append(Anchor(file, symbol, sha))
+    return out
 
 
-def rows_with_fix_ids(record: Path, merge: Merge) -> list[tuple[BugRow, str]]:
+def _introduced_by(facts: dict) -> list[str]:
+    raw = facts.get("introduced_by")
+    if not isinstance(raw, list):
+        return []
+    return [s for s in raw if isinstance(s, str) and _SHA40.fullmatch(s)]
+
+
+def rows_for(record: Path, merge: Merge, ledger: list[BugRow] | None = None) -> list[BugRow]:
+    return [row for row, _ in rows_with_fix_ids(record, merge, ledger)]
+
+
+def rows_with_fix_ids(record: Path, merge: Merge,
+                      ledger: list[BugRow] | None = None) -> list[tuple[BugRow, str]]:
     """Each row with the L4 fix id it came from, which a backfill row may be keyed by."""
-    return rows_and_skips(record, merge)[0]
+    return rows_and_skips(record, merge, ledger)[0]
 
 
-def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]], list[str]]:
+def rows_and_skips(record: Path, merge: Merge, ledger: list[BugRow] | None = None,
+                   ) -> tuple[list[tuple[BugRow, str]], list[str]]:
     """The rows, and "<finding id> <reason>" for each L4 entry that was not fixed.
 
     A fix parked or reverted after L4 was recorded stays in L4.json, so only an entry
     with a fix id whose scorecard result, when there is one, is `fixed` becomes a row.
+
+    Anchors and caused_by come from the record's run_facts.json, computed at capture where
+    the checkout was; the commits it names become caused_by through `ledger`'s rows of the
+    same repository. A record captured before run_facts existed gives rows with neither.
     """
+    raw_facts = _load(record, "run_facts.json", {})
+    by_finding = raw_facts.get("findings") if isinstance(raw_facts, dict) else None
+    by_finding = by_finding if isinstance(by_finding, dict) else {}
     meta = _load(record, "meta.json", {})
     l2 = {f.get("id"): f for f in _load(record, "L2.json", []) if isinstance(f, dict)}
     l25 = {v.get("id"): v.get("verdict") for v in _load(record, "L2.5.json", [])
@@ -167,6 +202,8 @@ def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]]
             continue
         found = l2.get(finding, {})
         severity = _text(found.get("priority"))
+        facts = by_finding.get(finding)
+        facts = facts if isinstance(facts, dict) else {}
         out.append((BugRow(
             project=merge.repo.split("/", 1)[1], repo=merge.repo, finding_id=finding,
             fix_commit=merge.sha, date=merge.date, files=_files(entry.get("files")),
@@ -182,5 +219,7 @@ def rows_and_skips(record: Path, merge: Merge) -> tuple[list[tuple[BugRow, str]]
             },
             sources=[f"run:{merge.repo}:{run_id}", f"pr:{merge.repo}#{merge.pr}",
                      f"git:{merge.sha}"],
+            anchors=_anchors(facts),
+            caused_by=bugs_for_commits(_introduced_by(facts), merge.repo, ledger or []),
         ), fix_id))
     return out, skipped
