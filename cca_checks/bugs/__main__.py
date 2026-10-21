@@ -2,12 +2,15 @@
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
 python -m cca_checks.bugs prior --files F [F ...] [--repo-name OWNER/NAME] [--root PATH]
     [--before YYYY-MM-DD] [--limit N] [--similar PATH [PATH ...]] [--cross-repo] [--json]
+python -m cca_checks.bugs rerender --all [--modified STAMP] [--json]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
 be asked about some record (the hourly worker retries), otherwise 0. `prior` is read-only
 and exits 0 on any data or environment problem (a missing ledger or origin prints the empty
-block), and 2 on a usage error (argparse).
+block), and 2 on a usage error (argparse). `rerender --all` rewrites every memo from the
+ledger, the one sanctioned overwrite of memos, and never writes the ledger; it exits 1 when a
+ledger line could not be read (that memo is left as it was).
 """
 from __future__ import annotations
 
@@ -145,6 +148,24 @@ def _prior(a: argparse.Namespace) -> int:
     return 0
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _rerender(a: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from .records import rerender_all
+
+    report = rerender_all(bugs_dir(), a.modified or _now())
+    data = {**asdict(report), "dir": str(bugs_dir())}
+    if a.json:
+        print(json.dumps(data, indent=2))
+    else:
+        _emit(_printable("\n".join(f"{k}: {v}" for k, v in data.items())))
+    return 1 if report.skipped else 0
+
+
 def _render(summary: dict) -> str:
     return _printable(_render_raw(summary))
 
@@ -195,7 +216,16 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--cross-repo", action="store_true",
                    help="let --similar show rows of other repositories of the allowed owners")
     q.add_argument("--json", action="store_true")
+    w = sub.add_parser("rerender", help="rewrite every memo from its ledger row")
+    w.add_argument("--all", action="store_true", required=True,
+                   help="required: every memo is rewritten, hand edits included")
+    w.add_argument("--modified", metavar="STAMP",
+                   help="the memos' `modified` stamp (default: now, UTC)")
+    w.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+
+    if a.cmd == "rerender":
+        return _rerender(a)
 
     if a.cmd == "prior":
         return _prior(a)
@@ -220,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize(result)
     if a.write:
         root = bugs_dir()
-        modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        modified = _now()
         rows, memos = write(result.rows, root, modified)
         text = "".join(f"{line}\n" for line in result.unparsed)
         (root / "unparsed.txt").write_text(text, encoding="utf-8", newline="\n")
