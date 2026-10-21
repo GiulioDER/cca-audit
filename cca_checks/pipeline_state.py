@@ -115,6 +115,9 @@ class PipelineState:
     paused: dict | None = None
     base_commit: str | None = None
     parent: str | None = None
+    #: The Claude Code session that opened the run (`CLAUDE_CODE_SESSION_ID` at `start`), so
+    #: the stop guard holds that session only. None when started outside Claude Code.
+    owner_session: str | None = None
 
     def to_json(self) -> dict:
         return {
@@ -124,6 +127,7 @@ class PipelineState:
             "seq": self.seq, "stop_refusals": self.stop_refusals,
             "stop_logged": self.stop_logged, "paused": self.paused, "layers": self.layers,
             "base_commit": self.base_commit, "parent": self.parent,
+            "owner_session": self.owner_session,
         }
 
     @classmethod
@@ -151,6 +155,9 @@ class PipelineState:
             paused=raw.get("paused") if isinstance(raw.get("paused"), dict) else None,
             base_commit=raw.get("base_commit") if isinstance(raw.get("base_commit"), str) else None,
             parent=raw.get("parent") if isinstance(raw.get("parent"), str) else None,
+            owner_session=(
+                raw.get("owner_session") if isinstance(raw.get("owner_session"), str) else None
+            ),
         )
 
     @property
@@ -392,6 +399,7 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
         mode=mode, no_fix=no_fix, started_utc=stamp,
         schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
         parent=stored_parent,
+        owner_session=os.environ.get("CLAUDE_CODE_SESSION_ID") or None,
     )
     _write(state, root)
     _registry("register", root, state.run_id)
@@ -1000,8 +1008,10 @@ def resume(root: str | pathlib.Path = ".") -> dict:
     stored = state.paused.get("tree")
     tree = current_tree(state, root)
     state.paused = None
-    # A resumed session is a new session: it gets the Stop hook's three refusals again.
+    # A resumed session is a new session: it gets the Stop hook's three refusals again,
+    # and it owns the run from here, so the stop guard holds it rather than the opener.
     state.stop_refusals = 0
+    state.owner_session = os.environ.get("CLAUDE_CODE_SESSION_ID") or state.owner_session
     state.stop_logged = False
     raw = state.to_json()
     nxt = None if state.legacy else core.next_owed(raw, tree)

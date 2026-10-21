@@ -37,6 +37,14 @@ that run's refusal. A run in a checkout that is neither the session's directory 
 below it is out of scope: this session did not start it, and blocking on it would
 trap every session on the machine. A registry that cannot be read costs only the
 runs below `cwd`, with a warning on stderr.
+
+WHOSE RUN. Being below `cwd` is not ownership: every worktree lies below the main
+checkout, so a session working there was held by any other session's run, and each
+of those stops spent that run's refusals, leaving its real owner unguarded. `pipeline
+start` (and `resume`) record `owner_session` from `CLAUDE_CODE_SESSION_ID`; a run whose
+`owner_session` differs from the payload's `session_id` is allowed silently, before
+any refusal is counted. A run with no recorded owner (older runs, a start outside
+Claude Code) or a payload with no `session_id` is judged as before.
 """
 
 from __future__ import annotations
@@ -139,6 +147,13 @@ def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
             return None
         return f"The CCA run state in {root} is unreadable ({exc}). Retire it with `{abort}`."
     if state is None or core.is_legacy(state):
+        return None
+    owner = state.get("owner_session")
+    session = payload.get("session_id")
+    theirs = isinstance(owner, str) and isinstance(session, str) and owner and session
+    if theirs and owner != session:
+        # Another session's run: allowed before the refusal counter, so its owner keeps
+        # every refusal it is due.
         return None
     if state.get("paused"):
         # Paused on the record so the session can end: allowed before the refusal

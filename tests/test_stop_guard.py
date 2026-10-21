@@ -247,3 +247,55 @@ def test_a_registry_entry_whose_state_is_gone_is_ignored(monkeypatch, capsys, tm
     core.register(child, "ghost")
     assert _stop(monkeypatch, capsys, session) is None
     assert not (child / ".claude").exists()
+
+
+def test_another_sessions_run_below_never_blocks_nor_spends(monkeypatch, capsys, tmp_path):
+    """A run below the session's directory that another session opened is not this session's.
+
+    Invariant: with the run's `owner_session` set and a payload `session_id` that differs,
+    the Stop hook allows the stop and spends none of that run's refusals (its owner keeps
+    all three). The live defect, 2026-10-21: a session in the main checkout was held three
+    times by a run another session had opened in a worktree below it, and those three stops
+    used up the run's refusals.
+    Red 2026-10-21: mutation the `owner != session` early return removed from `_judge`;
+    failed at `assert _stop(..., session_id="session-B") is None` (a block was printed).
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-A")
+    session, child = _session_with_a_worktree_below(tmp_path)
+    ps.start("FAST", root=child)
+    ps.record("L1", output=write_output(child), root=child)
+    for _ in range(4):
+        assert _stop(monkeypatch, capsys, session, session_id="session-B") is None
+    assert ps.load(child).stop_refusals == 0
+
+
+def test_the_owning_session_is_still_held(monkeypatch, capsys, tmp_path):
+    """Scope control, not a red-proved behaviour test: the owner check must not free the owner.
+
+    Exempt from red proof on purpose: with the owner check deleted the owner is held exactly
+    as before, so no plausible mutation of the new branch turns this red; it pins that the
+    branch compares identities rather than allowing every session that sends one.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-A")
+    session, child = _session_with_a_worktree_below(tmp_path)
+    ps.start("FAST", root=child)
+    ps.record("L1", output=write_output(child), root=child)
+    out = _stop(monkeypatch, capsys, session, session_id="session-A")
+    assert out is not None and out["decision"] == "block" and "L2" in out["reason"]
+    assert ps.load(child).stop_refusals == 1
+
+
+def test_start_records_the_owner_and_resume_hands_the_run_over(monkeypatch, git_repo):
+    """`start` stamps `CLAUDE_CODE_SESSION_ID` as `owner_session`; `resume` moves it.
+
+    Red 2026-10-21: mutation `owner_session=os.environ.get(...) or None` replaced by
+    `owner_session=None` in `pipeline_state.start`; failed at
+    `assert ps.load(git_repo).owner_session == "session-A"`.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-A")
+    ps.start("FAST", root=git_repo)
+    assert ps.load(git_repo).owner_session == "session-A"
+    ps.pause("machine restart", root=git_repo)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-B")
+    ps.resume(root=git_repo)
+    assert ps.load(git_repo).owner_session == "session-B"
