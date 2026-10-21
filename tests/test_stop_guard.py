@@ -299,3 +299,21 @@ def test_start_records_the_owner_and_resume_hands_the_run_over(monkeypatch, git_
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-B")
     ps.resume(root=git_repo)
     assert ps.load(git_repo).owner_session == "session-B"
+
+
+def test_the_run_in_the_sessions_own_checkout_holds_it_whatever_the_owner(
+    monkeypatch, capsys, git_repo
+):
+    """The owner exemption covers only runs below `cwd`, never the run where the session works.
+
+    Invariant: a run found by walking up from `cwd` blocks even when its `owner_session`
+    names another session, because that owner comes from an environment variable the agent
+    controls at `start`; trusting it here would let an agent switch off its own guard.
+    Red 2026-10-21: mutation `if below and theirs and ...` changed to `if theirs and ...`
+    in `_judge`; failed at `assert out is not None and out["decision"] == "block"`.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "someone-else")
+    ps.start("FAST", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    out = _stop(monkeypatch, capsys, git_repo, session_id="session-A")
+    assert out is not None and out["decision"] == "block" and "L2" in out["reason"]

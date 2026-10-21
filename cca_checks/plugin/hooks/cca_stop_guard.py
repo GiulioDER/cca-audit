@@ -43,8 +43,11 @@ checkout, so a session working there was held by any other session's run, and ea
 of those stops spent that run's refusals, leaving its real owner unguarded. `pipeline
 start` (and `resume`) record `owner_session` from `CLAUDE_CODE_SESSION_ID`; a run whose
 `owner_session` differs from the payload's `session_id` is allowed silently, before
-any refusal is counted. A run with no recorded owner (older runs, a start outside
-Claude Code) or a payload with no `session_id` is judged as before.
+any refusal is counted, but only when it was found through the registry below `cwd`:
+the run in the session's own checkout always holds it, because the recorded owner
+comes from an environment variable the agent could set to dodge its own guard. A run
+with no recorded owner (older runs, a start outside Claude Code) or a payload with no
+`session_id` is judged as before.
 """
 
 from __future__ import annotations
@@ -121,23 +124,25 @@ def _decide(raw: str) -> int:
             f"{exc}); runs below {cwd} were not checked",
             file=sys.stderr,
         )
+    own = os.path.normcase(os.path.realpath(root)) if root is not None else None
     seen: set[str] = set()
     for candidate in candidates:
         key = os.path.normcase(os.path.realpath(candidate))
         if key in seen:
             continue
         seen.add(key)
-        reason = _judge(core, pathlib.Path(candidate), payload)
+        reason = _judge(core, pathlib.Path(candidate), payload, below=key != own)
         if reason is not None:
             return _block(reason)
     return 0
 
 
-def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
+def _judge(core, root: pathlib.Path, payload: dict, *, below: bool = False) -> str | None:
     """Why the turn may not end because of the run at `root`; None to allow.
 
     Spends one of that run's refusals when it returns a reason (an unreadable state
-    excepted, which has no counter to spend).
+    excepted, which has no counter to spend). `below` is true for a run found only
+    through the registry under `cwd`; only such a run can be another session's.
     """
     abort = f'python -m cca_checks pipeline abort --root "{root}" --reason "<why>"'
     try:
@@ -151,9 +156,11 @@ def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
     owner = state.get("owner_session")
     session = payload.get("session_id")
     theirs = isinstance(owner, str) and isinstance(session, str) and owner and session
-    if theirs and owner != session:
-        # Another session's run: allowed before the refusal counter, so its owner keeps
-        # every refusal it is due.
+    if below and theirs and owner != session:
+        # Another session's run below this one: allowed before the refusal counter, so
+        # its owner keeps every refusal it is due. Never for the run in the session's own
+        # checkout, which holds whoever works there whatever its recorded owner says (the
+        # owner comes from the environment at `start`, which the agent itself controls).
         return None
     if state.get("paused"):
         # Paused on the record so the session can end: allowed before the refusal
