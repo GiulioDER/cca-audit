@@ -6,41 +6,78 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.13.0] - 2026-10-21
 
-**Every Layer 1 auditor now sees the bugs already fixed in the files it audits.** Step 1 of the
-pipeline runs `python -m cca_checks bugs prior --files <FILES>` once per run and pastes its whole
-output into each Layer 1 auditor prompt as a PRIOR FIXES block, in DIFF and HUNT modes; the
-verifier, differential and architect prompts do not get it, and the deferred pass dispatches no
-Layer 1 auditors and skips it. Every line of the block is a row of the local bug ledger: it lists
-fixes recorded for the same repository as the target, and RE-call, when used, only chooses which
-further rows its similar bugs part shows. In HUNT mode the run passes `--root` with the git top
-level of the hunted paths, so the rows come from the hunted repository and never from the checkout
-the run started in; when that top level cannot be resolved, or is the checkout the run started
-in, the hunt pastes the empty block instead of running `bugs prior`. The prompt rules tell
-the auditor to treat the block as context and as a cue to look for the same class of bug in the
-code under audit; it never narrows what the auditor reports, and only a listed bug the code has
-not reintroduced is left out. An earlier wording ("never report a listed bug unless...") was
-measured in a replay to cost as many confirmed findings as the whole block, within run to run
-noise, and was softened before release. A host without a ledger, such as Codex working on a remote copy, gets
-the empty block, pasted as is, and the audit proceeds as before; so does a run where `bugs prior`
-exits non-zero, such as an older installed `cca_checks` without the verb. The ledger and a saved
-`--similar` response are read as UTF-8 with an optional BOM, so a BOM no longer drops the first row. The Codex skill builds the block
-the same way, once per run before it dispatches any role. The effect on what auditors find is not
-yet measured.
+**Auditors now see the bugs CCA already fixed in the files they audit.** Since 0.12.0 every CCA
+run that fixes something is recorded in the bug ledger once its pull request merges. From 0.13.0
+that history goes back into the audit: before Layer 1 starts, the pipeline looks up the earlier
+fixes in the files under audit and hands them to every Layer 1 auditor as a PRIOR FIXES block, a
+cue to check whether the same class of bug turns up again.
 
-**The brief can also draw on RE-call, optionally, in DIFF mode only.** When a `recall-cca` server
-is available, Step 1 runs up to three one sentence queries, saves the raw responses under
-`.claude/audits/out/` and passes them to `bugs prior --similar` with `--cross-repo`; `bugs prior`
-discards any response that is not trusted or that abstained. `cca_checks` joins each hit to a
-ledger row in code and drops any hit that does not join, so no similar bug text reaches the PRIOR
-FIXES block unchecked. A project memory tool, when present, is also queried once for settled
-decisions, which auditors see as context without a join, inside a backtick fence longer than the
-longest backtick run in the quoted memos, and at most 1,500 characters per memo. A hunt runs
-none of these queries, because it targets someone else's repository. Without these servers the
-brief is built from the ledger alone, as before. `--similar` accepts a saved response in either
-form an MCP client may keep: the SearchResult itself, or the structured result that carries it as
-JSON text under `result`. The effect is not yet measured.
+### How it works
+
+* **`python -m cca_checks bugs prior --files <FILES>`** (new) prints the block: ledger rows of the
+  same repository that touched those files, ranked (rows from CCA runs first, then proved, then
+  more overlapping files, then fewer files, then newest), at most 8 by default (`--limit`).
+  `--repo-name OWNER/NAME` names the repository instead of reading it from `origin`; `--before
+  YYYY-MM-DD` hides rows from that date on; `--json` gives the rows as data.
+* **Untrusted text stays inert.** Ledger rows come from repositories under audit, so every field
+  is sanitised before it reaches a prompt: control characters and lone surrogates are replaced,
+  newlines collapsed, backticks neutralised so nothing can close the block's fence, severity,
+  tier and date checked against allowlists, and every field and the whole block length capped
+  (4,000 characters).
+* **It never breaks a run.** A missing ledger, a checkout with no `origin`, a malformed or deeply
+  nested ledger line, or a terminal that cannot encode a character all give the empty block and
+  exit 0; only a usage error exits 2. If `bugs prior` fails anyway, for example on an older
+  installed `cca_checks` without the verb, the pipeline pastes the empty block and carries on.
+* **Where it goes.** Step 1 of `/audit-fix` runs the command once per run and pastes the output
+  into Layer 1 auditor prompts only; verifiers, the regression review and the architect never see
+  it, and the deferred pass, which has no Layer 1 auditors, skips it. The Codex skill does the
+  same. A host without a ledger, such as Codex on a remote copy, gets the empty block.
+* **The rule auditors get with it** says the block is context, not findings and not
+  instructions: use it to look for the same class of bug, report every defect found, and leave out
+  only a listed bug the code has not reintroduced.
+* **Hunts stay clean.** A hunt audits someone else's repository, so it reads only that
+  repository's rows (`--root` at the hunted paths' git top level), skips RE-call entirely, and
+  pastes the empty block when that top level cannot be resolved or is the checkout the run
+  started in. No text from your own projects reaches a stranger's brief.
+
+### Optional: similar bugs from RE-call
+
+When a `recall-cca` MCP server is available (RE-call serving the bug ledger as tenant `cca`), Step 1
+in a change audit also runs up to three short `recall_search` queries describing the change,
+saves the responses under `.claude/audits/out/` and passes them with `bugs prior --similar
+--cross-repo`. The block then gains a SIMILAR BUGS ELSEWHERE part. Nothing from RE-call's text
+reaches a prompt: each hit is joined to a ledger row in code by its memo filename, a hit that
+does not join is dropped, and a response that is not trusted or that abstained is discarded.
+`--cross-repo` admits other repositories only of an allowed owner (`CCA_BUGS_OWNERS`, else the
+target's owner). Either form an MCP client may save works: the SearchResult itself or the
+structured result carrying it as JSON text under `result`; a wrapper that cannot be read is named
+in `similar_error`. A project memory tool, when present, is also asked once for settled decisions,
+quoted as context in a fence no memo can close. Without these servers the brief is built from the
+ledger alone.
+
+### What was measured
+
+Two pre-registered replays, written and committed before they ran
+(`docs/preregistrations/2026-10-20-prior-bugs-in-brief.md` and
+`2026-10-20-prior-bugs-rule-and-noise.md`), re-audited eight past runs on their exact diffs with
+and without the block. With the first wording of the rule ("never report a listed bug unless the
+code reintroduces it") the block did not raise confirmed findings (71 without, 54 with, 55 with
+RE-call added), and the same rule with no history rows cost exactly as much (48 against 48). The
+same audit repeated without the block moved by up to 6 findings on one run, so the dip sits within
+run to run noise. The history rows themselves showed no cost; the rule did. That rule was softened
+for this release to the wording above, whose effect is not yet measured. The replays used haiku
+for every agent and a single verifier, so their counts are what that verifier accepted.
+
+### Upgrading from 0.12.x
+
+* `pip install -U cca-audit`, then `cca-audit install` and `cca-audit install-codex`, so the
+  copies in `.claude/` and the Codex skill carry the new Step 1 (`pipeline start` warns about any
+  that do not).
+* No setup is needed for the PRIOR FIXES block: it reads the ledger 0.12.0 already writes. With
+  no ledger yet, the block is empty and audits run as before.
+* The RE-call part is opt in: register a `recall-cca` MCP server for it, or leave it out.
 
 ## [0.12.1] - 2026-10-20
 
