@@ -37,6 +37,17 @@ that run's refusal. A run in a checkout that is neither the session's directory 
 below it is out of scope: this session did not start it, and blocking on it would
 trap every session on the machine. A registry that cannot be read costs only the
 runs below `cwd`, with a warning on stderr.
+
+WHOSE RUN. Being below `cwd` is not ownership: every worktree lies below the main
+checkout, so a session working there was held by any other session's run, and each
+of those stops spent that run's refusals, leaving its real owner unguarded. `pipeline
+start` (and `resume`) record `owner_session` from `CLAUDE_CODE_SESSION_ID`; a run whose
+`owner_session` differs from the payload's `session_id` is allowed silently, before
+any refusal is counted, but only when it was found through the registry below `cwd`:
+the run in the session's own checkout always holds it, because the recorded owner
+comes from an environment variable the agent could set to dodge its own guard. A run
+with no recorded owner (older runs, a start outside Claude Code) or a payload with no
+`session_id` is judged as before.
 """
 
 from __future__ import annotations
@@ -58,6 +69,32 @@ def _load_core():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def claimed_session(root: pathlib.Path) -> str | None:
+    """The session named by the checkout's `claude-session-claim`, or None.
+
+    Workspace tooling writes `session=<id>` into a worktree's own git directory when a
+    session claims it. A run opened before `owner_session` existed has no recorded owner;
+    this is the fallback for those. Anything unreadable is None (judged as before).
+    """
+    try:
+        dot_git = root / ".git"
+        if dot_git.is_file():
+            line = dot_git.read_text(encoding="utf-8").strip()
+            if not line.startswith("gitdir:"):
+                return None
+            git_dir = pathlib.Path(line.split(":", 1)[1].strip())
+            if not git_dir.is_absolute():
+                git_dir = root / git_dir
+        else:
+            git_dir = dot_git
+        for raw in (git_dir / "claude-session-claim").read_text(encoding="utf-8").splitlines():
+            if raw.startswith("session="):
+                return raw.split("=", 1)[1].strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
 
 
 def find_root(start: pathlib.Path) -> pathlib.Path | None:
@@ -113,23 +150,25 @@ def _decide(raw: str) -> int:
             f"{exc}); runs below {cwd} were not checked",
             file=sys.stderr,
         )
+    own = os.path.normcase(os.path.realpath(root)) if root is not None else None
     seen: set[str] = set()
     for candidate in candidates:
         key = os.path.normcase(os.path.realpath(candidate))
         if key in seen:
             continue
         seen.add(key)
-        reason = _judge(core, pathlib.Path(candidate), payload)
+        reason = _judge(core, pathlib.Path(candidate), payload, below=key != own)
         if reason is not None:
             return _block(reason)
     return 0
 
 
-def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
+def _judge(core, root: pathlib.Path, payload: dict, *, below: bool = False) -> str | None:
     """Why the turn may not end because of the run at `root`; None to allow.
 
     Spends one of that run's refusals when it returns a reason (an unreadable state
-    excepted, which has no counter to spend).
+    excepted, which has no counter to spend). `below` is true for a run found only
+    through the registry under `cwd`; only such a run can be another session's.
     """
     abort = f'python -m cca_checks pipeline abort --root "{root}" --reason "<why>"'
     try:
@@ -139,6 +178,17 @@ def _judge(core, root: pathlib.Path, payload: dict) -> str | None:
             return None
         return f"The CCA run state in {root} is unreadable ({exc}). Retire it with `{abort}`."
     if state is None or core.is_legacy(state):
+        return None
+    owner = state.get("owner_session")
+    if below and not owner:
+        owner = claimed_session(root)
+    session = payload.get("session_id")
+    theirs = isinstance(owner, str) and isinstance(session, str) and owner and session
+    if below and theirs and owner != session:
+        # Another session's run below this one: allowed before the refusal counter, so
+        # its owner keeps every refusal it is due. Never for the run in the session's own
+        # checkout, which holds whoever works there whatever its recorded owner says (the
+        # owner comes from the environment at `start`, which the agent itself controls).
         return None
     if state.get("paused"):
         # Paused on the record so the session can end: allowed before the refusal
