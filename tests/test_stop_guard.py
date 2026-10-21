@@ -317,3 +317,25 @@ def test_the_run_in_the_sessions_own_checkout_holds_it_whatever_the_owner(
     ps.record("L1", output=write_output(git_repo), root=git_repo)
     out = _stop(monkeypatch, capsys, git_repo, session_id="session-A")
     assert out is not None and out["decision"] == "block" and "L2" in out["reason"]
+
+
+def test_an_unowned_run_below_falls_back_to_the_worktree_claim(monkeypatch, capsys, tmp_path):
+    """A run opened before `owner_session` existed is owned by the session claiming its worktree.
+
+    Invariant: with no `owner_session` in the state and a `claude-session-claim` naming
+    another session in the run checkout's git directory, a run found below `cwd` allows the
+    stop and spends no refusal. The live case, 2026-10-21: run 20261021T193810Z predates the
+    field, and a main-checkout session kept spending its refusals.
+    Red 2026-10-21: mutation `owner = claimed_session(root)` replaced by `owner = None` in
+    `_judge`; failed at `assert _stop(..., session_id="session-B") is None`.
+    """
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    session, child = _session_with_a_worktree_below(tmp_path)
+    ps.start("FAST", root=child)
+    ps.record("L1", output=write_output(child), root=child)
+    assert ps.load(child).owner_session is None
+    (child / ".git" / "claude-session-claim").write_text(
+        "session=session-A\npid=1\n", encoding="utf-8"
+    )
+    assert _stop(monkeypatch, capsys, session, session_id="session-B") is None
+    assert ps.load(child).stop_refusals == 0

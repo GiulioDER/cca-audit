@@ -71,6 +71,32 @@ def _load_core():
     return module
 
 
+def claimed_session(root: pathlib.Path) -> str | None:
+    """The session named by the checkout's `claude-session-claim`, or None.
+
+    Workspace tooling writes `session=<id>` into a worktree's own git directory when a
+    session claims it. A run opened before `owner_session` existed has no recorded owner;
+    this is the fallback for those. Anything unreadable is None (judged as before).
+    """
+    try:
+        dot_git = root / ".git"
+        if dot_git.is_file():
+            line = dot_git.read_text(encoding="utf-8").strip()
+            if not line.startswith("gitdir:"):
+                return None
+            git_dir = pathlib.Path(line.split(":", 1)[1].strip())
+            if not git_dir.is_absolute():
+                git_dir = root / git_dir
+        else:
+            git_dir = dot_git
+        for raw in (git_dir / "claude-session-claim").read_text(encoding="utf-8").splitlines():
+            if raw.startswith("session="):
+                return raw.split("=", 1)[1].strip() or None
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
+
+
 def find_root(start: pathlib.Path) -> pathlib.Path | None:
     """Same boundary rule as the commit guard: stop at the repository root."""
     for candidate in [start, *start.parents]:
@@ -154,6 +180,8 @@ def _judge(core, root: pathlib.Path, payload: dict, *, below: bool = False) -> s
     if state is None or core.is_legacy(state):
         return None
     owner = state.get("owner_session")
+    if below and not owner:
+        owner = claimed_session(root)
     session = payload.get("session_id")
     theirs = isinstance(owner, str) and isinstance(session, str) and owner and session
     if below and theirs and owner != session:
