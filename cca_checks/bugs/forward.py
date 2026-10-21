@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from .anchors import Anchor
+from .anchors import Anchor, well_formed_file, well_formed_symbol
 from .caused_by import bugs_for_commits
 from .ledgers import fix_number
 from .model import ABSENT, CLAIMED, EVIDENCED, NOT_REQUIRED, BugRow
@@ -128,17 +128,16 @@ def _not_fixed(entry: dict, fix_id: str, card: list[dict]) -> str | None:
 
 
 def _anchors(facts: dict) -> list[Anchor]:
-    """The finding's anchors from run_facts.json, keeping only well-formed ones."""
+    """The finding's anchors from run_facts.json, keeping only ones capture could have written."""
     out = []
     raw = facts.get("anchors")
     for a in raw if isinstance(raw, list) else []:
         if not isinstance(a, dict):
             continue
         file, symbol, sha = a.get("file"), a.get("symbol"), a.get("code_sha")
-        if (isinstance(file, str) and file and "\\" not in file
-                and (symbol is None or isinstance(symbol, str) and symbol)
+        if (well_formed_file(file) and well_formed_symbol(symbol)
                 and isinstance(sha, str) and _SHA256.fullmatch(sha)):
-            out.append(Anchor(file, symbol, sha))
+            out.append(Anchor(str(file), symbol if isinstance(symbol, str) else None, sha))
     return out
 
 

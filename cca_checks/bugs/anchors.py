@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,6 +119,35 @@ def symbol_sha(source: str, symbol: str | None) -> str:
     span = {s.symbol: s for s in resolve_symbols(source)}[symbol]
     lines = normalize(source).split("\n")
     return code_sha("\n".join(lines[span.start_line - 1 : span.end_line]))
+
+
+_DRIVE = re.compile(r"[A-Za-z]:")
+_SUFFIX = re.compile(r"#[0-9]+")
+
+
+def well_formed_file(file: object) -> bool:
+    """Whether `file` is a path `_relative` can return: repo-relative POSIX, nothing odd.
+
+    For anchors read back from a file the run did not just compute (a pending record).
+    Memos print paths inside backticks, so a backtick is refused with the control characters.
+    """
+    if not isinstance(file, str) or not file or file.startswith("/") or _DRIVE.match(file):
+        return False
+    if any(c in file for c in "\\`") or any(ord(c) < 0x20 or ord(c) == 0x7f for c in file):
+        return False
+    return all(part not in ("", ".", "..") for part in file.split("/"))
+
+
+def well_formed_symbol(symbol: object) -> bool:
+    """Whether `symbol` is None or a name `resolve_symbols` can return."""
+    if symbol is None:
+        return True
+    if not isinstance(symbol, str):
+        return False
+    name, hash_, n = symbol.partition("#")
+    if hash_ and not _SUFFIX.fullmatch(f"#{n}"):
+        return False
+    return all(part.isidentifier() for part in name.split("."))
 
 
 def _relative(repo_root: Path, file: str) -> str:

@@ -15,6 +15,7 @@ from cca_checks.bugs.caused_by import (
     backfill_caused_by,
     caused_by_for_fix,
     changed_old_lines,
+    fix_diff,
     introducing_commits,
 )
 from cca_checks.bugs.model import EVIDENCED, BugRow
@@ -24,9 +25,9 @@ FIX_A_TEXT = "def lease():\n    conn = take()\n    ok = check(conn)\n    return 
 FIX_B_TEXT = "def lease():\n    conn = take()\n    ok = check(conn, inside=True)\n    return conn\n"
 
 
-def _row(repo: str, sha: str, finding: str = "BUG-1") -> BugRow:
+def _row(repo: str, sha: str, finding: str = "BUG-1", files=("pool.py",)) -> BugRow:
     return BugRow(project=repo.split("/")[1], repo=repo, finding_id=finding, fix_commit=sha,
-                  date="2026-09-01", files=["pool.py"], summary="s",
+                  date="2026-09-01", files=list(files), summary="s",
                   evidence={"confirmed_l25": EVIDENCED, "fixed": EVIDENCED,
                             "l6_approved": EVIDENCED, "red_proof": EVIDENCED})
 
@@ -249,3 +250,147 @@ def test_backfill_fills_only_empty_caused_by_and_keeps_other_lines(tmp_path):
     assert lines[0] == original[0]
     assert json.loads(lines[1]) == {**b.to_json(), "caused_by": [a.bug_id]}
     assert backfill_caused_by(root, repo, write=True).changed == {}
+
+
+GAPPED_BASE = "def lease():\n\n    conn = take()\n    ok = conn.closed\n    return conn\n"
+GAPPED_A = "def lease():\n\n    conn = take()\n    ok = check(conn)\n    return conn\n"
+GAPPED_B = "def lease():\n\n    conn = take()\n    ok = check(conn, inside=True)\n    return conn\n"
+
+
+def test_the_users_git_config_does_not_change_the_edges(tmp_path):
+    """Edges are the same whatever `diff.*` and `blame.*` the host has configured.
+
+    `diff.suppressBlankEmpty` prints a blank context line as "" (the parser lost count), and
+    `blame.ignoreRevsFile` naming fix A makes blame skip it (A missed, the seed invented).
+
+    Red 2026-10-22, against the pre-fix implementation at cf060bf: failed at
+    `assert introducing_commits(...) == [fix_a]` with `[seed]`.
+    """
+    repo = make_repo(tmp_path / "w")
+    seed = commit(repo, "pool.py", GAPPED_BASE, "add the pool")
+    fix_a = commit(repo, "pool.py", GAPPED_A, "fix(audit): BUG-1")
+    base = run_git(repo, "rev-parse", "HEAD").strip()
+    head = commit(repo, "pool.py", GAPPED_B, "fix(audit): BUG-2")
+    (repo / ".ignore-revs").write_text(f"{fix_a}\n", encoding="utf-8")
+    run_git(repo, "config", "diff.suppressBlankEmpty", "true")
+    run_git(repo, "config", "blame.ignoreRevsFile", ".ignore-revs")
+    run_git(repo, "config", "diff.noprefix", "true")
+    assert seed != fix_a
+    assert introducing_commits(repo, base, fix_diff(repo, base, head)) == [fix_a]
+
+
+TWENTY = "".join(f"line_{i} = {i}\n" for i in range(1, 21))
+
+
+def test_a_renamed_file_blames_only_the_line_it_changed(tmp_path):
+    """A fix that renames a file and edits one line blames that line, by either name in L4.
+
+    Red 2026-10-22, against the pre-fix implementation at cf060bf: failed at
+    `assert facts(["new.py"]) == [fix_a]` with `[]` (the pathspec hid the rename's old side).
+    """
+    repo = make_repo(tmp_path / "w")
+    commit(repo, "old.py", TWENTY, "add twenty lines")
+    fix_a = commit(repo, "old.py", TWENTY.replace("line_10 = 10", "line_10 = 100"),
+                   "fix(audit): BUG-1")
+    base = run_git(repo, "rev-parse", "HEAD").strip()
+    run_git(repo, "mv", "old.py", "new.py")
+    (repo / "new.py").write_text(TWENTY.replace("line_10 = 10", "line_10 = 1000"),
+                                 encoding="utf-8", newline="\n")
+    run_git(repo, "add", "new.py")
+    run_git(repo, "commit", "-q", "-m", "fix(audit): BUG-2 rename and fix")
+    head = run_git(repo, "rev-parse", "HEAD").strip()
+
+    def facts(files):
+        l4 = [{"fix_id": "FIX-1", "finding": "BUG-2", "files": files}]
+        return run_facts.compute(repo, base, head, [], l4)["findings"]["BUG-2"]["introduced_by"]
+
+    assert facts(["new.py"]) == [fix_a]
+    assert facts(["old.py"]) == [fix_a]
+    assert facts(["old.py", "new.py"]) == [fix_a]
+
+
+def test_backfill_blames_each_row_on_its_own_files(tmp_path):
+    """Two findings fixed in one squash get the causes of their own files, not the union.
+
+    Red 2026-10-22, against the pre-fix implementation at cf060bf: failed at
+    `assert done.changed == {...}`, both rows given both causes.
+    """
+    repo = make_repo(tmp_path / "w")
+    commit(repo, "a.py", "a = 1\n", "add a")
+    commit(repo, "b.py", "b = 1\n", "add b")
+    fix_x = commit(repo, "a.py", "a = 2\n", "fix(audit): BUG-1")
+    fix_y = commit(repo, "b.py", "b = 2\n", "fix(audit): BUG-2")
+    (repo / "a.py").write_text("a = 3\n", encoding="utf-8", newline="\n")
+    run_git(repo, "add", "a.py")  # `commit` stages only the file it writes
+    squash = commit(repo, "b.py", "b = 3\n", "fix(audit): BUG-3 and BUG-4")
+    x, y = _row("acme/widgets", fix_x, files=["a.py"]), _row("acme/widgets", fix_y, "BUG-2",
+                                                             files=["b.py"])
+    on_a = _row("acme/widgets", squash, "BUG-3", files=["a.py"])
+    on_b = _row("acme/widgets", squash, "BUG-4", files=["b.py"])
+    root = tmp_path / "bugs"
+    root.mkdir()
+    (root / "bugs.jsonl").write_text(
+        "".join(json.dumps(r.to_json(), sort_keys=True) + "\n" for r in (x, y, on_a, on_b)),
+        encoding="utf-8", newline="\n")
+    done = backfill_caused_by(root, repo, write=False)
+    assert done.changed == {on_a.bug_id: [x.bug_id], on_b.bug_id: [y.bug_id]}
+
+
+def test_backfill_keeps_a_row_appended_while_it_ran(tmp_path, monkeypatch):
+    """`resolve --write` may append while the back-fill blames; that row must survive the write.
+
+    Red 2026-10-22, against the pre-fix implementation at cf060bf: failed at
+    `assert late in ledger.read_text(...)` (the appended row was overwritten).
+    """
+    from cca_checks.bugs import caused_by
+
+    repo, fix_a, base, fix_b, _diff = _history(tmp_path)
+    a, b = _row("acme/widgets", fix_a), _row("acme/widgets", fix_b, "BUG-2")
+    root = tmp_path / "bugs"
+    root.mkdir()
+    ledger = root / "bugs.jsonl"
+    ledger.write_text("".join(json.dumps(r.to_json(), sort_keys=True) + "\n" for r in (a, b)),
+                      encoding="utf-8", newline="\n")
+    late = json.dumps(_row("acme/widgets", "d" * 40, "BUG-77").to_json(), sort_keys=True)
+    real = caused_by.introducing_commits
+
+    def appending(*args, **kwargs):
+        with ledger.open("a", encoding="utf-8", newline="\n") as fh:
+            fh.write(late + "\n")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(caused_by, "introducing_commits", appending)
+    done = backfill_caused_by(root, repo, write=True)
+    assert done.changed == {b.bug_id: [a.bug_id]}
+    text = ledger.read_text(encoding="utf-8")
+    assert late in text
+    assert json.loads(text.splitlines()[1])["caused_by"] == [a.bug_id]
+
+
+def test_forward_drops_anchors_capture_could_not_have_written(tmp_path):
+    """A record's anchors are kept only when capture could have produced them.
+
+    Paths are repo-relative POSIX with no `..`, no root or drive, no control character and no
+    backtick (memos print paths inside backticks); a symbol is a dotted identifier with an
+    optional `#n`.
+
+    Red 2026-10-22, against the pre-fix `_anchors` at cf060bf: failed at
+    `assert bug.anchors == [good]`, every forged anchor kept.
+    """
+    from test_bugs_forward import MERGE, make_record
+
+    from cca_checks.bugs.anchors import Anchor
+    from cca_checks.bugs.forward import rows_for
+
+    rec = make_record(tmp_path)
+    sha = "1" * 64
+    forged = ["../etc/passwd", "/abs.py", "C:/x.py", "a/../b.py", "a`b.py", "a\nb.py",
+              "./a.py", "a//b.py"]
+    raw = [{"file": f, "symbol": None, "code_sha": sha} for f in forged]
+    raw += [{"file": "a.py", "symbol": s, "code_sha": sha}
+            for s in ("not valid", "a..b", "f#x", "", "f`")]
+    raw.append({"file": "pkg/a.py", "symbol": "Pool.value#2", "code_sha": sha})
+    (rec / "run_facts.json").write_text(json.dumps({"schema": 1, "findings": {
+        "BUG-001": {"anchors": raw, "introduced_by": [], "errors": []}}}))
+    bug = rows_for(rec, MERGE)[0]
+    assert bug.anchors == [Anchor("pkg/a.py", "Pool.value#2", sha)]

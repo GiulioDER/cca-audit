@@ -33,6 +33,7 @@ def compute(root: Path, base: str, head: str, l2: list, l4: list) -> dict:
     """`{"schema", "base", "head", "findings": {id: {"anchors", "introduced_by", "errors"}}}`."""
     located = {f.get("id"): f for f in l2 if isinstance(f, dict)}
     findings: dict[str, dict] = {}
+    diff: str | None = None
     for entry in l4:
         if not isinstance(entry, dict):
             continue
@@ -49,8 +50,9 @@ def compute(root: Path, base: str, head: str, l2: list, l4: list) -> dict:
                 facts["anchors"].append(anchor.to_json())
         files = _files(entry.get("files"))
         try:
-            facts["introduced_by"] = (introducing_commits(root, base,
-                                                          fix_diff(root, base, head, files))
+            if files and diff is None:
+                diff = fix_diff(root, base, head)  # one diff per run, filtered per finding
+            facts["introduced_by"] = (introducing_commits(root, base, diff or "", files)
                                       if files else [])
         except GitError as exc:
             facts["errors"].append(f"blame: {exc}")
