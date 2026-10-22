@@ -2,12 +2,22 @@
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
 python -m cca_checks.bugs prior --files F [F ...] [--repo-name OWNER/NAME] [--root PATH]
     [--before YYYY-MM-DD] [--limit N] [--similar PATH [PATH ...]] [--cross-repo] [--json]
+python -m cca_checks.bugs rerender --all [--modified STAMP] [--json]
+python -m cca_checks.bugs backfill-caused-by --repo-root PATH [--write] [--json]
+python -m cca_checks.bugs roundtrip-check --dump FILE [FILE ...] [--json]
 
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
 be asked about some record (the hourly worker retries), otherwise 0. `prior` is read-only
 and exits 0 on any data or environment problem (a missing ledger or origin prints the empty
-block), and 2 on a usage error (argparse).
+block), and 2 on a usage error (argparse). `rerender --all` rewrites every memo from the
+ledger, the one sanctioned overwrite of memos, and never writes the ledger; it exits 1 when a
+ledger line could not be read (that memo is left as it was). `backfill-caused-by` blames each
+fix of one checked-out repository against its parent; with --write it rewrites only the lines
+it changed, keeping the old ledger as `bugs.jsonl.before-caused-by`. Run `rerender --all`
+after it, so the memos carry the edges. `roundtrip-check` exits 0 only when every ledger row
+has an equal record in RE-call's dump and the dump holds nothing else, 1 when it lists a
+difference, and 2 when the dump cannot be read or is truncated.
 """
 from __future__ import annotations
 
@@ -145,6 +155,58 @@ def _prior(a: argparse.Namespace) -> int:
     return 0
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _rerender(a: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from .records import rerender_all
+
+    report = rerender_all(bugs_dir(), a.modified or _now())
+    data = {**asdict(report), "dir": str(bugs_dir())}
+    if a.json:
+        print(json.dumps(data, indent=2))
+    else:
+        _emit(_printable("\n".join(f"{k}: {v}" for k, v in data.items())))
+    return 1 if report.skipped else 0
+
+
+def _backfill_caused_by(a: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from .caused_by import backfill_caused_by
+
+    report = backfill_caused_by(bugs_dir(), a.repo_root, write=a.write)
+    data = {**asdict(report), "written": bool(a.write and report.changed)}
+    if a.json:
+        print(json.dumps(data, indent=2))
+    else:
+        _emit(_printable("\n".join(f"{k}: {v}" for k, v in data.items())))
+    return 0
+
+
+def _roundtrip_check(a: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from . import roundtrip
+
+    try:
+        result = roundtrip.check(bugs_dir(), roundtrip.load_dumps(a.dump))
+    except (OSError, ValueError, RecursionError) as exc:
+        print(f"roundtrip-check refused: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(json.dumps({**asdict(result), "ok": result.ok}, indent=2))
+    else:
+        lines = [f"rows: {result.rows}  records: {result.records}  ok: {result.ok}"]
+        for label in ("missing", "changed", "orphan", "unreadable"):
+            lines += [f"{label}: {item}" for item in getattr(result, label)]
+        _emit(_printable("\n".join(lines)))
+    return 0 if result.ok else 1
+
+
 def _render(summary: dict) -> str:
     return _printable(_render_raw(summary))
 
@@ -195,7 +257,34 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--cross-repo", action="store_true",
                    help="let --similar show rows of other repositories of the allowed owners")
     q.add_argument("--json", action="store_true")
+    w = sub.add_parser("rerender", help="rewrite every memo from its ledger row")
+    w.add_argument("--all", action="store_true", required=True,
+                   help="required: every memo is rewritten, hand edits included")
+    w.add_argument("--modified", metavar="STAMP",
+                   help="the memos' `modified` stamp (default: now, UTC)")
+    w.add_argument("--json", action="store_true")
+    c = sub.add_parser("backfill-caused-by",
+                       help="set caused_by on ledger rows of one checked-out repository")
+    c.add_argument("--repo-root", type=Path, required=True, metavar="PATH",
+                   help="a clone of the repository whose rows to fill")
+    c.add_argument("--write", action="store_true",
+                   help="rewrite the changed ledger lines (the old ledger is kept beside it)")
+    c.add_argument("--json", action="store_true")
+    t = sub.add_parser("roundtrip-check",
+                       help="compare the ledger with RE-call's dump of the records it serves")
+    t.add_argument("--dump", type=Path, nargs="+", required=True, metavar="FILE",
+                   help="`recall records --all --json` output; several files are pages, in order")
+    t.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+
+    if a.cmd == "roundtrip-check":
+        return _roundtrip_check(a)
+
+    if a.cmd == "rerender":
+        return _rerender(a)
+
+    if a.cmd == "backfill-caused-by":
+        return _backfill_caused_by(a)
 
     if a.cmd == "prior":
         return _prior(a)
@@ -220,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = summarize(result)
     if a.write:
         root = bugs_dir()
-        modified = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        modified = _now()
         rows, memos = write(result.rows, root, modified)
         text = "".join(f"{line}\n" for line in result.unparsed)
         (root / "unparsed.txt").write_text(text, encoding="utf-8", newline="\n")

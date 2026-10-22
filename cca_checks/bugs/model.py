@@ -7,9 +7,11 @@ its sources.
 """
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
+from typing import ClassVar
+
+from .anchors import Anchor
 
 EVIDENCED = "evidenced"
 CLAIMED = "claimed"
@@ -44,11 +46,20 @@ class BugRow:
     # A squash of two CCA commits can carry FIX-1 twice: finding IDs restart in every
     # run. The second one in the same commit is ordinal 2, and its bug_id says so.
     ordinal: int = 1
+    # Finding-level places, computed during the run over the fixed code (anchors.py).
+    anchors: list[Anchor] = field(default_factory=list)
+    # bug_ids of earlier CCA fixes whose lines this fix modified or removed (caused_by.py).
+    caused_by: list[str] = field(default_factory=list)
+    kind: ClassVar[str] = "bug"
 
     @property
     def bug_id(self) -> str:
         base = f"{self.project}:{self.fix_commit[:SHA_LEN]}:{self.finding_id}"
         return base if self.ordinal == 1 else f"{base}~{self.ordinal}"
+
+    @property
+    def id(self) -> str:
+        return self.bug_id
 
     @property
     def tier(self) -> str:
@@ -77,7 +88,28 @@ class BugRow:
             "summary": self.summary,
             "supersedes": self.supersedes,
             "ordinal": self.ordinal,
+            "anchors": [a.to_json() for a in self.anchors],
+            "caused_by": list(self.caused_by),
+            "kind": self.kind,
         }
+
+    @classmethod
+    def from_json(cls, row: dict) -> BugRow:
+        """A ledger line read back; one written before anchors existed reads with none.
+
+        `bug_id` and `tier` are derived, so they are recomputed rather than read.
+        """
+        return cls(
+            project=row["project"], repo=row["repo"], finding_id=row["finding_id"],
+            fix_commit=row["fix_commit"], date=row["date"], files=list(row["files"]),
+            summary=row["summary"], severity=row.get("severity"), auditor=row.get("auditor"),
+            category=row.get("category"), run_id=row.get("run_id"),
+            evidence=dict(row.get("evidence") or {}), sources=list(row.get("sources") or []),
+            supersedes=row.get("supersedes"), ordinal=int(row.get("ordinal", 1)),
+            anchors=[Anchor(a["file"], a["symbol"], a["code_sha"])
+                     for a in row.get("anchors") or []],
+            caused_by=list(row.get("caused_by") or []),
+        )
 
 
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
@@ -99,46 +131,8 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
-_LABELS = {NOT_REQUIRED: "not required (not a P1 fix)"}
-
-
 def render_memo(row: BugRow, modified: str) -> str:
-    flat = " ".join(row.summary.split())
-    description = f"{row.project} {row.finding_id} ({row.tier}): {flat[:120]}"
-    lines = [
-        "---",
-        f"name: {_slug(row.bug_id)}",
-        f"description: {json.dumps(description, ensure_ascii=False)}",
-        f"valid_from: {row.date}",
-        "metadata:",
-        "  node_type: memory",
-        "  type: project",
-        "  originSessionId: cca-bugs",
-        f"  modified: {modified}",
-        "---",
-        "",
-        f"# {row.project} {row.finding_id}: a bug CCA fixed",
-        "",
-        "## The bug",
-        "",
-        row.summary,
-        "",
-        "## The fix",
-        "",
-        f"Commit `{row.fix_commit}` in `{row.repo}`, {row.date}. Files changed by that commit:",
-        "",
-        *[f"* `{f}`" for f in row.files],
-        "",
-        "## The evidence",
-        "",
-        f"Tier: **{row.tier}**.",
-        "",
-        "| Condition | Value |",
-        "|---|---|",
-        *[f"| {c} | {_LABELS.get(v, v)} |"
-          for c in CONDITIONS for v in [row.evidence.get(c, ABSENT)]],
-        "",
-        "Sources: " + ", ".join(f"`{s}`" for s in row.sources),
-        "",
-    ]
-    return "\n".join(lines)
+    """The memo for `row`; the template lives in `records.render_memo`, which renders every kind."""
+    from .records import render_memo as render
+
+    return render(row, modified=modified)
