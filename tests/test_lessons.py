@@ -246,6 +246,26 @@ def test_withholding_survives_look_alike_apostrophes_and_hidden_characters(text)
         ds.one_sentence(text, ds.PATTERN_MAX)
 
 
+@pytest.mark.parametrize("text", [
+    "Dо not flag reads of conn.closed.",  # Cyrillic o
+    "Do not flаg reads of conn.closed.",  # Cyrillic a
+    "Check the léase.",  # a combining mark, or the accented letter NFKC makes of it
+    "Check the lease.",  # private use
+])
+def test_what_a_fold_cannot_settle_fails_closed(text):
+    """Invariant: a confusable no fold list covers, a private-use character, or a word mixing
+    ASCII with other letters refuses the text rather than passing it (second security review,
+    2026-10-22). This refuses accented words too, by design: a lesson is English prose about
+    code, and the owner can reword one; plain ASCII prose passes.
+
+    Red 2026-10-22: mutation `return hit.group(0) if hit else unreadable(text)` ->
+    `return hit.group(0) if hit else None` in `distill.withholding`; failed at
+    `assert ds.withholding(text)` for all four cases.
+    """
+    assert ds.withholding(text)
+    assert ds.withholding("Check the lease before close; a pool's conn may be reused.") is None
+
+
 def test_an_existing_proposal_or_lesson_is_not_drafted_again(tmp_path):
     """Red 2026-10-22: mutation deleting the `if proposal_path(root, lesson_id).exists():`
     branch in `distill.distill`; failed at `assert client.prompts == []` (a second paid call).

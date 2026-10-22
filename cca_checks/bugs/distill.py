@@ -82,10 +82,36 @@ def _comparable(text: str) -> str:
     return " ".join(visible.translate(_LOOKALIKES).split())
 
 
+#: Invisible, combining, private-use and unassigned characters. A lesson is English prose
+#: about code; one of these can only hide a word from `_WITHHOLD`, so it fails closed.
+_HIDING = ("Cf", "Co", "Cn", "Mn", "Me")
+_WORD = re.compile(r"\w+")
+
+
+def unreadable(text: str) -> str | None:
+    """Why `text` cannot be checked reliably, or None.
+
+    The fold in `_comparable` is a list, and no list covers every look-alike: a Cyrillic `о`
+    inside "dо not flag" survives NFKC. So beyond the fold, the check fails closed on what a
+    list cannot settle: any character of the `_HIDING` categories, and any word that mixes
+    ASCII letters with other letters (the mixed-script test of Unicode TR39, simplified).
+    """
+    folded = unicodedata.normalize("NFKC", text)
+    for char in folded:
+        if unicodedata.category(char) in _HIDING:
+            return f"holds the invisible or unassigned character U+{ord(char):04X}"
+    for word in _WORD.findall(folded):
+        letters = [c for c in word if c.isalpha()]
+        if any(c.isascii() for c in letters) and any(not c.isascii() for c in letters):
+            return f"mixes scripts in the word {word!r}"
+    return None
+
+
 def withholding(text: str) -> str | None:
-    """The phrase in `text` that tells an auditor to withhold something, or None."""
+    """The phrase in `text` that tells an auditor to withhold something, or why `text` cannot
+    be checked (`unreadable`), or None. Either refuses the lesson."""
     hit = _WITHHOLD.search(_comparable(text))
-    return hit.group(0) if hit else None
+    return hit.group(0) if hit else unreadable(text)
 
 
 def one_sentence(text: object, limit: int) -> str:
