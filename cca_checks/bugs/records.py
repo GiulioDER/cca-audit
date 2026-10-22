@@ -17,7 +17,7 @@ import json
 import os
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, TypeVar, cast
 
 from .anchors import Anchor
 from .model import ABSENT, CONDITIONS, NOT_REQUIRED, BugRow, _slug, memo_filename
@@ -208,24 +208,34 @@ def from_record(record: dict) -> Row:
     return row
 
 
-def no_nul(value):
+_T = TypeVar("_T")
+
+
+def no_nul(value: _T) -> _T:
     """`value` with U+0000 in every string replaced by U+FFFD, through lists, dicts and rows.
 
     PostgreSQL jsonb cannot store U+0000, so RE-call refuses such a record at index time and
     `roundtrip-check` would list it as missing. Summaries come from commit subjects and model
     output CCA does not control, so every writer of the ledger, the caused_by log and memos
     passes what it writes through this first, as `model._printable` does for display.
+
+    The result has the input's type: `_scrub` rebuilds each container and dataclass as its own
+    kind, which is what the cast states.
     """
+    return cast(_T, _scrub(value))
+
+
+def _scrub(value: object) -> object:
     if isinstance(value, str):
         return value.replace("\x00", "\ufffd")
     if isinstance(value, list):
-        return [no_nul(v) for v in value]
+        return [_scrub(v) for v in value]
     if isinstance(value, tuple):
-        return tuple(no_nul(v) for v in value)
+        return tuple(_scrub(v) for v in value)
     if isinstance(value, dict):
-        return {no_nul(k): no_nul(v) for k, v in value.items()}
+        return {_scrub(k): _scrub(v) for k, v in value.items()}
     if is_dataclass(value) and not isinstance(value, type):
-        return replace(value, **{f.name: no_nul(getattr(value, f.name))
+        return replace(value, **{f.name: _scrub(getattr(value, f.name))
                                  for f in fields(value) if f.init})
     return value
 
