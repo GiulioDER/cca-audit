@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import ClassVar
 
@@ -206,6 +206,28 @@ def from_record(record: dict) -> Row:
     if row.id != record["id"]:
         raise ValueError(f"record id {record['id']!r} is not the row's {row.id!r}")
     return row
+
+
+def no_nul(value):
+    """`value` with U+0000 in every string replaced by U+FFFD, through lists, dicts and rows.
+
+    PostgreSQL jsonb cannot store U+0000, so RE-call refuses such a record at index time and
+    `roundtrip-check` would list it as missing. Summaries come from commit subjects and model
+    output CCA does not control, so every writer of the ledger, the caused_by log and memos
+    passes what it writes through this first, as `model._printable` does for display.
+    """
+    if isinstance(value, str):
+        return value.replace("\x00", "\ufffd")
+    if isinstance(value, list):
+        return [no_nul(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(no_nul(v) for v in value)
+    if isinstance(value, dict):
+        return {no_nul(k): no_nul(v) for k, v in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return replace(value, **{f.name: no_nul(getattr(value, f.name))
+                                 for f in fields(value) if f.init})
+    return value
 
 
 def one_line(text: str) -> str:
@@ -447,12 +469,16 @@ def rerender_all(root: Path, modified: str) -> RerenderReport:
     report = RerenderReport(skipped=skipped)
     memos = root / MEMOS
     memos.mkdir(parents=True, exist_ok=True)
-    for row_id, row in rows.items():
-        target = memos / memo_filename(row_id)
+    known: set[str] = set()
+    for row in rows.values():
+        # A line written before no_nul existed may hold U+0000; its memo, and so its name,
+        # must not. roundtrip-check then reports that row changed rather than missing.
+        clean = no_nul(row)
+        target = memos / memo_filename(clean.id)
+        known.add(target.name)
         tmp = target.with_name(f".tmp-{target.name}-{os.getpid()}")
-        tmp.write_text(render_memo(row, modified=modified), encoding="utf-8", newline="\n")
+        tmp.write_text(render_memo(clean, modified=modified), encoding="utf-8", newline="\n")
         os.replace(tmp, target)
         report.rendered += 1
-    known = {memo_filename(i) for i in rows}
     report.stray = sorted(p.name for p in memos.glob("*.md") if p.name not in known)
     return report
