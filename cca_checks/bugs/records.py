@@ -411,11 +411,14 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
     """Every row of the ledger under `root` by id, and "line N: reason" for each unreadable line.
 
     The first line of an id wins, as in `store.existing_ids`. Lines are split on LF only, so a
-    line separator inside a value written before `one_line` existed cannot split a row.
+    line separator inside a value written before `one_line` existed cannot split a row. A bug
+    row carries its effective caused_by (`store.effective_caused_by`), so `to_record`, its memo
+    and the round-trip check all see a back-filled edge.
     """
-    from .store import LEDGER
+    from .store import LEDGER, caused_by_annotations, with_effective_caused_by
 
     ledger = root / LEDGER
+    annotations = caused_by_annotations(root)
     lines = ledger.read_text(encoding="utf-8").split("\n") if ledger.exists() else []
     rows: dict[str, Row] = {}
     skipped: list[str] = []
@@ -428,7 +431,7 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
         except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as exc:
             skipped.append(f"line {number}: {type(exc).__name__}: {exc}")
             continue
-        rows.setdefault(row_id, row)
+        rows.setdefault(row_id, with_effective_caused_by(row, annotations))
     return rows, skipped
 
 
