@@ -18,10 +18,15 @@ from cca_checks import pipeline_state as ps
 from cca_checks.bugs import match_fp
 from cca_checks.bugs.__main__ import main
 from cca_checks.bugs.query_anchors import at
+from cca_checks.bugs.records import RetractionRow, from_record
+from cca_checks.bugs.store import write
 
 RESPONSES = Path(__file__).parent / "fixtures" / "audit_memory_responses"
 ANSWER = json.loads((RESPONSES / "fp_answer.json").read_text(encoding="utf-8"))
 RECORD = ANSWER["records"][0]["recall_record"]
+GOLDEN_FP = json.loads((Path(__file__).parent / "fixtures" / "audit_memory"
+                        / "expected_records.json").read_text(encoding="utf-8"))[
+    "RE-call__fp__run-20261021-9f8e7d__BUG-003.md"]
 REPO = "GiulioDER/RE-call"
 
 
@@ -98,21 +103,51 @@ def test_a_superseded_record_does_not_suppress():
 
 
 def test_a_retracted_record_never_suppresses():
-    """Invariant: a retraction in the local ledger (RE-call learns of it one refresh later) or
-    in the answer stops the record suppressing.
+    """Invariant: a retraction in the local ledger (RE-call learns of it one refresh later) stops
+    the record suppressing; in the answer, a retraction shows as the target's `superseded_by`.
 
-    Red 2026-10-22: mutation `if rec["id"] in retracted or rec["id"] in retractions:` -> `if
-    False:` in `match_fp.match`; failed at the first `assert got.action == "attach"`.
+    Red 2026-10-22: mutation `if rec["id"] in retracted:` -> `if False:` in `match_fp.match`;
+    failed at `assert got.action == "attach"`.
     """
     [got] = run(retracted={RECORD["id"]})
     assert got.action == "attach" and "retracted" in got.reasons
+
+
+def test_currency_comes_from_the_returned_fields_not_from_retraction_links():
+    """Orchestrator, 2026-10-22, from RE-call #977 and #970: RE-call honours the successor's
+    validity window, so a retraction dated in the future does not yet hide its target. A
+    retraction record in the answer whose target RE-call still returns current does not stop it.
+
+    Red 2026-10-22: mutation restoring the inference (`if rec["id"] in retracted or rec["id"] in
+    {r["recall_record"].get("target_id") for r in held}:`) in `match_fp.match`; failed at
+    `assert got.action == "suppress"`.
+    """
     answer = edited()
     answer["records"].append({**copy.deepcopy(answer["records"][0]),
+                              "id": RECORD["id"] + "~retract",
                               "kind": "false_positive_retraction",
                               "recall_record": {"kind": "false_positive_retraction",
-                                                "target_id": RECORD["id"]}})
+                                                "target_id": RECORD["id"],
+                                                "date": "2026-11-30"}})
     [got] = run(answer=answer)
-    assert got.action == "attach"
+    assert got.action == "suppress"
+
+
+def test_a_local_retraction_counts_only_from_its_date(tmp_path):
+    """The local ledger follows the same window: a retraction dated after today is not yet one.
+
+    Red 2026-10-22: mutation deleting `and r.date[:10] <= today` in `match_fp.ledger_facts`;
+    failed at `assert retracted == set()`.
+    """
+    fp = from_record(GOLDEN_FP)
+    write([fp], tmp_path, "2026-10-22T00:00:00Z")
+    later = RetractionRow(kind="false_positive_retraction", project=fp.project, repo=fp.repo,
+                          date="2026-11-30", target_id=fp.id, reason="r", retracted_by="o")
+    write([later], tmp_path, "2026-10-22T00:00:00Z")
+    retracted, _, blocked = match_fp.ledger_facts(tmp_path, today="2026-10-22")
+    assert blocked is None and retracted == set()
+    retracted, _, _ = match_fp.ledger_facts(tmp_path, today="2026-11-30")
+    assert retracted == {fp.id}
 
 
 def test_an_expired_record_does_not_suppress():

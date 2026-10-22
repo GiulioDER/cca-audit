@@ -3,7 +3,11 @@
 A finding is suppressed (verdict PRIOR_FP, no fp-check) only when it sits at the place of a
 `false_positive` record and ALL of these hold:
 
-* the record is current: not superseded, not retracted, not expired;
+* the record is current: RE-call returns it with no `superseded_by` and no `valid_until` that
+  has passed, and the local ledger holds no retraction dated today or earlier. Currency comes
+  from those returned fields, never from `supersedes` links in the answer: RE-call honours the
+  successor's validity window (RE-call #970), so a retraction dated in the future does not yet
+  hide its target;
 * every one of the record's anchors is `exact`, so neither the code it was judged on nor any
   mitigation it cited has changed;
 * the finding's `category` equals the record's;
@@ -61,10 +65,14 @@ def enabled() -> bool:
     return os.environ.get(SWITCH, "").strip().lower() != "off"
 
 
-def ledger_facts(root: Path) -> tuple[set[str], dict[str, dict] | None, str | None]:
-    """(retracted record ids, false_positive records by id as authored, why nothing may suppress).
+def ledger_facts(root: Path, today: str | None = None,
+                 ) -> tuple[set[str], dict[str, dict] | None, str | None]:
+    """(record ids retracted by `today`, false_positive records by id as authored, why nothing
+    may suppress).
 
     The records are None when `root` holds no ledger; then the answer is trusted as it stands.
+    A retraction dated after `today` does not count yet, as RE-call would not yet return its
+    target superseded.
     """
     from .records import FalsePositiveRow, RetractionRow, read_ledger, to_record
     from .store import LEDGER
@@ -77,8 +85,10 @@ def ledger_facts(root: Path) -> tuple[set[str], dict[str, dict] | None, str | No
         return set(), {}, f"the bug ledger cannot be read ({type(exc).__name__})"
     if skipped:
         return set(), {}, f"{len(skipped)} bug ledger line(s) cannot be read"
+    today = today or date.today().isoformat()
     retracted = {r.target_id for r in rows.values()
-                 if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"}
+                 if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"
+                 and r.date[:10] <= today}
     known = {r.id: to_record(r) for r in rows.values() if isinstance(r, FalsePositiveRow)}
     return retracted, known, None
 
@@ -151,8 +161,6 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
     on = enabled() if on is None else on
     held, envelope, _ = records(response)
     fps = [(r, rec) for r in held if (rec := _fp(r, repo)) is not None]
-    retractions = {r["recall_record"].get("target_id") for r in held
-                   if r["kind"] == "false_positive_retraction"}
     out: list[Match] = []
     for finding in findings:
         anchor = finding.get("anchor")
@@ -168,7 +176,7 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
             reasons: list[str] = []
             if record.get("superseded_by") is not None:
                 reasons.append(f"superseded by {record['superseded_by']}")
-            if rec["id"] in retracted or rec["id"] in retractions:
+            if rec["id"] in retracted:
                 reasons.append("retracted")
             if _expired(record.get("valid_until"), today):
                 reasons.append(f"expired {record.get('valid_until')}")
