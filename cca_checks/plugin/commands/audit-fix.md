@@ -1053,7 +1053,9 @@ python -m cca_checks pipeline record L6 --detail APPROVED \
 
 At `pipeline close`, each false positive with `fp_reason` `not_real` that the architect ACCEPTED,
 in a run whose final L6 verdict is APPROVED, and whose every place resolved to code at L2.5, becomes
-a `false_positive` record in the bug ledger. A wrongly accepted one is retracted with `python -m
+a `false_positive` record in the bug ledger. A FAST run creates none: it writes no Step 2.5b rows,
+so its accepted false positives are decided at L6 but not recorded. `pipeline close` prints each
+false positive it did not record, with the reason. A wrongly accepted one is retracted with `python -m
 cca_checks bugs retract-fp <record id> --reason "<why>"`; a retracted record never suppresses
 again.
 

@@ -12,6 +12,7 @@ record whose fields have the wrong type is dropped here rather than read by a ca
 from __future__ import annotations
 
 import json
+from datetime import date
 
 MATCHES = ("exact", "symbol_changed", "file_only", "none")
 
@@ -23,6 +24,21 @@ def _unwrap(value: object) -> object:
         except (ValueError, RecursionError):
             return value
     return value
+
+
+def expired(valid_until: object, today: str) -> bool:
+    """Whether a record whose `valid_until` is this has lapsed by `today` (YYYY-MM-DD).
+
+    None never lapses. Fail closed: a value that does not read as a date is not proof the record
+    is current. The brief and the PRIOR_FP matcher share this one rule.
+    """
+    if valid_until is None:
+        return False
+    try:
+        # Parsed, not compared as text: a malformed value would sort after every real date.
+        return date.fromisoformat(str(valid_until)[:10]) <= date.fromisoformat(today[:10])
+    except ValueError:
+        return True
 
 
 def _record(raw: object) -> dict | None:

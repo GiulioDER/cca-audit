@@ -14,6 +14,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,6 +73,13 @@ def _write_facts(root: Path, run_dir: Path, summary: dict, fixes: list, dest: Pa
     (dest / run_facts.NAME).write_text(json.dumps(facts, indent=1) + "\n", encoding="utf-8")
 
 
+def _report_skipped(skipped: list[str]) -> None:
+    """Say which false positives became no record, and why, so a lost one is never silent."""
+    if skipped:
+        print("note: false positives not recorded for later runs: " + "; ".join(skipped),
+              file=sys.stderr)
+
+
 def capture(root, run_id: str, verdict: str = "") -> Path | None:
     """Keep the run for the ledger; `verdict` is its final L6 verdict.
 
@@ -84,6 +92,7 @@ def capture(root, run_id: str, verdict: str = "") -> Path | None:
     stamp = datetime.now(timezone.utc)
     picked, skipped = fp_records.eligible_for_run(root, run_id, verdict)
     if not fixes and not picked:
+        _report_skipped(skipped)
         return None
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     commit = summary["commit"]
@@ -130,4 +139,5 @@ def capture(root, run_id: str, verdict: str = "") -> Path | None:
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
+    _report_skipped(skipped)
     return dest

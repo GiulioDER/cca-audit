@@ -112,10 +112,9 @@ def _key(anchor: object) -> tuple | None:
 
 
 def _expired(valid_until: object, today: str) -> bool:
-    if valid_until is None:
-        return False
-    # Fail closed: a value that does not read as a date is not proof the record is current.
-    return not isinstance(valid_until, str) or valid_until[:10] <= today
+    from .envelope import expired
+
+    return expired(valid_until, today)
 
 
 def _statuses(record: dict, rec: dict,
