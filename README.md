@@ -16,6 +16,10 @@ adversarial review where none can. Only survivors get fixed. A differential pass
 scope creep, and an architect gate refuses the change unless every confirmed finding has a fix and
 every edit has a finding.
 
+It also remembers. Bugs it already fixed and false alarms it already rejected come back to the next
+audit of the same code, through [RE-call](https://github.com/GiulioDER/RE-call), so it does not
+repeat its own mistakes.
+
 The design rule: a check that could not run must never look like a check that passed.
 
 ## Results on code I did not write
@@ -58,6 +62,39 @@ version ([PR #22](https://github.com/GiulioDER/cca-audit/pull/22)).
     </picture>
   </a>
 </p>
+
+## Memory across audits
+
+An auditor without memory starts every run from nothing: it can miss a bug class it fixed in the
+same function last month, and raise again a false alarm a verifier already rejected. CCA keeps what
+its runs settled and hands it back through [RE-call](https://github.com/GiulioDER/RE-call), a
+memory server that matches records to code by file, symbol and a hash of the code.
+
+- **A ledger of real bugs.** When a run's pull request merges, each fix becomes a row in
+  `~/.claude/cca-bugs/`, keyed by the merge commit. A row is `proved` only when a verifier
+  confirmed the bug, the fix merged, the architect approved it and its regression test failed on
+  the old code. The ledger is append only: nothing rewrites a row.
+- **Past bugs in the brief.** Before Layer 1, the bugs CCA fixed at the code a change touches go to
+  every auditor as context. A bug at a symbol the change touches ranks above one elsewhere in the
+  file, and a bug whose fix later caused a regression is marked.
+- **A false alarm is not raised twice.** A finding the verifier rejected and the architect accepted
+  as false becomes a record. When the same finding returns on the same code, it is marked
+  `PRIOR_FP` and listed in the report with its citation, never dropped. Suppression needs an exact
+  code match, the same category and no higher priority; a high-stakes finding is never suppressed,
+  and the gate derives every suppression again rather than trusting the model. `CCA_PRIOR_FP=off`
+  sends each match to the verifier instead.
+- **Lessons the owner accepted.** When three or more past bugs share a pattern, `bugs distill`
+  drafts a lesson. It reaches auditors only after `bugs lesson accept --by NAME`, at most three
+  per run, worded as something to check and never as something to ignore.
+
+All of it is optional. Without a `recall-cca` server, audits run as before with an empty block. A
+hunt never reads memory from your own projects, because it audits someone else's code.
+
+Whether memory raises the number of real findings is not established yet. A pre-registered replay
+of eight past runs with the first version of the brief (2026-10-20 and 21) found a difference within
+run to run noise
+([record](https://github.com/GiulioDER/cca-audit/blob/master/docs/preregistrations/2026-10-20-prior-bugs-rule-and-noise.md)).
+The anchored brief, `PRIOR_FP` and lessons are not measured.
 
 ## The auditors
 
@@ -115,6 +152,11 @@ arithmetic findings on high-stakes code cannot be auto-fixed.** To see what your
 ```bash
 python -m cca_checks capabilities --file <source file>
 ```
+
+Recording needs no server: `pipeline close` saves each run that fixed something, and
+`python -m cca_checks bugs resolve --write` writes its rows once the pull request merges (by hand or
+on a schedule). To give the record back to auditors, serve the memos in `~/.claude/cca-bugs/memos/`
+with RE-call and register it as an MCP server named `recall-cca`.
 
 ## Usage
 

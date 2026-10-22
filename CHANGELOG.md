@@ -8,6 +8,15 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**Audits remember what earlier audits settled, through RE-call.** 0.13.0 gave auditors the earlier
+fixes in the files they audit. This release turns the bug ledger into records RE-call serves by
+code anchor (file, symbol and a hash of the code), and uses them three ways: the bugs CCA fixed at
+the changed code go into the brief, a false alarm already judged on unchanged code is suppressed
+visibly instead of being raised again, and patterns the owner accepted from three or more past bugs
+reach auditors as lessons. Everything below was built and tested against saved `recall_records`
+answers; it has not yet run against a live RE-call server, and its effect on findings is not
+measured.
+
 **Lessons: patterns from three or more past bugs, proposed by a model, accepted only by the
 owner, shown as context.** Session 5 of RE-call's audit-memory plan.
 
@@ -62,6 +71,48 @@ there), built against saved `recall_records` answers until the live server is de
   is refused outside DIFF mode. `bugs anchors --diff` no longer depends on the user's diff prefix
   or path-quoting config. `pipeline close` prints each false positive it did not record. A FAST
   run creates no false-positive record, and Step 6 says so.
+
+**The ledger as records RE-call can serve.** Sessions 2 and 3 of the same plan, the layer the
+sections above read.
+
+* **Code anchors.** `cca_checks/bugs/anchors.py` computes the `(file, symbol, code_sha)` key
+  RE-call matches records by, ported from RE-call's reference resolver and pinned to its test
+  vectors. `bugs anchors` prints them for a diff, the findings of a run, a saved answer or
+  named places.
+* **One record model.** Bug rows gain `anchors`, `caused_by` and `kind`, and false positives,
+  lessons and retractions sit beside them. Each memo is rendered byte for byte in the format RE-call
+  indexes, and a record that cannot be rebuilt exactly is refused. `bugs rerender --all` rewrites
+  the memos from the ledger and never writes the ledger.
+* **What caused a bug.** `pipeline close` stores each fixed finding's anchor and the commits
+  `git blame` names for the lines it changed, and `bugs resolve` turns them into `caused_by` links
+  between ledger rows; no model decides a link. `bugs backfill-caused-by --repo-root PATH` does the
+  same for older rows, appending to `caused_by.jsonl` beside the ledger and never amending a ledger
+  line. Every reader takes a row's own value when it has one, else its last annotation.
+* **Checked against what RE-call holds.** `bugs roundtrip-check --dump FILE...` compares the ledger
+  with RE-call's `recall records --all --json` and lists missing, changed, orphan and unreadable
+  records; it exits 0 only when all four are empty.
+* **No U+0000.** RE-call's store cannot hold it, so every writer replaces it with U+FFFD in rows,
+  annotations and memos.
+
+### Fixed
+
+* **The Stop guard holds only the session that opened the run.** It judged every open run in or
+  below the session's directory, and every worktree lies below the main checkout, so one session's
+  run held others and spent its own three refusals on them. `pipeline start` and `resume` now
+  record the owning session, and a run below the working directory owned by another session is
+  passed over. The run in the session's own checkout always holds it, whatever owner it names,
+  because that name comes from the agent. A run opened before owners were recorded falls back to
+  the worktree's session claim.
+
+### Upgrading from 0.13.0
+
+* In a change audit the PRIOR BUGS block now comes from a `recall-cca` server that offers
+  `recall_records`. Without one, the block is empty; in 0.13.0 it was read from the local ledger.
+  Hunts still read the hunted repository's rows from the ledger.
+* `--similar`, `--cross-repo` and the `recall_search` queries of 0.13.0 are gone; a saved search
+  response is no longer read.
+* Run `cca-audit install` and `cca-audit install-codex` again, so the copies carry the new Steps 1
+  and 2.4.
 
 ## [0.13.0] - 2026-10-21
 
