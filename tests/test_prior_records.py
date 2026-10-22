@@ -1,7 +1,7 @@
 """Task 4.4: the anchored PRIOR BUGS block, the code join, the run record's block counts,
 `bugs retract-fp` and `bugs anchors`.
 
-The saved answers are `tests/fixtures/audit_memory/responses/` (see `build.py` there), to RE-call's
+The saved answers are `tests/fixtures/audit_memory_responses/` (see `build.py` there), to RE-call's
 contract C5. Red proof (user rule, 2026-09-08) is in each test's docstring: the mutation, the
 test run against it, the assertion that failed; each was restored.
 """
@@ -19,7 +19,7 @@ from cca_checks.bugs.__main__ import main
 from cca_checks.bugs.records import FalsePositiveRow, from_record, read_ledger
 from cca_checks.bugs.store import write
 
-RESPONSES = Path(__file__).parent / "fixtures" / "audit_memory" / "responses"
+RESPONSES = Path(__file__).parent / "fixtures" / "audit_memory_responses"
 GOLDEN = json.loads((Path(__file__).parent / "fixtures" / "audit_memory"
                      / "expected_records.json").read_text(encoding="utf-8"))
 REPO = "GiulioDER/RE-call"

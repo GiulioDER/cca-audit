@@ -60,11 +60,11 @@ def _append(repo, rows):
             fh.write(json.dumps(row) + "\n")
 
 
-def through_l25(repo, rows_for, **l2_over):
+def through_l25(repo, rows_for, run_id="", **l2_over):
     """A STANDARD run whose findings are all FALSE_POSITIVE; `rows_for(run_id)` gives their
     ledger rows, and L2 holds one finding per row at the row's place (`l2_over` overrides L2's
     fields). Returns the state after L3."""
-    state = ps.start("STANDARD", root=repo)
+    state = ps.start("STANDARD", run_id=run_id, root=repo)
     rows = rows_for(state.run_id)
     n = len(rows)
     l2 = [{"id": r["finding_id"], "auditor": r["auditor"], "category": r["category"],
@@ -125,7 +125,8 @@ def test_l25_refuses_a_hand_written_code_sha_and_pins_every_place(repo):
     with pytest.raises(ps.RecordRefused, match="copy both"):
         through_l25(repo, lambda run: [fp_row(repo, run, "F-1", code_sha="0" * 64)])
     ps.abort("test", root=repo)
-    state = through_l25(repo, lambda run: [fp_row(repo, run, "F-1")])
+    # Its own run id: a second start within the same second would reuse the timestamp id.
+    state = through_l25(repo, lambda run: [fp_row(repo, run, "F-1")], run_id="second")
     pinned = json.loads((repo / ".claude" / "audits" / "runs" / state.run_id
                          / "fp_anchors.json").read_text(encoding="utf-8"))
     assert pinned["F-1"]["anchors"] == [_anchor(repo, "pool.py:2"), _anchor(repo, "pool.py:6")]

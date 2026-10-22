@@ -21,9 +21,10 @@ authored (`ledger_facts`): the saved answer is a file the orchestrator writes, a
 the system of record. A ledger that cannot be read in full suppresses nothing, since a
 retraction could be on the line that failed. A host with no ledger at all trusts RE-call's answer.
 
-An anchor counts as `exact` when RE-call reported it so, or, for an anchor the query did not
-cover (reported `none` or `file_only`, typically a mitigation in another symbol), when the
-checkout's hash of that symbol equals the record's. `symbol_changed` is never exact.
+With the checkout at hand (`local`), an anchor counts as `exact` only when the checkout's hash
+of its symbol equals the record's: RE-call's `exact` is then confirmed, never taken on trust,
+and an anchor the query did not cover (reported `none` or `file_only`, typically a mitigation in
+another symbol) is decided by the hash alone. `symbol_changed` is never exact.
 
 Red proof (user rule, 2026-09-08): see the docstrings of `tests/test_match_fp.py`.
 """
@@ -101,9 +102,11 @@ def _statuses(record: dict, rec: dict,
     out = []
     for anchor in rec["anchors"]:
         status = reported.get(_key(anchor), "none")
-        if status in ("none", "file_only") and local is not None \
-                and local(anchor) == anchor.get("code_sha"):
-            status = "exact"
+        if local is not None and status in ("exact", "none", "file_only"):
+            if local(anchor) == anchor.get("code_sha"):
+                status = "exact"
+            elif status == "exact":
+                status = "changed in the checkout"
         out.append((anchor, status))
     return out
 

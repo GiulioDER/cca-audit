@@ -1,6 +1,6 @@
 """Task 4.3: the mechanical PRIOR_FP matcher, and the L2.5 gate that holds the run to it.
 
-The saved answers are `tests/fixtures/audit_memory/responses/`, built from the golden records
+The saved answers are `tests/fixtures/audit_memory_responses/`, built from the golden records
 to RE-call's contract C5 (see `build.py` there). Red proof (user rule, 2026-09-08) is in each
 test's docstring: the mutation, the test run against it, the assertion that failed; restored.
 """
@@ -19,7 +19,7 @@ from cca_checks.bugs import match_fp
 from cca_checks.bugs.__main__ import main
 from cca_checks.bugs.query_anchors import at
 
-RESPONSES = Path(__file__).parent / "fixtures" / "audit_memory" / "responses"
+RESPONSES = Path(__file__).parent / "fixtures" / "audit_memory_responses"
 ANSWER = json.loads((RESPONSES / "fp_answer.json").read_text(encoding="utf-8"))
 RECORD = ANSWER["records"][0]["recall_record"]
 REPO = "GiulioDER/RE-call"
@@ -68,7 +68,7 @@ def test_an_anchor_the_query_did_not_cover_is_exact_only_when_the_checkout_agree
     """The second anchor (a mitigation in store.py, a file the query did not name) came back
     `none`: it counts exact only when the checkout's hash equals the record's.
 
-    Red 2026-10-22: mutation `and local(anchor) == anchor.get("code_sha")` -> `and True` in
+    Red 2026-10-22: mutation `if local(anchor) == anchor.get("code_sha"):` -> `if True:` in
     `match_fp._statuses`; failed at `assert got.action == "attach"` (it suppressed).
     """
     [got] = run()
@@ -338,3 +338,19 @@ def test_a_ledger_that_cannot_be_read_in_full_suppresses_nothing(tmp_path):
     assert blocked == "1 bug ledger line(s) cannot be read"
     [got] = run(known=known, blocked=blocked)
     assert got.action == "attach" and blocked in got.reasons
+
+
+def test_an_exact_the_answer_claims_is_confirmed_against_the_checkout():
+    """Push security review 2026-10-22. Invariant: with the checkout at hand, RE-call's `exact` is
+    confirmed by the local hash, so a saved answer cannot vouch for code that changed.
+
+    Red 2026-10-22: mutation `elif status == "exact":` -> `elif False:` in `match_fp._statuses`;
+    failed at `assert got.action == "attach"`.
+    """
+    answer = edited()
+    answer["records"][0]["anchor_matches"][1]["match"] = "exact"
+    store = RECORD["anchors"][1]
+    [got] = run(answer=answer, local=lambda a: "0" * 64 if a == store else a["code_sha"])
+    assert got.action == "attach"
+    assert "anchor recall/store.py Store._with_retry_shared is changed in the checkout" \
+        in got.reasons

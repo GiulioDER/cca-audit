@@ -7,7 +7,7 @@ query's anchors, `anchor_match` the best of them, and a record with no anchor ma
 `file_only` left out. A code tenant returns one `kind: "code"` record per distinct anchor, with
 `chunk_ids`, and a code anchor with a null repo never matches a repo query.
 
-Run from the repository root to regenerate: `python tests/fixtures/audit_memory/responses/build.py`.
+Run from the repository root to regenerate: `python tests/fixtures/audit_memory_responses/build.py`.
 """
 from __future__ import annotations
 
@@ -15,7 +15,9 @@ import json
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-GOLDEN = json.loads((HERE.parent / "expected_records.json").read_text(encoding="utf-8"))
+# Beside the contract folder, not in it: that folder is pinned file by file to RE-call.
+GOLDEN = json.loads((HERE.parent / "audit_memory" / "expected_records.json")
+                    .read_text(encoding="utf-8"))
 REPO = "GiulioDER/RE-call"
 RANK = ("exact", "symbol_changed", "file_only", "none")
 
