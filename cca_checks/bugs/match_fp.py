@@ -7,7 +7,9 @@ A finding is suppressed (verdict PRIOR_FP, no fp-check) only when it sits at the
 * every one of the record's anchors is `exact`, so neither the code it was judged on nor any
   mitigation it cited has changed;
 * the finding's `category` equals the record's;
-* the finding is not high stakes, and its priority is not higher than the record's;
+* the finding is not high stakes (a finding that does not say is treated as high stakes), and
+  its priority is not higher than the record's;
+* the repository is known: without one no record is scoped, so none suppresses;
 * `CCA_PRIOR_FP` is not `off`, the switch for the day the match rule itself is wrong.
 
 Any other finding at that place is `attach`: it goes to fp-check as usual, with the record as
@@ -96,7 +98,7 @@ def _fp(record: dict, repo: str | None) -> dict | None:
         return None
     if repo is not None and str(rec.get("repo", "")).lower() != repo.lower():
         return None
-    return rec
+    return rec  # with no repo, kept to attach: `match` never suppresses it
 
 
 def match(findings: list[dict], response: dict, *, repo: str | None = None,
@@ -146,7 +148,8 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
             if finding.get("category") != rec.get("category"):
                 reasons.append(f"category {finding.get('category')!r} is not the record's "
                                f"{rec.get('category')!r}")
-            if finding.get("high_stakes") is True:
+            if finding.get("high_stakes") is not False:
+                # Fail closed: an auditor that omits the field may be on a high-stakes path.
                 reasons.append("high stakes")
             mine = _RANK.get(str(finding.get("priority")), 0)
             theirs = _RANK.get(str(rec.get("priority")), 0)
@@ -155,6 +158,8 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
                                f"{rec.get('priority')}")
             if not on:
                 reasons.append(f"{SWITCH}=off")
+            if repo is None:
+                reasons.append("the repository is unknown, so the record is not scoped to it")
             if not reasons and suppressed:
                 reasons.append("another record already suppresses this finding")
             action = ATTACH if reasons else SUPPRESS

@@ -10,7 +10,7 @@ import json
 import subprocess
 
 import pytest
-from conftest import findings_output, plan_output, verdicts_output, write_output
+from conftest import plan_output, verdicts_output, write_output
 
 from cca_checks import pipeline_state as ps
 from cca_checks.bugs import fp_records
@@ -60,14 +60,18 @@ def _append(repo, rows):
             fh.write(json.dumps(row) + "\n")
 
 
-def through_l25(repo, rows_for):
-    """A STANDARD run whose findings F-1..F-n are all FALSE_POSITIVE; `rows_for(run_id)` gives
-    their ledger rows. Returns the state after L2.6."""
+def through_l25(repo, rows_for, **l2_over):
+    """A STANDARD run whose findings are all FALSE_POSITIVE; `rows_for(run_id)` gives their
+    ledger rows, and L2 holds one finding per row at the row's place (`l2_over` overrides L2's
+    fields). Returns the state after L3."""
     state = ps.start("STANDARD", root=repo)
     rows = rows_for(state.run_id)
     n = len(rows)
+    l2 = [{"id": r["finding_id"], "auditor": r["auditor"], "category": r["category"],
+           "priority": r["priority"], "high_stakes": r["high_stakes"], "file": "pool.py",
+           "line": 2, "claim": r["claim"], **l2_over} for r in rows]
     ps.record("L1", output=write_output(repo), root=repo)
-    ps.record("L2", counts={"unique": n}, output=findings_output(repo, n), root=repo)
+    ps.record("L2", counts={"unique": n}, output=write_output(repo, l2), root=repo)
     _append(repo, rows)
     ps.record("L2.5", counts={"confirmed": 0, "fp": n, "uncertain": 0, "duplicate": 0},
               output=verdicts_output(repo, fp=n), root=repo)
@@ -126,6 +130,19 @@ def test_l25_refuses_a_hand_written_code_sha_and_pins_every_place(repo):
                          / "fp_anchors.json").read_text(encoding="utf-8"))
     assert pinned["F-1"]["anchors"] == [_anchor(repo, "pool.py:2"), _anchor(repo, "pool.py:6")]
     assert [a["symbol"] for a in pinned["F-1"]["anchors"]] == ["lease", "guard"]
+
+
+def test_l25_refuses_a_row_away_from_its_finding(repo):
+    """Final review 2026-10-22, Important 2. Invariant: a FALSE_POSITIVE row sits at the place L2
+    recorded for its finding; a mitigation's place goes in evidence_refs, never in file/line,
+    or the record would suppress real findings inside the mitigation.
+
+    Red 2026-10-22: mutation `if (str(row["file"])...) != (...found...):` -> `if False:` in
+    `pipeline_state._fp_anchors`; failed at `pytest.raises(..., match="but L2 put F-1")` (DID
+    NOT RAISE).
+    """
+    with pytest.raises(ps.RecordRefused, match="but L2 put F-1 at pool.py:2"):
+        through_l25(repo, lambda run: [fp_row(repo, run, "F-1", line=6, refs=())])
 
 
 # Task 4.1: the L6 validator
@@ -288,3 +305,20 @@ def test_no_nul_reaches_a_record():
     """
     rows, _ = _build(row={**ROW, "claim": "pops\x00 an empty pool"})
     assert "\x00" not in rows[0].claim and rows[0].claim == "pops� an empty pool"
+
+
+def test_the_record_takes_the_findings_fields_from_l2(repo, _private_bugs_dir):
+    """Final review 2026-10-22, Important 2. Invariant: the record's category, priority and
+    high_stakes are the finding's as L2 recorded them, not what the ledger row says, so a row
+    cannot raise the priority a record suppresses up to.
+
+    Red 2026-10-22: mutation `out.append(({**row, **recorded} if ... else row, where))` ->
+    `out.append((row, where))` in `fp_records.eligible`; failed at `assert rows[0]["priority"] ==
+    "P3"` ('P1' != 'P3').
+    """
+    through_l25(repo, lambda run: [fp_row(repo, run, "F-1", priority="P1")], priority="P3")
+    ps.record("L6", detail="APPROVED", output=write_output(repo, acceptance(F_1="ACCEPT")),
+              root=repo)
+    ps.close(root=repo)
+    rows = _ledger(_private_bugs_dir)
+    assert rows[0]["priority"] == "P3"

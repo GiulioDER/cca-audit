@@ -30,8 +30,10 @@ there), built against saved `recall_records` answers until the live server is de
 * **PRIOR_FP.** Step 2.4 (`bugs anchors --findings`, `recall_records`, `bugs match-fp`) suppresses a
   finding only when its record is current, every anchor is `exact`, the category is equal, and the
   finding is neither high stakes nor of higher priority; any other match goes to fp-check with the
-  record attached. The verdict `PRIOR_FP` is counted (`--prior-fp`), and `record L2.5` refuses any
-  PRIOR_FP the match file does not suppress and any suppression it does not show.
+  record attached. The verdict `PRIOR_FP` is counted (`--prior-fp`), and `record L2.5` runs the
+  matcher again over the recorded L2 and the saved answer, refusing any PRIOR_FP it does not derive
+  and any suppression the L2.5 file does not show. A finding silent on `high_stakes` counts as high
+  stakes, and a checkout with no GitHub `origin` suppresses nothing.
   `CCA_PRIOR_FP=off` turns every suppression into an attachment; `bugs retract-fp ID --reason`
   retracts a record.
 

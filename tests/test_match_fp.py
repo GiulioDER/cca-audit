@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import findings_output, write_output
+from conftest import write_output
 
 from cca_checks import pipeline_state as ps
 from cca_checks.bugs import match_fp
 from cca_checks.bugs.__main__ import main
+from cca_checks.bugs.query_anchors import at
 
 RESPONSES = Path(__file__).parent / "fixtures" / "audit_memory" / "responses"
 ANSWER = json.loads((RESPONSES / "fp_answer.json").read_text(encoding="utf-8"))
@@ -185,19 +187,27 @@ def test_another_repositorys_record_is_ignored():
 # The L2.5 gate: PRIOR_FP is the matcher's verdict, never the orchestrator's.
 
 
-def _through_l2(repo, n=2):
+def _gated_run(repo):
+    """A FAST run whose L2 holds F-1 (category x, at app.py:1) and F-2 (category y, same place),
+    with this run's saved recall_records answer holding one accepted false positive judged on
+    app.py as it is now, category x."""
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "https://github.com/acme/widgets.git"], check=True)
     state = ps.start("FAST", root=repo)
+    place = at(repo, ["app.py:1"])[0]["anchor"]
+    l2 = [{"id": f"F-{i}", "category": c, "priority": "P2", "high_stakes": False,
+           "file": "app.py", "line": 1, "claim": "c"} for i, c in ((1, "x"), (2, "y"))]
     ps.record("L1", output=write_output(repo), root=repo)
-    ps.record("L2", counts={"unique": n}, output=findings_output(repo, n), root=repo)
-    return state
-
-
-def _match_file(repo, state, *matches):
-    path = repo / ".claude" / "audits" / "runs" / state.run_id / "match_fp.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"schema": 1, "matches": [
-        {"finding_id": f, "record_id": r, "action": a, "reasons": [], "citation": {}}
-        for f, r, a in matches]}), encoding="utf-8")
+    ps.record("L2", counts={"unique": 2}, output=write_output(repo, l2), root=repo)
+    rec = {**RECORD, "repo": "acme/widgets", "category": "x", "anchors": [place],
+           "id": "widgets:fp:r0:F-9"}
+    answer = {"tenant_id": "cca", "generation_id": "g", "truncated": False, "records": [
+        {**ANSWER["records"][0], "id": rec["id"], "recall_record": rec,
+         "anchor_matches": [{"anchor": place, "match": "exact"}], "anchor_match": "exact"}]}
+    run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "fp-records.json").write_text(json.dumps(answer), encoding="utf-8")
+    return state, rec["id"]
 
 
 def _l25(repo, rows, prior_fp, confirmed):
@@ -207,14 +217,36 @@ def _l25(repo, rows, prior_fp, confirmed):
 
 
 def test_l25_refuses_a_prior_fp_the_matcher_did_not_suppress(git_repo):
-    """Red 2026-10-22: mutation `unmatched = sorted(set(given) - set(suppress))` -> `unmatched =
+    """Invariant: F-2's category differs from the record's, so it is not suppressible, whatever
+    a match file says.
+
+    Red 2026-10-22: mutation `unmatched = sorted(set(given) - set(suppress))` -> `unmatched =
     []` in `pipeline_state._check_prior_fp`; failed at `pytest.raises(..., match="did not
-    suppress")` (DID NOT RAISE)."""
-    state = _through_l2(git_repo)
-    _match_file(git_repo, state, ("F-1", "rec-1", "attach"))
+    suppress")` (DID NOT RAISE).
+    """
+    _, record = _gated_run(git_repo)
     with pytest.raises(ps.RecordRefused, match="did not suppress"):
-        _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": "rec-1"},
-                        {"id": "F-2", "verdict": "CONFIRMED"}], 1, 1)
+        _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": record},
+                        {"id": "F-2", "verdict": "PRIOR_FP", "record_id": record}], 2, 0)
+
+
+def test_l25_derives_the_suppressions_itself_and_ignores_a_hand_written_match_file(git_repo):
+    """Final review 2026-10-22, Important 1. Invariant: record L2.5 runs the matcher again over
+    the stored L2 and the saved answer; a match file (stale, edited or hand-written) that
+    suppresses F-2 suppresses nothing.
+
+    Red 2026-10-22: mutation making `_prior_fp_matches` return the `suppress` entries of
+    `match_fp.json` (the first version's behaviour); failed at `pytest.raises(..., match="did
+    not suppress F-2"...)` (DID NOT RAISE).
+    """
+    state, record = _gated_run(git_repo)
+    match = git_repo / ".claude" / "audits" / "runs" / state.run_id / "match_fp.json"
+    match.write_text(json.dumps({"schema": 1, "matches": [
+        {"finding_id": f, "record_id": record, "action": "suppress", "reasons": [],
+         "citation": {}} for f in ("F-1", "F-2")]}), encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="F-2 is PRIOR_FP but the matcher did not"):
+        _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": record},
+                        {"id": "F-2", "verdict": "PRIOR_FP", "record_id": record}], 2, 0)
 
 
 def test_l25_refuses_to_hide_a_suppression(git_repo):
@@ -223,16 +255,40 @@ def test_l25_refuses_to_hide_a_suppression(git_repo):
     Red 2026-10-22: mutation `dropped = sorted(set(suppress) - set(given))` -> `dropped = []`
     in `_check_prior_fp`; failed at `pytest.raises(..., match="does not mark")`.
     """
-    state = _through_l2(git_repo)
-    _match_file(git_repo, state, ("F-1", "rec-1", "suppress"))
+    state, record = _gated_run(git_repo)
     with pytest.raises(ps.RecordRefused, match="does not mark"):
         _l25(git_repo, [{"id": "F-1", "verdict": "CONFIRMED"},
                         {"id": "F-2", "verdict": "CONFIRMED"}], 0, 2)
-    _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": "rec-1"},
+    _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": record},
                     {"id": "F-2", "verdict": "CONFIRMED"}], 1, 1)
     l25 = json.loads((git_repo / ".claude" / "audits" / "runs" / state.run_id
                       / "L2.5.json").read_text(encoding="utf-8"))
-    assert {"id": "F-1", "verdict": "PRIOR_FP", "record_id": "rec-1"} in l25
+    assert {"id": "F-1", "verdict": "PRIOR_FP", "record_id": record} in l25
+
+
+def test_a_finding_that_does_not_say_whether_it_is_high_stakes_is_not_suppressed():
+    """Final review 2026-10-22, Important 3. Invariant: a missing high_stakes field fails closed.
+
+    Red 2026-10-22: mutation `if finding.get("high_stakes") is not False:` -> `if
+    finding.get("high_stakes") is True:` in `match_fp.match`; failed at `assert got.action ==
+    "attach"`.
+    """
+    unsaid = finding()
+    del unsaid["high_stakes"]
+    [got] = run([unsaid])
+    assert got.action == "attach" and "high stakes" in got.reasons
+
+
+def test_an_unknown_repository_never_suppresses():
+    """Final review and security review 2026-10-22. Invariant: with no repository to scope the
+    records to, a record of another repository at an identical place cannot suppress.
+
+    Red 2026-10-22: mutation deleting `if repo is None: reasons.append(...)` (`if False:`) in
+    `match_fp.match`; failed at `assert got.action == "attach"`.
+    """
+    [got] = match_fp.match([finding()], ANSWER, repo=None, on=True, today="2026-10-22",
+                           local=agrees)
+    assert got.action == "attach"
 
 
 def test_match_fp_cli_writes_the_match_file(git_repo, monkeypatch):

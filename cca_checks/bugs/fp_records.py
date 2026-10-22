@@ -86,11 +86,14 @@ def eligible(rows: list[dict], anchors: dict, acceptance: object,
         if decided.get(finding) != ACCEPT:
             skipped.append(f"{finding}: L6 {decided.get(finding) or 'gave no decision'}")
             continue
-        where = _anchors(anchors.get(finding))
+        facts = anchors.get(finding)
+        where = _anchors(facts)
         if where is None:
             skipped.append(f"{finding}: an anchor did not resolve")
             continue
-        out.append((row, where))
+        # The finding's own fields as L2 recorded them win over the row's (record L2.5).
+        recorded = facts.get("finding") if isinstance(facts, dict) else None
+        out.append(({**row, **recorded} if isinstance(recorded, dict) else row, where))
     return out, skipped
 
 

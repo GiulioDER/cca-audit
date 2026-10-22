@@ -425,7 +425,7 @@ FP_FIELDS = ("finding_id", "file", "line", "symbol", "code_sha", "claim", "evide
              "fp_reason")
 #: Run files the false-positive path reads, under .claude/audits/runs/<run_id>/.
 FP_ANCHORS = "fp_anchors.json"
-MATCH_FP = "match_fp.json"
+FP_RECORDS = "fp-records.json"
 L6_DECISIONS = ("ACCEPT", "REJECT")
 
 
@@ -529,18 +529,38 @@ def _ref(ref: str) -> tuple[str, int]:
 def _fp_anchors(state: PipelineState, root) -> dict[str, dict]:
     """Anchor every false positive of this run over the code it was judged on, now, at L2.5.
 
-    Returns finding id to `{"anchors": [...], "errors": [...]}`: the finding's own place first,
-    then each evidence location, so a record built from it lapses when either changes. A row
-    whose `symbol` and `code_sha` disagree with the code is refused: those fields are copied from
-    `python -m cca_checks bugs anchors --at <file>:<line>`, never written by hand, because a
-    record that suppresses must pin the code it was judged on.
+    Returns finding id to `{"anchors": [...], "errors": [...], "finding": {...}}`: the finding's
+    own place first, then each evidence location, so a record built from it lapses when either
+    changes, and the finding's `category`, `priority` and `high_stakes` as L2 recorded them,
+    which the record takes rather than the row's. A row is refused when it names no finding of
+    L2, sits at another place than L2's finding, or gives a `symbol` and `code_sha` that disagree
+    with the code: those are copied from `python -m cca_checks bugs anchors --at <file>:<line>`,
+    never written by hand, because a record that suppresses must pin the code it was judged on.
     """
     from .bugs.anchors import anchor_for
 
+    try:
+        l2 = {f["id"]: f for f in _stored_l2(state, root)}
+    except layer_outputs.ShapeError as exc:
+        raise RecordRefused(str(exc)) from exc
     out: dict[str, dict] = {}
     for row in _verdict_rows(root, state.run_id, "FALSE_POSITIVE"):
         finding = row["finding_id"]
-        facts: dict = {"anchors": [], "errors": []}
+        found = l2.get(finding)
+        if found is None:
+            raise RecordRefused(
+                f"FALSE_POSITIVE row {finding} names no finding of L2; finding_id is the L2 id"
+            )
+        if (str(row["file"]).replace("\\", "/"), str(row["line"])) != \
+                (str(found.get("file")).replace("\\", "/"), str(found.get("line"))):
+            raise RecordRefused(
+                f"FALSE_POSITIVE row {finding} is at {row['file']}:{row['line']}, but L2 put "
+                f"{finding} at {found.get('file')}:{found.get('line')}; file and line are the "
+                "finding's own place, and a mitigation's place goes in evidence_refs"
+            )
+        facts: dict = {"anchors": [], "errors": [], "finding": {
+            "category": found.get("category"), "priority": found.get("priority"),
+            "high_stakes": found.get("high_stakes") is not False}}
         places = [(row["file"], row["line"]), *(_ref(r) for r in row["evidence_refs"])]
         for index, (file, line) in enumerate(places):
             try:
@@ -565,29 +585,54 @@ def _fp_anchors(state: PipelineState, root) -> dict[str, dict]:
 
 
 def _prior_fp_matches(state: PipelineState, root) -> dict[str, dict]:
-    """Finding id to its `suppress` match in this run's match file, or {} without one."""
-    path = deferred.runs_dir(root) / state.run_id / MATCH_FP
+    """Finding id to the record that suppresses it, computed here, never read from a file.
+
+    The matcher runs again over L2 as it was recorded, the saved `recall_records` answer of this
+    run (FP_RECORDS) and the checkout, with the ledger's retractions and the switch read now. So
+    a match file left from an earlier L2, a hand-written one, or one computed from an edited L2
+    file suppresses nothing the gate does not also derive. Without a saved answer nothing is
+    suppressed.
+    """
+    path = deferred.runs_dir(root) / state.run_id / FP_RECORDS
     if not path.exists():
         return {}
-    try:
-        value = json.loads(path.read_bytes())
-        matches = value["matches"]
-        return {m["finding_id"]: m for m in matches if m.get("action") == "suppress"}
-    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+    from .bugs import envelope, match_fp, query_anchors
+    from .bugs.gitread import GitError, remote_repo
+    from .bugs.records import RetractionRow, read_ledger
+    from .bugs.store import bugs_dir
+
+    _, value, why = envelope.load(path)
+    if why:
         raise RecordRefused(
-            f"{path.as_posix()} is not a match file from `python -m cca_checks bugs match-fp` "
-            f"({type(exc).__name__}); run that command again, or delete the file to suppress "
-            "nothing"
-        ) from exc
+            f"{path.as_posix()} is not a recall_records answer ({why}); save the raw answer "
+            "again, or delete the file to suppress nothing"
+        )
+    try:
+        l2 = _stored_l2(state, root)
+    except layer_outputs.ShapeError as exc:
+        raise RecordRefused(str(exc)) from exc
+    try:
+        repo = remote_repo(pathlib.Path(root))
+    except (OSError, GitError):
+        repo = None
+    try:
+        rows, _ = read_ledger(bugs_dir())
+    except OSError:
+        rows = {}
+    retracted = {r.target_id for r in rows.values()
+                 if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"}
+    matches = match_fp.match(query_anchors.locate(pathlib.Path(root), l2), value, repo=repo,
+                             retracted=retracted, local=query_anchors.local_sha(pathlib.Path(root)))
+    return {m.finding_id: m.to_json() for m in matches if m.action == match_fp.SUPPRESS}
 
 
 def _check_prior_fp(state: PipelineState, l25: list, root) -> None:
     """PRIOR_FP is the matcher's verdict, never the orchestrator's: refuse any disagreement.
 
-    Each PRIOR_FP in the L2.5 file must be a `suppress` in the match file, carrying the same
-    `record_id`, and each `suppress` must be a PRIOR_FP: a suppression is kept visible, and no
-    finding is suppressed by hand. On STANDARD and DEEP each PRIOR_FP ledger row names the same
-    record in `prior_fp_record`.
+    Each PRIOR_FP in the L2.5 file must be a suppression `_prior_fp_matches` derives, carrying
+    the same `record_id`, and each such suppression must be a PRIOR_FP: a suppression is kept
+    visible, and no finding is suppressed by hand. On STANDARD and DEEP each PRIOR_FP ledger row
+    names the same record in `prior_fp_record`.
     """
     suppress = _prior_fp_matches(state, root)
     given = {r["id"]: r for r in l25 if isinstance(r, dict) and r.get("verdict") == "PRIOR_FP"}
@@ -611,8 +656,9 @@ def _check_prior_fp(state: PipelineState, l25: list, root) -> None:
                             "and prior_fp_record equal to the matcher's record_id")
     if problems:
         raise RecordRefused(
-            "; ".join(problems) + f". PRIOR_FP comes only from {MATCH_FP} under "
-            f".claude/audits/runs/{state.run_id}/ (`python -m cca_checks bugs match-fp`)"
+            "; ".join(problems) + f". PRIOR_FP comes only from the matcher, which record "
+            f"L2.5 runs again over L2 and .claude/audits/runs/{state.run_id}/{FP_RECORDS}; "
+            f"`python -m cca_checks bugs match-fp` shows what it decides"
         )
 
 

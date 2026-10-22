@@ -74,8 +74,13 @@ def _line(value: object) -> int:
 
 def located(root: Path, path: Path) -> list[dict]:
     """The L2 findings in `path`, each with `anchor` set where its place resolves."""
+    return locate(root, _findings(path))
+
+
+def locate(root: Path, findings: list[dict]) -> list[dict]:
+    """`findings`, each with `anchor` set where its place resolves in the checkout."""
     out = []
-    for finding in _findings(path):
+    for finding in findings:
         file = finding.get("file")
         anchor = None
         if isinstance(file, str) and file.strip():

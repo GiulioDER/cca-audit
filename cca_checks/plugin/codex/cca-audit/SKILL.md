@@ -143,8 +143,8 @@ primary agent: `bugs anchors --findings`, one `recall_records` call with `kinds:
 ... --out .claude/audits/runs/<run_id>/match_fp.json`. A `suppress` match gets the verdict
 `PRIOR_FP`, counted with `--prior-fp`, skips `fp-check` and is reported with the record's citation;
 an `attach` match goes to `fp-check` with the record as evidence. Never show these records to a
-Layer 1 auditor, and never mark a finding `PRIOR_FP` yourself: `record L2.5` refuses any PRIOR_FP the
-match file does not suppress.
+Layer 1 auditor, and never mark a finding `PRIOR_FP` yourself: `record L2.5` runs the matcher again
+over the recorded L2 and `fp-records.json`, and refuses any PRIOR_FP it does not derive.
 
 Keep verification independent:
 

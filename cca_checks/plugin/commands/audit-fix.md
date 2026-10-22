@@ -611,8 +611,11 @@ Each match names a finding, a record and an `action`:
   citation and claim attached as evidence that an earlier run judged that place a false positive.
   `fp-check` decides afresh; a high-stakes P1 still gets the full DEEP panel.
 
-`record L2.5` refuses a `PRIOR_FP` the match file does not suppress, and a suppression the L2.5 file
-does not mark `PRIOR_FP`: the verdict is the matcher's, never yours. `CCA_PRIOR_FP=off` in the
+`record L2.5` runs the matcher again itself, over L2 as recorded and the saved
+`fp-records.json`, and refuses a `PRIOR_FP` it does not derive and a suppression the L2.5 file does
+not mark `PRIOR_FP`: the verdict is the matcher's, never yours, and the match file only shows it. A
+finding that does not say whether it is `high_stakes` is treated as high stakes, and a checkout with
+no GitHub `origin` suppresses nothing. `CCA_PRIOR_FP=off` in the
 environment turns every suppression into an attachment, for the day the match rule itself is wrong.
 Without the server, skip this step: write no match file, and no finding is `PRIOR_FP`.
 
@@ -737,7 +740,10 @@ append one row per verified finding (a `DEFERRED` finding gets none: it received
      "verdict": "CONFIRMED|FALSE_POSITIVE|DUPLICATE|UNCERTAIN|STALE|PRIOR_FP",
      "fix_id": <FIX-id or null>}
 
-A **`FALSE_POSITIVE`** row adds what a record of it needs, and `record L2.5` refuses one without:
+A **`FALSE_POSITIVE`** row adds what a record of it needs, and `record L2.5` refuses one without.
+`file` and `line` are the finding's own place as L2 recorded it (a mitigation's place goes in
+`evidence_refs`), and the record takes the finding's `category`, `priority` and `high_stakes` from
+L2, not from the row:
 
     "file": <path>, "line": <N>, "symbol": <S or null>, "code_sha": <sha or null>,
     "claim": <the finding's claim>, "evidence_refs": ["<file>:<line>", ...],
