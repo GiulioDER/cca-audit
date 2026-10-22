@@ -88,9 +88,21 @@ def ledger_facts(root: Path, today: str | None = None,
     today = today or date.today().isoformat()
     retracted = {r.target_id for r in rows.values()
                  if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"
-                 and r.date[:10] <= today}
+                 and _in_effect(r.date, today)}
     known = {r.id: to_record(r) for r in rows.values() if isinstance(r, FalsePositiveRow)}
     return retracted, known, None
+
+
+def _in_effect(when: object, today: str) -> bool:
+    """Whether a retraction dated `when` is in effect on `today`.
+
+    Fail closed: a date that does not read as YYYY-MM-DD counts as in effect, since a string
+    compare would put a malformed one after every real date and the retraction would never act.
+    """
+    try:
+        return date.fromisoformat(str(when)[:10]) <= date.fromisoformat(today[:10])
+    except ValueError:
+        return True
 
 
 def _key(anchor: object) -> tuple | None:

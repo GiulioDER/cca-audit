@@ -136,8 +136,8 @@ def test_currency_comes_from_the_returned_fields_not_from_retraction_links():
 def test_a_local_retraction_counts_only_from_its_date(tmp_path):
     """The local ledger follows the same window: a retraction dated after today is not yet one.
 
-    Red 2026-10-22: mutation deleting `and r.date[:10] <= today` in `match_fp.ledger_facts`;
-    failed at `assert retracted == set()`.
+    Red 2026-10-22: mutation `return date.fromisoformat(...) <= date.fromisoformat(...)` ->
+    `return True` in `match_fp._in_effect`; failed at `assert retracted == set()`.
     """
     fp = from_record(GOLDEN_FP)
     write([fp], tmp_path, "2026-10-22T00:00:00Z")
@@ -389,3 +389,19 @@ def test_an_exact_the_answer_claims_is_confirmed_against_the_checkout():
     assert got.action == "attach"
     assert "anchor recall/store.py Store._with_retry_shared is changed in the checkout" \
         in got.reasons
+
+
+def test_a_retraction_with_an_unreadable_date_is_in_effect(tmp_path):
+    """Security review 2026-10-22. Invariant: a retraction whose date does not parse counts as
+    in effect; a string compare would put it after every real date and never let it act.
+
+    Red 2026-10-22: mutation `return True` -> `return False` in the `except ValueError` of
+    `match_fp._in_effect`; failed at `assert retracted == {fp.id}`.
+    """
+    fp = from_record(GOLDEN_FP)
+    write([fp], tmp_path, "2026-10-22T00:00:00Z")
+    odd = RetractionRow(kind="false_positive_retraction", project=fp.project, repo=fp.repo,
+                        date="zz-not-a-date", target_id=fp.id, reason="r", retracted_by="o")
+    write([odd], tmp_path, "2026-10-22T00:00:00Z")
+    retracted, _, blocked = match_fp.ledger_facts(tmp_path, today="2026-10-22")
+    assert blocked is None and retracted == {fp.id}
