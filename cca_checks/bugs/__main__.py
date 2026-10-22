@@ -1,7 +1,14 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
+python -m cca_checks.bugs prior --records FILE [--code FILE] [--repo-name OWNER/NAME] [--root PATH]
+    [--before YYYY-MM-DD] [--limit N] [--json]
 python -m cca_checks.bugs prior --files F [F ...] [--repo-name OWNER/NAME] [--root PATH]
-    [--before YYYY-MM-DD] [--limit N] [--similar PATH [PATH ...]] [--cross-repo] [--json]
+    [--before YYYY-MM-DD] [--limit N] [--json]
+python -m cca_checks.bugs anchors (--diff [--base REV] | --findings L2.json | --records FILE
+    | --at FILE:LINE ...)
+    [--root PATH] [--repo-name OWNER/NAME]
+python -m cca_checks.bugs match-fp --findings L2.json --records FILE [--out FILE] [--root PATH]
+python -m cca_checks.bugs retract-fp ID --reason TEXT [--by NAME]
 python -m cca_checks.bugs rerender --all [--modified STAMP] [--json]
 python -m cca_checks.bugs backfill-caused-by --repo-root PATH [--write] [--json]
 python -m cca_checks.bugs roundtrip-check --dump FILE [FILE ...] [--json]
@@ -9,15 +16,21 @@ python -m cca_checks.bugs roundtrip-check --dump FILE [FILE ...] [--json]
 Read-only unless --write. The dry run prints what would be written, so the numbers can
 be reviewed before anything lands in the ledger. `resolve` exits 3 when GitHub could not
 be asked about some record (the hourly worker retries), otherwise 0. `prior` is read-only
-and exits 0 on any data or environment problem (a missing ledger or origin prints the empty
-block), and 2 on a usage error (argparse). `rerender --all` rewrites every memo from the
-ledger, the one sanctioned overwrite of memos, and never writes the ledger; it exits 1 when a
-ledger line could not be read (that memo is left as it was). `backfill-caused-by` blames each
-fix of one checked-out repository against its parent; it only reads the ledger, and with
---write it appends each new edge to `caused_by.jsonl` beside it. Run `rerender --all` after
-it, so the memos carry the edges. `roundtrip-check` exits 0 only when every ledger row
-has an equal record in RE-call's dump and the dump holds nothing else, 1 when it lists a
-difference, and 2 when the dump cannot be read or is truncated.
+and exits 0 on any data or environment problem (a missing ledger, origin or readable records
+file prints the empty block), and 2 on a usage error. With `--records` it renders the anchored
+block from a saved `recall_records` answer (DIFF mode), with `--files` the ledger join (HUNT
+mode). `anchors` prints the anchors a `recall_records` query or a Step 2.5b row needs.
+`match-fp` is the mechanical PRIOR_FP matcher; it writes its result to `--out` and exits 0, and
+`CCA_PRIOR_FP=off` turns every suppression into an attachment. `retract-fp` appends a
+`false_positive_retraction` row (exit 1 when ID is not a false positive of the ledger).
+`rerender --all` rewrites every memo from the ledger, the one sanctioned overwrite of memos,
+and never writes the ledger; it exits 1 when a ledger line could not be read (that memo is
+left as it was). `backfill-caused-by` blames each fix of one checked-out repository against
+its parent; it only reads the ledger, and with --write it appends each new edge to
+`caused_by.jsonl` beside it. Run `rerender --all` after it, so the memos carry the edges.
+`roundtrip-check` exits 0 only when every ledger row has an equal record in RE-call's dump and
+the dump holds nothing else, 1 when it lists a difference, and 2 when the dump cannot be read
+or is truncated.
 """
 from __future__ import annotations
 
@@ -29,7 +42,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .backfill import backfill, summarize
-from .github import owners_from_env
 from .gitread import GitError
 from .model import _printable
 from .store import bugs_dir, write
@@ -58,28 +70,6 @@ def _date_arg(value: str) -> str:
     return value
 
 
-def _responses(paths: list[Path]) -> tuple[list[dict], str | None]:
-    # Saved RE-call answers: an unreadable or malformed file is skipped and named, never fatal.
-    from . import prior
-
-    responses: list[dict] = []
-    errors: list[str] = []
-    for path in paths:
-        try:
-            value = json.loads(path.read_text(encoding="utf-8-sig"))
-        except (OSError, ValueError, RecursionError) as exc:
-            errors.append(f"{path}: {type(exc).__name__}")
-            continue
-        if not isinstance(value, dict):
-            errors.append(f"{path}: {type(value).__name__} is not an object")
-            continue
-        if reason := prior.unwrap_error(value):
-            errors.append(f"{path}: {reason}")
-            continue
-        responses.append(value)
-    return responses, "; ".join(errors) or None
-
-
 def _emit(text: str) -> None:
     # A piped stdout on Windows is cp1252 with strict errors: write only what it can encode.
     encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
@@ -96,28 +86,33 @@ def _positive_int(value: str) -> int:
     return number
 
 
-def _owners(repo: str | None) -> set[str]:
-    named = set(owners_from_env())
-    if named:
-        return named
-    return {repo.split("/", 1)[0].lower()} if repo else set()
+def _repo(a: argparse.Namespace) -> str | None:
+    from .gitread import remote_repo
+
+    if getattr(a, "repo_name", None):
+        return a.repo_name
+    try:
+        return remote_repo(a.root)
+    except (OSError, GitError):
+        return None
 
 
 def _prior(a: argparse.Namespace) -> int:
     from . import prior
-    from .gitread import remote_repo
     from .store import LEDGER
 
+    if a.code is not None and a.records is None:
+        print("bugs prior: --code needs --records", file=sys.stderr)
+        return 2
+    if a.records is None and not a.files:
+        print("bugs prior: give --records FILE (DIFF mode) or --files (HUNT mode)",
+              file=sys.stderr)
+        return 2
+    repo = _repo(a)
+    reason = None if repo is not None else "no origin remote"
+    if a.records is not None:
+        return _prior_records(a, repo, reason)
     ledger = bugs_dir() / LEDGER
-    repo = a.repo_name
-    reason = None
-    if repo is None:
-        try:
-            repo = remote_repo(a.root)
-        except (OSError, GitError):
-            repo = None
-        if repo is None:
-            reason = "no origin remote"
     rows: list[dict] = []
     if reason is None:
         if ledger.is_file():
@@ -127,31 +122,107 @@ def _prior(a: argparse.Namespace) -> int:
     selected = []
     if repo is not None and rows:
         selected = prior.select(rows, repo, a.files, before=a.before, limit=a.limit)
-    near: list[tuple[dict, list[str]]] | None = None
-    unjoined = 0
-    similar_error = None
-    if a.similar is not None:
-        responses, similar_error = _responses(a.similar)
-        near = []
-        if repo is not None and rows:
-            exclude = {str(row.get("bug_id")) for row, _ in selected}
-            near, unjoined = prior.similar(rows, responses, repo, _owners(repo), a.cross_repo,
-                                           a.before, exclude, limit=min(a.limit, prior.SIMILAR_MAX))
     if a.json:
         keys = ("bug_id", "finding_id", "severity", "date", "tier", "fix_commit", "summary")
         out = [{**{k: row.get(k) for k in keys}, "files": overlap} for row, overlap in selected]
-        data: dict = {"repo": repo, "reason": reason, "rows": out}
-        if near is not None:
-            data["similar"] = [{**{k: row.get(k) for k in keys}, "repo": row.get("repo"),
-                                "files": files} for row, files in near]
-            data["unjoined"] = unjoined
-            if similar_error:
-                data["similar_error"] = similar_error
-        print(json.dumps(data, indent=2))
-    elif near is None:
-        _emit(prior.render(selected, reason))
+        print(json.dumps({"repo": repo, "reason": reason, "rows": out}, indent=2))
     else:
-        _emit(prior.render(selected, reason, similar_rows=near, repo=repo or ""))
+        _emit(prior.render(selected, reason))
+    return 0
+
+
+def _prior_records(a: argparse.Namespace, repo: str | None, reason: str | None) -> int:
+    from . import envelope, prior
+
+    records, _, why = envelope.load(a.records)
+    reason = reason or why
+    code = None
+    if a.code is not None:
+        code, _, code_why = envelope.load(a.code)
+        if code_why:
+            # A code answer that cannot be read labels nothing, rather than guessing.
+            code = None
+            reason = "; ".join(r for r in (reason, f"code: {code_why}") if r)
+    selected = []
+    if repo is not None and why is None:
+        selected = prior.select_records(records, repo, before=a.before, limit=a.limit)
+    if a.json:
+        print(json.dumps({"repo": repo, "reason": reason,
+                          "counts": prior.block_counts(selected),
+                          "records": [r.get("id") for r in selected]}, indent=2))
+    else:
+        _emit(prior.render_records(selected, reason, code, repo or ""))
+    return 0
+
+
+def _anchors(a: argparse.Namespace) -> int:
+    from . import query_anchors
+
+    try:
+        if a.at:
+            out: object = query_anchors.at(a.root, a.at)
+        elif a.findings is not None:
+            out = query_anchors.for_findings(a.root, a.findings, _repo(a))
+        elif a.records is not None:
+            out = query_anchors.for_records(a.records, _repo(a))
+        else:
+            out = query_anchors.for_diff(a.root, a.base, _repo(a))
+    except (OSError, ValueError, GitError) as exc:
+        print(f"bugs anchors: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(out, indent=1))
+    return 0
+
+
+def _match_fp(a: argparse.Namespace) -> int:
+    from . import match_fp, query_anchors
+
+    try:
+        findings = query_anchors.located(a.root, a.findings)
+    except (OSError, ValueError) as exc:
+        print(f"bugs match-fp: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+    from . import envelope
+
+    _, value, why = envelope.load(a.records)
+    retracted, known, blocked = match_fp.ledger_facts(bugs_dir())
+    on = match_fp.enabled()
+    matches = [] if why else match_fp.match(
+        findings, value, repo=_repo(a), retracted=retracted,
+        local=query_anchors.local_sha(a.root), on=on, known=known, blocked=blocked)
+    out = {"schema": 1, "switch": "on" if on else "off", "repo": _repo(a),
+           "generation_id": value.get("generation_id") if isinstance(value, dict) else None,
+           "matches": [m.to_json() for m in matches], "errors": [why] if why else []}
+    text = json.dumps(out, indent=1)
+    if a.out is not None:
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0
+
+
+def _retract_fp(a: argparse.Namespace) -> int:
+    import getpass
+
+    from .records import FalsePositiveRow, RetractionRow, read_ledger
+    from .store import write as write_rows
+
+    root = bugs_dir()
+    rows, _ = read_ledger(root)
+    target = rows.get(a.id)
+    if not isinstance(target, FalsePositiveRow):
+        print(f"bugs retract-fp: {a.id!r} is not a false_positive row of the ledger",
+              file=sys.stderr)
+        return 1
+    if not a.reason.strip():
+        print("bugs retract-fp: --reason must not be empty", file=sys.stderr)
+        return 2
+    stamp = _now()
+    row = RetractionRow(kind="false_positive_retraction", project=target.project,
+                        repo=target.repo, date=stamp[:10], target_id=target.id,
+                        reason=a.reason.strip(), retracted_by=a.by or getpass.getuser())
+    added, memos = write_rows([row], root, stamp)
+    print(json.dumps({"id": row.id, "rows": added, "memos": memos, "dir": str(root)}))
     return 0
 
 
@@ -249,18 +320,45 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--write", action="store_true", help="append rows and move records")
     r.add_argument("--json", action="store_true")
     r.add_argument("--stale-days", type=int, default=14)
-    q = sub.add_parser("prior", help="print the prior fixes recorded for a set of files")
-    q.add_argument("--files", nargs="+", required=True)
+    q = sub.add_parser("prior", help="print the prior bugs block for the auditor brief")
+    q.add_argument("--records", type=Path, metavar="FILE",
+                   help="a saved recall_records answer for the changed code's anchors (DIFF)")
+    q.add_argument("--code", type=Path, metavar="FILE",
+                   help="the code tenant's recall_records answer for the records' anchors; "
+                        "labels each anchor unchanged, changed or gone")
+    q.add_argument("--files", nargs="+", default=[],
+                   help="HUNT mode: join the local ledger on these files")
     q.add_argument("--repo-name", metavar="OWNER/NAME",
                    help="the repository; when absent it is read from --root's origin")
     q.add_argument("--root", type=Path, default=Path("."))
     q.add_argument("--before", type=_date_arg, metavar="YYYY-MM-DD")
     q.add_argument("--limit", type=_positive_int, default=8)
-    q.add_argument("--similar", nargs="+", action="extend", type=Path, metavar="PATH",
-                   help="saved recall_search responses to join to the ledger")
-    q.add_argument("--cross-repo", action="store_true",
-                   help="let --similar show rows of other repositories of the allowed owners")
     q.add_argument("--json", action="store_true")
+    n = sub.add_parser("anchors", help="code anchors for a recall_records query or a row")
+    how = n.add_mutually_exclusive_group(required=True)
+    how.add_argument("--diff", action="store_true",
+                     help="the symbols the working tree changes against --base")
+    how.add_argument("--findings", type=Path, metavar="L2.json",
+                     help="the place of every finding in a consolidated L2 file")
+    how.add_argument("--records", type=Path, metavar="FILE",
+                     help="the bug records' anchors in a saved recall_records answer, for the "
+                          "code tenant's query (the code join)")
+    how.add_argument("--at", nargs="+", metavar="FILE:LINE", help="these places")
+    n.add_argument("--base", default="HEAD", help="--diff: the revision to compare against")
+    n.add_argument("--root", type=Path, default=Path("."))
+    n.add_argument("--repo-name", metavar="OWNER/NAME")
+    m = sub.add_parser("match-fp", help="the PRIOR_FP matcher, between L2 and L2.5")
+    m.add_argument("--findings", type=Path, required=True, metavar="L2.json")
+    m.add_argument("--records", type=Path, required=True, metavar="FILE",
+                   help="the saved recall_records answer for the findings' anchors")
+    m.add_argument("--out", type=Path, metavar="FILE",
+                   help=".claude/audits/runs/<run_id>/match_fp.json, which L2.5 reads")
+    m.add_argument("--root", type=Path, default=Path("."))
+    m.add_argument("--repo-name", metavar="OWNER/NAME")
+    x = sub.add_parser("retract-fp", help="retract an accepted false positive record")
+    x.add_argument("id", help="the false positive record id, <project>:fp:<run_id>:<finding>")
+    x.add_argument("--reason", required=True)
+    x.add_argument("--by", help="who retracts it (default: the current user)")
     w = sub.add_parser("rerender", help="rewrite every memo from its ledger row")
     w.add_argument("--all", action="store_true", required=True,
                    help="required: every memo is rewritten, hand edits included")
@@ -293,6 +391,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "prior":
         return _prior(a)
+
+    if a.cmd == "anchors":
+        return _anchors(a)
+
+    if a.cmd == "match-fp":
+        return _match_fp(a)
+
+    if a.cmd == "retract-fp":
+        return _retract_fp(a)
 
     if a.cmd == "resolve":
         from dataclasses import asdict

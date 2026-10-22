@@ -6,6 +6,37 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**Prior bugs are matched by code anchor, and a false positive already judged on unchanged code is
+suppressed visibly.** Session 4 of RE-call's audit-memory plan (`docs/AUDIT_MEMORY_PLAN.md`
+there), built against saved `recall_records` answers until the live server is deployed.
+
+* **The brief.** In DIFF mode Step 1 asks `recall_records` with the anchors of the changed symbols
+  (`bugs anchors --diff`) and `bugs prior --records FILE` renders the PRIOR BUGS block from the
+  answer: `exact` and `symbol_changed` before `file_only`, each labelled, a bug whose fix later
+  caused a regression marked. With a code tenant, `--code FILE` labels each place `unchanged`,
+  `changed` or `gone`; without one, no label. The three `recall_search` "similar fixes" queries,
+  `--similar` and `--cross-repo` are removed, and so is the sentence that told auditors to leave a
+  listed bug out. HUNT mode keeps the ledger join (`--files`). The run summary stores the block's
+  record count by match (`prior_block`), the measurement trigger's input.
+* **False-positive records.** Step 2.5b FALSE_POSITIVE rows carry `finding_id`, `file`, `line`,
+  `symbol`, `code_sha`, `claim`, `evidence_refs` and `fp_reason` (`not_real`, `out_of_scope`,
+  `settled`); `record L2.5` refuses a row without them, recomputes the anchor and writes
+  `fp_anchors.json`. L6 takes `--output` with the architect's ACCEPT or REJECT per false positive,
+  required for APPROVED; a REJECT is reported as disputed and counted in `human_pending`. At
+  `pipeline close` each accepted `not_real` false positive of an APPROVED run whose places all
+  resolved becomes a `false_positive` ledger row, an all-false-positive run included.
+* **PRIOR_FP.** Step 2.4 (`bugs anchors --findings`, `recall_records`, `bugs match-fp`) suppresses a
+  finding only when its record is current, every anchor is `exact`, the category is equal, and the
+  finding is neither high stakes nor of higher priority; any other match goes to fp-check with the
+  record attached. The verdict `PRIOR_FP` is counted (`--prior-fp`), and `record L2.5` runs the
+  matcher again over the recorded L2 and the saved answer, refusing any PRIOR_FP it does not derive
+  and any suppression the L2.5 file does not show. A finding silent on `high_stakes` counts as high
+  stakes, and a checkout with no GitHub `origin` suppresses nothing.
+  `CCA_PRIOR_FP=off` turns every suppression into an attachment; `bugs retract-fp ID --reason`
+  retracts a record.
+
 ## [0.13.0] - 2026-10-21
 
 **Auditors now see the bugs CCA already fixed in the files they audit.** Since 0.12.0 every CCA

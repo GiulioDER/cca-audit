@@ -56,6 +56,7 @@ def add_parser(sub) -> None:
         ("--unverified", "L2.5: findings passed on without a verdict (P3; P2 on FAST), "
                          "each marked DEFERRED in the L2.5 file"),
         ("--stale", "L2.5, DEFERRED run only: findings whose code moved on (STALE)"),
+        ("--prior-fp", "L2.5: findings the PRIOR_FP matcher suppressed (bugs match-fp)"),
         ("--to-fix", "L3: findings the plan will fix"),
         ("--deferred", "L3: confirmed findings deferred, not fixed"),
     ):
@@ -63,7 +64,9 @@ def add_parser(sub) -> None:
     pl_record.add_argument(
         "--output", default=None,
         help="L1, L2, L2.5, L3, L4: a JSON file holding the layer's work; it is copied "
-             "into .claude/audits/runs/<run_id>/ so a paused run can resume from it",
+             "into .claude/audits/runs/<run_id>/ so a paused run can resume from it. L6: "
+             "the architect's ACCEPT or REJECT per false positive (required for APPROVED "
+             "when L2.5 has any)",
     )
     pl_record.add_argument("--root", default=".")
 
@@ -144,8 +147,8 @@ def run(a) -> int:
         if a.pipeline_cmd == "record":
             counts = {"unique": a.unique, "confirmed": a.confirmed, "fp": a.fp,
                       "uncertain": a.uncertain, "duplicate": a.duplicate,
-                      "unverified": a.unverified, "stale": a.stale, "to_fix": a.to_fix,
-                      "deferred": a.deferred}
+                      "unverified": a.unverified, "stale": a.stale,
+                      "prior_fp": a.prior_fp, "to_fix": a.to_fix, "deferred": a.deferred}
             # Recording writes only under .claude/audits/, which the fingerprint
             # excludes, so the tree taken before it is the tree after it.
             run_state = pipeline_state.load(a.root)

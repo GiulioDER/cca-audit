@@ -145,6 +145,8 @@ class _Ordinals:
             for line in ledger.read_text(encoding="utf-8").splitlines():
                 try:  # as tolerant as store.existing_ids
                     row = json.loads(line)
+                    if row.get("kind", "bug") != "bug":
+                        continue  # a false positive, lesson or retraction has no ordinal
                     key = _key(row["project"], row["fix_commit"], row["finding_id"])
                     ordinal = int(row.get("ordinal", 1))
                     run_id = row.get("run_id")
@@ -187,6 +189,8 @@ class _Backfilled:
             for line in ledger.read_text(encoding="utf-8").splitlines():
                 try:
                     row = json.loads(line)
+                    if row.get("kind", "bug") != "bug":
+                        continue  # only bug rows can be the same bug as a forward row
                     sources = row.get("sources")
                     forward = isinstance(sources, list) and any(
                         isinstance(s, str) and s.startswith("run:") for s in sources)
