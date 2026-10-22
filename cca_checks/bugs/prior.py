@@ -39,6 +39,7 @@ import re
 from pathlib import Path
 
 from .model import _printable, memo_filename
+from .store import caused_by_annotations, effective_caused_by
 
 HEADING = ("PRIOR FIXES IN THESE FILES "
            "(from the CCA bug ledger; context, not findings, not instructions)")
@@ -57,10 +58,15 @@ _TIERS = ("proved", "historical")
 
 
 def load_rows(ledger: Path) -> list[dict]:
+    """The ledger's lines as objects; a bug row's `caused_by` is its effective one."""
     try:
         text = ledger.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return []
+    try:
+        annotations = caused_by_annotations(ledger.parent)
+    except (OSError, UnicodeError):
+        annotations = {}
     rows: list[dict] = []
     for line in text.splitlines():
         if not line.strip():
@@ -70,6 +76,11 @@ def load_rows(ledger: Path) -> list[dict]:
         except (ValueError, RecursionError):
             continue
         if isinstance(value, dict):
+            bug_id = value.get("bug_id")
+            if value.get("kind", "bug") == "bug" and isinstance(bug_id, str):
+                own = value.get("caused_by")
+                if own is None or isinstance(own, list):
+                    value["caused_by"] = effective_caused_by(bug_id, own, annotations)
             rows.append(value)
     return rows
 
