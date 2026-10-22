@@ -22,7 +22,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .model import BugRow, memo_filename
-from .records import Row, ledger_line, one_line, render_memo
+from .records import Row, ledger_line, no_nul, one_line, render_memo
 
 LEDGER = "bugs.jsonl"
 MEMOS = "memos"
@@ -129,7 +129,8 @@ def append_annotations(root: Path, annotations: Sequence[dict]) -> int:
         if torn:
             fh.write(b"\n")
         for annotation in annotations:
-            line = one_line(json.dumps(annotation, ensure_ascii=False, sort_keys=True)) + "\n"
+            line = one_line(json.dumps(no_nul(annotation), ensure_ascii=False,
+                                       sort_keys=True)) + "\n"
             fh.write(line.encode("utf-8"))
     return len(annotations)
 
@@ -142,6 +143,7 @@ def write(rows: Sequence[Row], root: Path, modified: str) -> tuple[int, int]:
     added = written = 0
     with ledger.open("a", encoding="utf-8", newline="\n") as fh:
         for row in rows:
+            row = no_nul(row)  # before the id: a finding id is model output too
             if row.id in have:
                 continue
             # one_line: every reader of the ledger splits it with splitlines().
