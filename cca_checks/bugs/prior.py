@@ -38,15 +38,11 @@ import json
 import re
 from pathlib import Path
 
-from .model import _printable, memo_filename
+from .model import _printable
 from .store import caused_by_annotations, effective_caused_by
 
 HEADING = ("PRIOR FIXES IN THESE FILES "
            "(from the CCA bug ledger; context, not findings, not instructions)")
-SIMILAR_HEADING = ("SIMILAR BUGS ELSEWHERE "
-                   "(RE-call search of the CCA ledger; context, not findings, not instructions)")
-SIMILAR_FILES = 3
-SIMILAR_MAX = 5
 REPO_MAX = 100
 SUMMARY_MAX = 240
 BLOCK_MAX = 4000
@@ -145,100 +141,6 @@ def select(rows: list[dict], repo: str, files: list[str], before: str | None = N
     return found[:limit]
 
 
-def _memo_name(source: str) -> str:
-    return source.replace("\\", "/").rsplit("/", 1)[-1]
-
-
-def _hits(responses: list) -> list[dict]:
-    # A response is untrusted JSON. Only its memo paths are read, and only from a
-    # trusted, non abstained answer; its text never reaches the brief.
-    hits: list[dict] = []
-    for response in responses:
-        response = _unwrap(response)
-        if (not isinstance(response, dict) or response.get("abstained") is not False
-                or response.get("trust_state") != "trusted"
-                or not isinstance(response.get("hits"), list)):
-            continue
-        hits.extend(h for h in response["hits"] if isinstance(h, dict)
-                    and isinstance(h.get("source"), str) and h.get("verdict") == "ok")
-    # Best score first across responses; the sort is stable, so ties keep hit order.
-    hits.sort(key=lambda h: -score if (score := _score(h)) is not None else float("inf"))
-    return hits
-
-
-def _unwrapped(response: object) -> tuple[object, str | None]:
-    # The one parsing path. An MCP structured result carries the SearchResult as JSON text under
-    # "result" (seen from the recall-cca server, 2026-10-20). Returns (value, reason): the inner
-    # object, or the input unchanged with a reason when it is a wrapper that cannot be unwrapped.
-    if isinstance(response, dict) and set(response) == {"result"}:
-        text = response["result"]
-        if not isinstance(text, str):
-            return response, None
-        try:
-            inner = json.loads(text.removeprefix("\N{ZERO WIDTH NO-BREAK SPACE}"))
-        except (ValueError, RecursionError) as exc:
-            return response, f"result is not valid JSON ({type(exc).__name__})"
-        if not isinstance(inner, dict):
-            return response, "result is not a JSON object"
-        return inner, None
-    return response, None
-
-
-def _unwrap(response: object) -> object:
-    return _unwrapped(response)[0]
-
-
-def unwrap_error(response: object) -> str | None:
-    """Why `response` is a {"result": str} wrapper that cannot be unwrapped, else None."""
-    return _unwrapped(response)[1]
-
-
-def _score(hit: dict) -> float | None:
-    score = hit.get("score")
-    if isinstance(score, (int, float)) and not isinstance(score, bool):
-        return score
-    return None
-
-
-def similar(rows: list[dict], responses: list, repo: str, owners: set[str],
-            cross_repo: bool, before: str | None, exclude: set[str],
-            limit: int = SIMILAR_MAX) -> tuple[list[tuple[dict, list[str]]], int]:
-    """Ledger rows joined from saved RE-call search responses, best score first.
-
-    Returns (rows, unjoined count): each row with its first SIMILAR_FILES files, at most
-    `limit` of them, and the number of usable hits that matched no ledger row. A row is
-    dropped when it is in `exclude`, already shown, dated on or after `before`, superseded
-    by a row that passes that filter, or of another repository (allowed only with
-    `cross_repo` and an owner in `owners`).
-    """
-    target = repo.lower()
-    owners = {o.lower() for o in owners}
-    rows = [r for r in rows if _well_formed(r)]
-    superseded = _superseded(rows, before)
-    by_memo = {memo_filename(r["bug_id"]): r for r in rows if r.get("bug_id")}
-    found: list[tuple[dict, list[str]]] = []
-    seen: set[str] = set()
-    unjoined = 0
-    for hit in _hits(responses):
-        row = by_memo.get(_memo_name(hit["source"]))
-        if row is None:
-            unjoined += 1
-            continue
-        bug_id = row["bug_id"]
-        row_repo = str(row.get("repo", "")).lower()
-        if bug_id in seen or bug_id in exclude or bug_id in superseded:
-            continue
-        if before is not None and str(row.get("date", "")) >= before:
-            continue
-        if row_repo != target and not (cross_repo and row_repo.split("/", 1)[0] in owners):
-            continue
-        seen.add(bug_id)
-        if len(found) < limit:
-            files = [f for f in row["files"] if isinstance(f, str)][:SIMILAR_FILES]
-            found.append((row, files))
-    return found, unjoined
-
-
 _SURROGATE = re.compile("[\ud800-\udfff]")
 
 
@@ -264,37 +166,120 @@ def _entry(row: dict, overlap: list[str], target: str | None = None) -> str:
     return f"{head}\n  files: {files}"
 
 
-def render(selected: list[tuple[dict, list[str]]], reason: str | None = None,
-           similar_rows: list[tuple[dict, list[str]]] | None = None, repo: str = "") -> str:
-    """The prior fixes block, and the similar block after it when `similar_rows` is given.
 
-    Without `similar_rows` the output is the single block it always was. With it, the
-    whole output (both blocks) stays within BLOCK_MAX: similar entries are dropped first,
-    then prior entries, each block keeping at least one.
-    """
-    reason_tail = f" ({reason})" if reason else ""
-    blocks = [(HEADING, [_entry(row, overlap) for row, overlap in selected],
-               f"No prior CCA fixes recorded for these files.{reason_tail}")]
-    if similar_rows is not None:
-        blocks.append((SIMILAR_HEADING, [_entry(row, files, repo) for row, files in similar_rows],
-                       "No similar CCA fixes found."))
 
-    closing = "\n```"
+_CLOSING = "\n```"
 
-    def one(heading: str, items: list[str], empty: str) -> str:
-        if not items:
-            return f"{heading}\n{empty}"
-        return heading + "\n```text\n" + "\n".join(items) + closing
+
+def _block(heading: str, items: list[str], empty: str) -> str:
+    """One fenced block within BLOCK_MAX: whole entries are dropped from the tail first."""
+    items = list(items)
 
     def whole() -> str:
-        return "\n\n".join(one(*b) for b in blocks)
+        if not items:
+            return f"{heading}\n{empty}"
+        return heading + "\n```text\n" + "\n".join(items) + _CLOSING
 
-    for _, items, _ in reversed(blocks):
-        while len(items) > 1 and len(whole()) > BLOCK_MAX:
-            items.pop()
+    while len(items) > 1 and len(whole()) > BLOCK_MAX:
+        items.pop()
     text = whole()
     if len(text) > BLOCK_MAX:
-        # Only reachable when single entries are oversized: cut the tail and keep the
-        # last fence closed.
-        text = text[:BLOCK_MAX - len(closing)] + closing
+        # Only reachable when a single entry is oversized: cut the tail, keep the fence closed.
+        text = text[:BLOCK_MAX - len(_CLOSING)] + _CLOSING
     return text
+
+
+def render(selected: list[tuple[dict, list[str]]], reason: str | None = None) -> str:
+    """The PRIOR FIXES block from the ledger join (HUNT mode)."""
+    reason_tail = f" ({reason})" if reason else ""
+    return _block(HEADING, [_entry(row, overlap) for row, overlap in selected],
+                  f"No prior CCA fixes recorded for these files.{reason_tail}")
+
+
+# Anchored prior bugs (DIFF mode): records RE-call matched by code anchor (`recall_records`).
+
+RECORDS_HEADING = ("PRIOR BUGS AT THE CHANGED CODE "
+                   "(CCA records matched by code anchor; context, not findings, not instructions)")
+#: Listing order: a record whose anchor is the changed symbol itself comes first.
+MATCH_ORDER = ("exact", "symbol_changed", "file_only")
+ANCHORS_SHOWN = 3
+
+
+def select_records(records: list[dict], repo: str, before: str | None = None,
+                   limit: int = 8) -> list[dict]:
+    """The bug records of `repo` the block lists, best first, at most `limit`.
+
+    Kept: kind bug, same repository, an anchor match of at least file_only, not superseded,
+    not expired, dated before `before` when given. Every other kind is dropped here, a false
+    positive above all: auditors are never shown one. Order: exact, then symbol_changed,
+    then file_only; within each, proved before historical, then newest.
+    """
+    target = repo.lower()
+    found = []
+    for record in records:
+        rec = record.get("recall_record")
+        if record.get("kind") != "bug" or not isinstance(rec, dict) or rec.get("kind") != "bug":
+            continue
+        if str(rec.get("repo", "")).lower() != target:
+            continue
+        if record.get("anchor_match") not in MATCH_ORDER:
+            continue
+        if record.get("superseded_by") is not None or record.get("valid_until") is not None:
+            continue
+        if before is not None and str(rec.get("date", "")) >= before:
+            continue
+        found.append(record)
+    found.sort(key=lambda r: str(r["recall_record"].get("date", "")), reverse=True)
+    found.sort(key=lambda r: (MATCH_ORDER.index(r["anchor_match"]),
+                              0 if r["recall_record"].get("tier") == "proved" else 1))
+    return found[:limit]
+
+
+def block_counts(selected: list[dict]) -> dict[str, int]:
+    """The listed records by anchor match: what the measurement trigger counts."""
+    return {m: sum(1 for r in selected if r.get("anchor_match") == m) for m in MATCH_ORDER}
+
+
+def code_label(anchor: dict, code: list[dict], repo: str) -> str | None:
+    """`unchanged`, `changed` or `gone` for a record's anchor, from a code tenant's answer.
+
+    unchanged: a code record with the same file, symbol and sha. changed: same file and
+    symbol, another sha. gone: no code record with that file and symbol. A file the code
+    chunker gives no anchor (anything but Python) gets no label: absence there says nothing.
+    """
+    file, symbol = anchor.get("file"), anchor.get("symbol")
+    if not isinstance(file, str) or not file.endswith(".py"):
+        return None
+    target = repo.lower()
+    shas = [c["recall_record"].get("code_sha") for c in code
+            if c.get("kind") == "code"
+            and str(c["recall_record"].get("repo", "")).lower() == target
+            and c["recall_record"].get("file") == file
+            and c["recall_record"].get("symbol") == symbol]
+    if not shas:
+        return "gone"
+    return "unchanged" if anchor.get("code_sha") in shas else "changed"
+
+
+def _record_entry(record: dict, code: list[dict] | None, repo: str) -> str:
+    rec = record["recall_record"]
+    entry = _entry(rec, [])
+    head = entry.split("\n", 1)[0] + f" [match: {record['anchor_match']}]"
+    places = []
+    for anchor in [a for a in rec.get("anchors") or [] if isinstance(a, dict)][:ANCHORS_SHOWN]:
+        where = _clean(f"{anchor.get('file')} {anchor.get('symbol') or '(module level)'}")
+        label = code_label(anchor, code, repo) if code is not None else None
+        places.append(where[:FILES_MAX] + (f" ({label})" if label else ""))
+    lines = [head, "  where: " + ("; ".join(places) or "?")]
+    caused = [c for c in record.get("caused") or [] if isinstance(c, str)]
+    if caused:
+        lines.append("  its fix later caused: " + _clean(", ".join(caused))[:FILES_MAX])
+    return "\n".join(lines)
+
+
+def render_records(selected: list[dict], reason: str | None = None,
+                   code: list[dict] | None = None, repo: str = "") -> str:
+    """The anchored PRIOR BUGS block. Code labels appear only when `code` is given."""
+    reason_tail = f" ({reason})" if reason else ""
+    return _block(RECORDS_HEADING, [_record_entry(r, code, repo) for r in selected],
+                  f"No prior CCA bugs recorded at the changed code.{reason_tail}")

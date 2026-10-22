@@ -299,7 +299,9 @@ def _capture_pending(state: PipelineState, root) -> None:
     """
     try:
         from .bugs import pending
-        pending.capture(root, state.run_id)
+        gate = state.layers.get("L6")
+        pending.capture(root, state.run_id,
+                        str(gate.get("detail", "")) if isinstance(gate, dict) else "")
     except Exception as exc:  # noqa: BLE001 (see the docstring)
         print(f"warning: could not save this run for the bug ledger "
               f"({exc.__class__.__name__}: {exc})", file=sys.stderr)
@@ -410,7 +412,21 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
 #: finding passed on unverified received no verdict, so it gets no ledger row. STALE is
 #: present: a DEFERRED run's verifier gives it, and it gets a row like any other verdict.
 _VERDICT_COUNTS = {"CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp",
-                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate", "STALE": "stale"}
+                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate", "STALE": "stale",
+                   "PRIOR_FP": "prior_fp"}
+
+#: Why fp-check called a finding FALSE_POSITIVE (Step 2.5b). Only `not_real` (criteria a and c)
+#: may become a suppressing record: an out-of-scope finding sits on unchanged code by
+#: construction, so its record would suppress a real defect the first time that code is in
+#: scope, and a settled one is the settled-decisions block's.
+FP_REASONS = ("not_real", "out_of_scope", "settled")
+#: Fields Step 2.5b adds to a FALSE_POSITIVE row, beside the common ones.
+FP_FIELDS = ("finding_id", "file", "line", "symbol", "code_sha", "claim", "evidence_refs",
+             "fp_reason")
+#: Run files the false-positive path reads, under .claude/audits/runs/<run_id>/.
+FP_ANCHORS = "fp_anchors.json"
+MATCH_FP = "match_fp.json"
+L6_DECISIONS = ("ACCEPT", "REJECT")
 
 
 LEDGER = ".claude/audits/AUDITOR_SCORECARD.jsonl"
@@ -467,6 +483,193 @@ def _ledger_rows(root, run_id: str) -> tuple[dict[str, int], int]:
     return tally, malformed
 
 
+def _verdict_rows(root, run_id: str, verdict: str) -> list[dict]:
+    """The disposition rows of `run_id` that carry `verdict`, in ledger order."""
+    return [row for row in _ledger(root)[0]
+            if str(row.get("run_id")) == run_id and row.get("verdict") == verdict]
+
+
+def _check_fp_rows(rows: list[dict]) -> None:
+    """Refuse a FALSE_POSITIVE row without the fields a suppressing record is built from.
+
+    The anchor fields are checked against the code by `_fp_anchors`; here only their presence,
+    and the reason code, which decides whether the row may ever suppress anything.
+    """
+    for n, row in enumerate(rows, 1):
+        name = row.get("finding_id") if isinstance(row.get("finding_id"), str) else f"#{n}"
+        missing = [k for k in FP_FIELDS if k not in row]
+        if missing:
+            raise RecordRefused(
+                f"FALSE_POSITIVE row {name} lacks {', '.join(missing)}; Step 2.5b gives every "
+                f"false positive {', '.join(FP_FIELDS)}"
+            )
+        if row["fp_reason"] not in FP_REASONS:
+            raise RecordRefused(
+                f"FALSE_POSITIVE row {name} has fp_reason {row['fp_reason']!r}; expected one of "
+                f"{', '.join(FP_REASONS)} (Step 2.5b)"
+            )
+        refs = row["evidence_refs"]
+        if not (isinstance(row["finding_id"], str) and row["finding_id"]
+                and isinstance(row["claim"], str) and row["claim"].strip()
+                and isinstance(refs, list) and all(isinstance(r, str) for r in refs)):
+            raise RecordRefused(
+                f"FALSE_POSITIVE row {name} needs a non-empty finding_id and claim, and "
+                "evidence_refs as a list of \"file:line\" strings"
+            )
+
+
+def _ref(ref: str) -> tuple[str, int]:
+    """("file", line) from an evidence ref "file:line"; a ref with no line is file level."""
+    file, sep, line = ref.rpartition(":")
+    if sep and line.strip().isdigit() and file:
+        return file, int(line)
+    return ref, 0
+
+
+def _fp_anchors(state: PipelineState, root) -> dict[str, dict]:
+    """Anchor every false positive of this run over the code it was judged on, now, at L2.5.
+
+    Returns finding id to `{"anchors": [...], "errors": [...]}`: the finding's own place first,
+    then each evidence location, so a record built from it lapses when either changes. A row
+    whose `symbol` and `code_sha` disagree with the code is refused: those fields are copied from
+    `python -m cca_checks bugs anchors --at <file>:<line>`, never written by hand, because a
+    record that suppresses must pin the code it was judged on.
+    """
+    from .bugs.anchors import anchor_for
+
+    out: dict[str, dict] = {}
+    for row in _verdict_rows(root, state.run_id, "FALSE_POSITIVE"):
+        finding = row["finding_id"]
+        facts: dict = {"anchors": [], "errors": []}
+        places = [(row["file"], row["line"]), *(_ref(r) for r in row["evidence_refs"])]
+        for index, (file, line) in enumerate(places):
+            try:
+                number = max(int(line or 0), 0)
+                anchor = anchor_for(pathlib.Path(root), str(file), number).to_json()
+            except (OSError, ValueError, TypeError) as exc:
+                anchor = None
+                facts["errors"].append(f"{file}:{line}: {type(exc).__name__}")
+            if index == 0:
+                want = (anchor or {}).get("symbol"), (anchor or {}).get("code_sha")
+                if (row.get("symbol"), row.get("code_sha")) != want:
+                    raise RecordRefused(
+                        f"FALSE_POSITIVE row {finding} gives symbol {row.get('symbol')!r} and "
+                        f"code_sha {row.get('code_sha')!r}, but {file}:{line} is {want[0]!r} "
+                        f"{want[1]!r} now; copy both from `python -m cca_checks bugs anchors "
+                        f"--at {file}:{line}`"
+                    )
+            if anchor is not None and anchor not in facts["anchors"]:
+                facts["anchors"].append(anchor)
+        out[finding] = facts
+    return out
+
+
+def _prior_fp_matches(state: PipelineState, root) -> dict[str, dict]:
+    """Finding id to its `suppress` match in this run's match file, or {} without one."""
+    path = deferred.runs_dir(root) / state.run_id / MATCH_FP
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_bytes())
+        matches = value["matches"]
+        return {m["finding_id"]: m for m in matches if m.get("action") == "suppress"}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RecordRefused(
+            f"{path.as_posix()} is not a match file from `python -m cca_checks bugs match-fp` "
+            f"({type(exc).__name__}); run that command again, or delete the file to suppress "
+            "nothing"
+        ) from exc
+
+
+def _check_prior_fp(state: PipelineState, l25: list, root) -> None:
+    """PRIOR_FP is the matcher's verdict, never the orchestrator's: refuse any disagreement.
+
+    Each PRIOR_FP in the L2.5 file must be a `suppress` in the match file, carrying the same
+    `record_id`, and each `suppress` must be a PRIOR_FP: a suppression is kept visible, and no
+    finding is suppressed by hand. On STANDARD and DEEP each PRIOR_FP ledger row names the same
+    record in `prior_fp_record`.
+    """
+    suppress = _prior_fp_matches(state, root)
+    given = {r["id"]: r for r in l25 if isinstance(r, dict) and r.get("verdict") == "PRIOR_FP"}
+    unmatched = sorted(set(given) - set(suppress))
+    dropped = sorted(set(suppress) - set(given))
+    wrong = sorted(i for i in set(given) & set(suppress)
+                   if given[i].get("record_id") != suppress[i].get("record_id"))
+    problems = ([f"{', '.join(unmatched)} is PRIOR_FP but the matcher did not suppress it"]
+                if unmatched else []) + \
+               ([f"the matcher suppressed {', '.join(dropped)}, which L2.5 does not mark "
+                 "PRIOR_FP"] if dropped else []) + \
+               ([f"{', '.join(wrong)} names a record_id other than the matcher's"]
+                if wrong else [])
+    if not problems and state.tier != "FAST":
+        rows = {str(r.get("finding_id")): r
+                for r in _verdict_rows(root, state.run_id, "PRIOR_FP")}
+        bad = sorted(i for i in given if (rows.get(i) or {}).get("prior_fp_record")
+                     != suppress[i].get("record_id"))
+        if bad:
+            problems.append(f"the PRIOR_FP ledger rows of {', '.join(bad)} need finding_id "
+                            "and prior_fp_record equal to the matcher's record_id")
+    if problems:
+        raise RecordRefused(
+            "; ".join(problems) + f". PRIOR_FP comes only from {MATCH_FP} under "
+            f".claude/audits/runs/{state.run_id}/ (`python -m cca_checks bugs match-fp`)"
+        )
+
+
+def _check_l6(state: PipelineState, detail: str, value: object | None, root) -> None:
+    """Refuse an L6 whose false-positive acceptance is missing or malformed.
+
+    The architect returns ACCEPT or REJECT with a reason for every FALSE_POSITIVE of L2.5, in
+    `{"fp_acceptance": [{"id", "decision", "reason"}]}`. An APPROVED verdict needs one entry per
+    false positive: only an accepted one, in an APPROVED run, can become a suppressing record.
+    """
+    l25 = _stored_json(state, "L2.5", root)
+    fps = [r["id"] for r in l25 if isinstance(r, dict) and r.get("verdict") == "FALSE_POSITIVE"
+           and isinstance(r.get("id"), str)] if isinstance(l25, list) else []
+    approved = detail.strip().upper() == core.APPROVING_VERDICT
+    if value is None:
+        if approved and fps:
+            raise RecordRefused(
+                f"L6 APPROVED needs --output with the architect's ACCEPT or REJECT for each "
+                f"false positive ({', '.join(fps)}): a JSON object "
+                '{"fp_acceptance": [{"id", "decision", "reason"}]} under .claude/audits/'
+            )
+        return
+    entries = value.get("fp_acceptance") if isinstance(value, dict) else None
+    if not isinstance(entries, list):
+        raise RecordRefused('L6\'s file must be a JSON object with an "fp_acceptance" array')
+    seen: list[str] = []
+    for n, entry in enumerate(entries):
+        if not (isinstance(entry, dict) and isinstance(entry.get("id"), str)
+                and entry.get("decision") in L6_DECISIONS
+                and isinstance(entry.get("reason"), str) and entry["reason"].strip()):
+            raise RecordRefused(
+                f"L6 fp_acceptance entry {n} needs an id, a decision of ACCEPT or REJECT and a "
+                "non-empty reason"
+            )
+        if entry["id"] not in fps:
+            raise RecordRefused(
+                f"L6 accepts or rejects {entry['id']}, which L2.5 did not mark FALSE_POSITIVE"
+            )
+        if entry["id"] in seen:
+            raise RecordRefused(f"L6 decides {entry['id']} more than once")
+        seen.append(entry["id"])
+    missing = [i for i in fps if i not in seen]
+    if approved and missing:
+        raise RecordRefused(
+            f"L6 APPROVED has no ACCEPT or REJECT for {', '.join(missing)}; the architect "
+            "decides every false positive"
+        )
+
+
+def disputed_fps(state: PipelineState, root) -> list[str]:
+    """The false positives the architect rejected: UNCERTAIN, for a human."""
+    value = _stored_json(state, "L6", root)
+    entries = value.get("fp_acceptance") if isinstance(value, dict) else None
+    return [e["id"] for e in entries or [] if isinstance(e, dict)
+            and e.get("decision") == "REJECT" and isinstance(e.get("id"), str)]
+
+
 def _need(counts: dict, key: str, layer: str) -> int:
     value = counts.get(key)
     if value is None:
@@ -505,6 +708,7 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
         # marks each of them DEFERRED, and the ledger holds no row for them.
         unverified = _optional(counts, "unverified", layer)
         given["stale"] = _optional(counts, "stale", layer)
+        given["prior_fp"] = _optional(counts, "prior_fp", layer)
         if unverified and state.mode == "DEFERRED":
             raise RecordRefused(_NO_DEFERRAL)
         if given["stale"] and state.mode != "DEFERRED":
@@ -549,6 +753,7 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
                     f"counts ({detail}){note}; each ledger row's verdict must be one of "
                     f"{', '.join(_VERDICT_COUNTS)}"
                 )
+            _check_fp_rows(_verdict_rows(root, state.run_id, "FALSE_POSITIVE"))
     elif layer == "L3":
         to_fix = _need(counts, "to_fix", layer)
         # `n_deferred`, not `deferred`: that name is kept free for the deferred-pass module
@@ -571,7 +776,7 @@ def _read_output(layer: str, output, root) -> bytes:
     fingerprint ignores: a file anywhere else in the working tree is an edit, which makes
     L4 onward owed), exists, and is JSON.
     """
-    what = OUTPUT_LAYERS[layer]
+    what = OUTPUT_LAYERS.get(layer, "the architect's ACCEPT or REJECT per false positive")
     where = f".claude/audits/out/{layer}.json"
     if output is None or not str(output).strip():
         raise RecordRefused(
@@ -727,6 +932,7 @@ def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, ro
                     f"L2.5 defers {', '.join(barred)}; only P3 findings (P2 too on FAST) may "
                     "be passed on unverified"
                 )
+            _check_prior_fp(state, value, root)
         elif layer == "L3":
             l2 = _stored_l2(state, root)
             l25 = _stored_l25(state, root, [r["id"] for r in l2])
@@ -764,6 +970,21 @@ def _store_output(state: PipelineState, layer: str, data: bytes, root) -> str:
     return rel
 
 
+def _store_run_file(state: PipelineState, name: str, value: object, root) -> None:
+    """Write `value` as JSON to `name` in this run's directory, atomically."""
+    dest = pathlib.Path(root) / ".claude" / "audits" / "runs" / state.run_id / name
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(dest.name + ".tmp")
+        tmp.write_text(json.dumps(value, indent=1) + "\n", encoding="utf-8")
+        os.replace(tmp, dest)
+    except OSError as exc:
+        raise RecordRefused(
+            f"{name} could not be written under .claude/audits/runs/{state.run_id}/ "
+            f"({exc.__class__.__name__}: {exc}); fix the cause and record again"
+        ) from exc
+
+
 def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | None = None,
            counts: dict | None = None, source: str = "cli", output=None,
            root: str | pathlib.Path = ".",
@@ -790,13 +1011,14 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         )
     if state.paused:
         raise RecordRefused(_PAUSED)
-    if output is not None and layer not in OUTPUT_LAYERS:
+    if output is not None and layer not in OUTPUT_LAYERS and layer != "L6":
         raise RecordRefused(
-            f"{layer} does not take --output; only {', '.join(OUTPUT_LAYERS)} store their "
-            "work on disk"
+            f"{layer} does not take --output; only {', '.join(OUTPUT_LAYERS)} and L6 store "
+            "their work on disk"
         )
     entry = {"status": status, "detail": detail, "at": core.now()}
     data = None
+    fp_anchors: dict | None = None
     if not state.legacy:
         if layer in core.TOOL_LAYERS and source != "tool":
             raise RecordRefused(
@@ -831,6 +1053,12 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         if layer in OUTPUT_LAYERS:
             data = _read_output(layer, output, root)
             _check_shape(layer, state, counts, data, root)
+        elif layer == "L6":
+            # Optional: only an APPROVED verdict over false positives requires the file.
+            data = _read_output(layer, output, root) if output is not None else None
+            _check_l6(state, detail, None if data is None else json.loads(data), root)
+        if layer == "L2.5" and state.tier != "FAST":
+            fp_anchors = _fp_anchors(state, root)
         state.seq += 1
         entry.update({"seq": state.seq, "source": source})
         if counts:
@@ -842,6 +1070,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         data = _read_output(layer, output, root)
     if data is not None:
         entry["output"] = _store_output(state, layer, data, root)
+    if fp_anchors is not None:
+        _store_run_file(state, FP_ANCHORS, fp_anchors, root)
     state.layers[layer] = entry
     if fixes is not None:
         state.fixes_applied = int(fixes)
@@ -901,6 +1131,33 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
     return log
 
 
+#: The saved `recall_records` answer Step 1 renders the prior-bugs block from.
+PRIOR_RECORDS = "prior-records.json"
+
+
+def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
+    """The anchored prior-bugs block's record count by anchor match, or None without one.
+
+    Counted with the block's own selection from the answer this run saved, so the counts are
+    the block the auditors were given. They are what the measurement trigger reads: twelve
+    DIFF runs whose block held an exact or symbol_changed record, across two repositories.
+    """
+    path = deferred.runs_dir(root) / state.run_id / PRIOR_RECORDS
+    if state.mode != "DIFF" or not path.is_file():
+        return None
+    from .bugs import envelope, prior
+    from .bugs.gitread import GitError, remote_repo
+
+    records, _, why = envelope.load(path)
+    try:
+        repo = remote_repo(pathlib.Path(root))
+    except (OSError, GitError):
+        repo = None
+    if why or repo is None:
+        return prior.block_counts([])
+    return prior.block_counts(prior.select_records(records, repo))
+
+
 def _write_summary(state: PipelineState, root) -> None:
     """Write runs/<run_id>/summary.json: what a later deferred pass reads about this run.
 
@@ -918,7 +1175,10 @@ def _write_summary(state: PipelineState, root) -> None:
         "pool": deferred.pool_ids(_stored_json(state, "L2.5", root),
                                   _stored_json(state, "L3", root)),
         "human_pending": (_layer_count(state, "L2.5", "uncertain") or 0)
-        + deferred.parked_count(root, state.run_id),
+        + deferred.parked_count(root, state.run_id) + len(disputed_fps(state, root)),
+        # False positives the L6 architect rejected: reported as disputed, UNCERTAIN → human.
+        "disputed_fp": disputed_fps(state, root),
+        "prior_block": prior_block_counts(state, root),
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"
     try:

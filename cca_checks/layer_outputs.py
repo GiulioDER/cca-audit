@@ -14,6 +14,7 @@ PRIORITIES = ("P1", "P2", "P3")
 COUNT_OF = {
     "CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp", "UNCERTAIN": "uncertain",
     "DUPLICATE": "duplicate", "DEFERRED": "unverified", "STALE": "stale",
+    "PRIOR_FP": "prior_fp",
 }
 VERDICTS = tuple(COUNT_OF)
 
