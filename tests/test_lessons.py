@@ -224,6 +224,28 @@ def test_a_draft_that_tells_auditors_to_withhold_is_refused(tmp_path):
     assert not (root / ds.PROPOSED).exists()
 
 
+@pytest.mark.parametrize("text", [
+    "Don’t flag reads of conn.closed.",
+    "Do​ not flag reads of conn.closed.",
+    "Do not flag reads of conn.closed.",
+    "Don`t report it.",
+    "These are false‑positives.",
+])
+def test_withholding_survives_look_alike_apostrophes_and_hidden_characters(text):
+    """Invariant: the check reads the text as an auditor would, so a curly apostrophe, a
+    zero-width space, a no-break space, a backtick (rendered as an apostrophe) or a non-breaking
+    hyphen cannot hide "do not flag" from it. Security review of 6cedf53, 2026-10-22.
+
+    Red 2026-10-22: mutation `_WITHHOLD.search(_comparable(text))` -> `_WITHHOLD.search(text)`
+    in `distill.withholding`; failed at `assert ds.withholding(text)` for the curly apostrophe,
+    the zero-width space, the backtick and the hyphen cases (the no-break space passes either
+    way, since `\\s` matches it).
+    """
+    assert ds.withholding(text)
+    with pytest.raises(ValueError):
+        ds.one_sentence(text, ds.PATTERN_MAX)
+
+
 def test_an_existing_proposal_or_lesson_is_not_drafted_again(tmp_path):
     """Red 2026-10-22: mutation deleting the `if proposal_path(root, lesson_id).exists():`
     branch in `distill.distill`; failed at `assert client.prompts == []` (a second paid call).
@@ -412,6 +434,23 @@ def test_accept_through_the_cli(tmp_path, monkeypatch, capsys):
     lesson = rows.get(lesson_id)
     assert skipped == [] and isinstance(lesson, LessonRow)
     assert lesson.accepted_by == "owner"
+
+
+def test_accepting_a_proposal_kept_elsewhere_leaves_the_owners_file(tmp_path):
+    """Invariant: only a file in lessons/proposed/ is moved; a proposal the owner edited
+    elsewhere stays where it is, and the accepted queue gets a copy.
+
+    Red 2026-10-22: mutation of the `if path.resolve().parent == (root / PROPOSED).resolve():`
+    branch in `lessons.accept` to an unconditional `os.replace(path, target)`; failed at
+    `assert outside.exists()`.
+    """
+    root = _ledger(tmp_path, _golden_rows())
+    lesson_id = _proposal(root)
+    outside = tmp_path / "my-edit.json"
+    ds.proposal_path(root, lesson_id).replace(outside)
+    lessons.accept(root, str(outside), by="owner", on="2026-10-21", modified=MODIFIED)
+    assert outside.exists()
+    assert ds.proposal_path(root, lesson_id, ds.ACCEPTED).read_bytes() == outside.read_bytes()
 
 
 def test_accept_refuses_a_member_that_is_not_a_bug_of_the_repo(tmp_path, monkeypatch, capsys):

@@ -1178,17 +1178,16 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 PRIOR_RECORDS = "prior-records.json"
 
 
-def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
-    """The anchored prior-bugs block's record count by anchor match, or None without one.
+def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | None] | None:
+    """(the records of the answer this DIFF run saved, its repository), or None without one.
 
-    Counted with the block's own selection from the answer this run saved, so the counts are
-    the block the auditors were given. They are what the measurement trigger reads: twelve
-    DIFF runs whose block held an exact or symbol_changed record, across two repositories.
+    The records are empty, and the repository None, when the answer or the origin cannot be
+    read: the brief then listed nothing, which is what the counts must say.
     """
     path = deferred.runs_dir(root) / state.run_id / PRIOR_RECORDS
     if state.mode != "DIFF" or not path.is_file():
         return None
-    from .bugs import envelope, prior
+    from .bugs import envelope
     from .bugs.gitread import GitError, remote_repo
 
     records, _, why = envelope.load(path)
@@ -1197,8 +1196,24 @@ def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
     except (OSError, GitError):
         repo = None
     if why or repo is None:
-        return prior.block_counts([])
-    return prior.block_counts(prior.select_records(records, repo))
+        return [], None
+    return records, repo
+
+
+def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
+    """The anchored prior-bugs block's record count by anchor match, or None without one.
+
+    Counted with the block's own selection from the answer this run saved, so the counts are
+    the block the auditors were given. They are what the measurement trigger reads: twelve
+    DIFF runs whose block held an exact or symbol_changed record, across two repositories.
+    """
+    from .bugs import prior
+
+    saved = _saved_brief_answer(state, root)
+    if saved is None:
+        return None
+    records, repo = saved
+    return prior.block_counts(prior.select_records(records, repo) if repo else [])
 
 
 def lessons_block_count(state: PipelineState, root) -> int | None:
@@ -1207,20 +1222,13 @@ def lessons_block_count(state: PipelineState, root) -> int | None:
     Selected from the same answer as `prior_block_counts`, so a later replay can tell the runs
     whose brief held lessons from those whose brief did not, and ablate the block.
     """
-    path = deferred.runs_dir(root) / state.run_id / PRIOR_RECORDS
-    if state.mode != "DIFF" or not path.is_file():
-        return None
-    from .bugs import envelope, prior
-    from .bugs.gitread import GitError, remote_repo
+    from .bugs import prior
 
-    records, _, why = envelope.load(path)
-    try:
-        repo = remote_repo(pathlib.Path(root))
-    except (OSError, GitError):
-        repo = None
-    if why or repo is None:
-        return 0
-    return len(prior.select_lessons(records, repo))
+    saved = _saved_brief_answer(state, root)
+    if saved is None:
+        return None
+    records, repo = saved
+    return len(prior.select_lessons(records, repo)) if repo else 0
 
 
 def _write_summary(state: PipelineState, root) -> None:

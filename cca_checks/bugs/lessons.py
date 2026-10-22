@@ -16,7 +16,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .anchors import Anchor, well_formed_file, well_formed_symbol
-from .distill import ACCEPTED, MIN_MEMBERS, PATTERN_MAX, RULE_MAX, one_sentence, proposal_path
+from .distill import (
+    ACCEPTED,
+    MIN_MEMBERS,
+    PATTERN_MAX,
+    PROPOSED,
+    RULE_MAX,
+    one_sentence,
+    proposal_path,
+)
 from .model import BugRow
 from .records import LessonRow, RetractionRow, from_record, no_nul, read_ledger, to_record
 
@@ -118,7 +126,11 @@ def accept(root: Path, ref: str, *, by: str, on: str, modified: str) -> Written:
     added, memos = write([lesson], root, modified)
     target = proposal_path(root, lesson.id, ACCEPTED)
     target.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(path, target)
+    if path.resolve().parent == (root / PROPOSED).resolve():
+        os.replace(path, target)
+    else:
+        # A proposal the owner keeps elsewhere stays where it is; the queue gets a copy.
+        target.write_bytes(path.read_bytes())
     return Written(lesson.id, added, memos)
 
 

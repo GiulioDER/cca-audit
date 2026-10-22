@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 import urllib.error
 import urllib.request
 from collections import Counter
@@ -64,9 +65,26 @@ _WITHHOLD = re.compile(
 )
 
 
+#: Characters an auditor reads as an apostrophe (the brief also renders a backtick as one) or
+#: as a hyphen. NFKC leaves these as they are.
+_LOOKALIKES = str.maketrans({
+    **dict.fromkeys("’‘ʼ′＇`", "'"),
+    **dict.fromkeys("‐‑‒–—−﹣－", "-"),
+})
+
+
+def _comparable(text: str) -> str:
+    """`text` as a reader sees it: NFKC, no format characters (zero-width spaces, joiners,
+    bidi marks), apostrophe and hyphen look-alikes as "'" and "-", whitespace collapsed. A
+    phrase hidden from the pattern by any of these would still read as the phrase."""
+    folded = unicodedata.normalize("NFKC", text)
+    visible = "".join(c for c in folded if unicodedata.category(c) != "Cf")
+    return " ".join(visible.translate(_LOOKALIKES).split())
+
+
 def withholding(text: str) -> str | None:
     """The phrase in `text` that tells an auditor to withhold something, or None."""
-    hit = _WITHHOLD.search(text)
+    hit = _WITHHOLD.search(_comparable(text))
     return hit.group(0) if hit else None
 
 
@@ -236,6 +254,8 @@ class AnthropicClient:
         headers = {"x-api-key": self._key, "anthropic-version": "2023-06-01",
                    "content-type": "application/json"}
         answer = self._transport(MESSAGES_URL, headers, body)
+        if not isinstance(answer, dict):
+            raise RuntimeError("the answer is not a JSON object")
         stop = answer.get("stop_reason")
         if stop != "end_turn":
             raise RuntimeError(f"the model stopped with {stop!r}, not end_turn")
