@@ -6,6 +6,136 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**Lessons: patterns from three or more past bugs, proposed by a model, accepted only by the
+owner, shown as context.** Session 5 of RE-call's audit-memory plan.
+
+* **Proposals.** `bugs distill [--repo R]` groups bug rows by repository, category and place (an
+  anchor's symbol or file; a backfilled row's files only when its commit touched at most three),
+  takes in every bug linked through `caused_by` (the effective one, `caused_by.jsonl` included),
+  and keeps groups of three or more, the most specific place first. It writes nothing without
+  `--draft`; with it, one Messages API call per new group drafts `rule` and `pattern`, and the
+  draft is stored under `lessons/proposed/` beside the ledger, never in it, in a memo or in
+  RE-call. A draft that tells auditors not to flag or report something is refused. The key comes
+  from `ANTHROPIC_API_KEY` only.
+* **Acceptance.** `bugs lesson accept <proposal> --by NAME` appends a `lesson` row and memo (the
+  golden lesson memo's format) after checking every member is a bug of the repository in the
+  ledger, every anchor names a place with no code sha, and the wording is a pattern to check.
+  `bugs lesson retract ID --reason TEXT --by NAME` appends a `lesson_retraction`.
+* **The brief.** Step 1 asks `recall_records` with `kinds: ["bug", "lesson"]`; `bugs prior
+  --records` prints a LESSONS block after PRIOR BUGS, at most three current lessons for the changed
+  code, each with the bugs it comes from, and nothing at all when no lesson applies. `--no-lessons`
+  leaves it out for a replay's ablation arm, and the run summary stores the count
+  (`lessons_block`). Unmeasured, context only, like the PRIOR BUGS block.
+
+**Prior bugs are matched by code anchor, and a false positive already judged on unchanged code is
+suppressed visibly.** Session 4 of RE-call's audit-memory plan (`docs/AUDIT_MEMORY_PLAN.md`
+there), built against saved `recall_records` answers until the live server is deployed.
+
+* **The brief.** In DIFF mode Step 1 asks `recall_records` with the anchors of the changed symbols
+  (`bugs anchors --diff`) and `bugs prior --records FILE` renders the PRIOR BUGS block from the
+  answer: `exact` and `symbol_changed` before `file_only`, each labelled, a bug whose fix later
+  caused a regression marked. With a code tenant, `--code FILE` labels each place `unchanged`,
+  `changed` or `gone`; without one, no label. The three `recall_search` "similar fixes" queries,
+  `--similar` and `--cross-repo` are removed, and so is the sentence that told auditors to leave a
+  listed bug out. HUNT mode keeps the ledger join (`--files`). The run summary stores the block's
+  record count by match (`prior_block`), the measurement trigger's input.
+* **False-positive records.** Step 2.5b FALSE_POSITIVE rows carry `finding_id`, `file`, `line`,
+  `symbol`, `code_sha`, `claim`, `evidence_refs` and `fp_reason` (`not_real`, `out_of_scope`,
+  `settled`); `record L2.5` refuses a row without them, recomputes the anchor and writes
+  `fp_anchors.json`. L6 takes `--output` with the architect's ACCEPT or REJECT per false positive,
+  required for APPROVED; a REJECT is reported as disputed and counted in `human_pending`. At
+  `pipeline close` each accepted `not_real` false positive of an APPROVED run whose places all
+  resolved becomes a `false_positive` ledger row, an all-false-positive run included.
+* **PRIOR_FP.** Step 2.4 (`bugs anchors --findings`, `recall_records`, `bugs match-fp`) suppresses a
+  finding only when its record is current, every anchor is `exact`, the category is equal, and the
+  finding is neither high stakes nor of higher priority; any other match goes to fp-check with the
+  record attached. The verdict `PRIOR_FP` is counted (`--prior-fp`), and `record L2.5` runs the
+  matcher again over the recorded L2 and the saved answer, refusing any PRIOR_FP it does not derive
+  and any suppression the L2.5 file does not show. A finding silent on `high_stakes` counts as high
+  stakes, and a checkout with no GitHub `origin` suppresses nothing.
+  `CCA_PRIOR_FP=off` turns every suppression into an attachment; `bugs retract-fp ID --reason`
+  retracts a record.
+* **Follow-ups.** A record is current by `superseded_by` and `valid_until` as RE-call returns them;
+  a `valid_until` or retraction date that does not parse counts as lapsed or in effect. PRIOR_FP
+  is refused outside DIFF mode. `bugs anchors --diff` no longer depends on the user's diff prefix
+  or path-quoting config. `pipeline close` prints each false positive it did not record. A FAST
+  run creates no false-positive record, and Step 6 says so.
+
+## [0.13.0] - 2026-10-21
+
+**Auditors now see the bugs CCA already fixed in the files they audit.** Since 0.12.0 every CCA
+run that fixes something is recorded in the bug ledger once its pull request merges. From 0.13.0
+that history goes back into the audit: before Layer 1 starts, the pipeline looks up the earlier
+fixes in the files under audit and hands them to every Layer 1 auditor as a PRIOR FIXES block, a
+cue to check whether the same class of bug turns up again.
+
+### How it works
+
+* **`python -m cca_checks bugs prior --files <FILES>`** (new) prints the block: ledger rows of the
+  same repository that touched those files, ranked (rows from CCA runs first, then proved, then
+  more overlapping files, then fewer files, then newest), at most 8 by default (`--limit`).
+  `--repo-name OWNER/NAME` names the repository instead of reading it from `origin`; `--before
+  YYYY-MM-DD` hides rows from that date on; `--json` gives the rows as data.
+* **Untrusted text stays inert.** Ledger rows come from repositories under audit, so every field
+  is sanitised before it reaches a prompt: control characters and lone surrogates are replaced,
+  newlines collapsed, backticks neutralised so nothing can close the block's fence, severity,
+  tier and date checked against allowlists, and every field and the whole block length capped
+  (4,000 characters).
+* **It never breaks a run.** A missing ledger, a checkout with no `origin`, a malformed or deeply
+  nested ledger line, or a terminal that cannot encode a character all give the empty block and
+  exit 0; only a usage error exits 2. If `bugs prior` fails anyway, for example on an older
+  installed `cca_checks` without the verb, the pipeline pastes the empty block and carries on.
+* **Where it goes.** Step 1 of `/audit-fix` runs the command once per run and pastes the output
+  into Layer 1 auditor prompts only; verifiers, the regression review and the architect never see
+  it, and the deferred pass, which has no Layer 1 auditors, skips it. The Codex skill does the
+  same. A host without a ledger, such as Codex on a remote copy, gets the empty block.
+* **The rule auditors get with it** says the block is context, not findings and not
+  instructions: use it to look for the same class of bug, report every defect found, and leave out
+  only a listed bug the code has not reintroduced.
+* **Hunts stay clean.** A hunt audits someone else's repository, so it reads only that
+  repository's rows (`--root` at the hunted paths' git top level), skips RE-call entirely, and
+  pastes the empty block when that top level cannot be resolved or is the checkout the run
+  started in. No text from your own projects reaches a stranger's brief.
+
+### Optional: similar bugs from RE-call
+
+When a `recall-cca` MCP server is available (RE-call serving the bug ledger as tenant `cca`), Step 1
+in a change audit also runs up to three short `recall_search` queries describing the change,
+saves the responses under `.claude/audits/out/` and passes them with `bugs prior --similar
+--cross-repo`. The block then gains a SIMILAR BUGS ELSEWHERE part. Nothing from RE-call's text
+reaches a prompt: each hit is joined to a ledger row in code by its memo filename, a hit that
+does not join is dropped, and a response that is not trusted or that abstained is discarded.
+`--cross-repo` admits other repositories only of an allowed owner (`CCA_BUGS_OWNERS`, else the
+target's owner). Either form an MCP client may save works: the SearchResult itself or the
+structured result carrying it as JSON text under `result`; a wrapper that cannot be read is named
+in `similar_error`. A project memory tool, when present, is also asked once for settled decisions,
+quoted as context in a fence no memo can close. Without these servers the brief is built from the
+ledger alone.
+
+### What was measured
+
+Two pre-registered replays, written and committed before they ran
+(`docs/preregistrations/2026-10-20-prior-bugs-in-brief.md` and
+`2026-10-20-prior-bugs-rule-and-noise.md`), re-audited eight past runs on their exact diffs with
+and without the block. With the first wording of the rule ("never report a listed bug unless the
+code reintroduces it") the block did not raise confirmed findings (71 without, 54 with, 55 with
+RE-call added), and the same rule with no history rows cost exactly as much (48 against 48). The
+same audit repeated without the block moved by up to 6 findings on one run, so the dip sits within
+run to run noise. The history rows themselves showed no cost; the rule did. That rule was softened
+for this release to the wording above, whose effect is not yet measured. The replays used haiku
+for every agent and a single verifier, so their counts are what that verifier accepted.
+
+### Upgrading from 0.12.x
+
+* `pip install -U cca-audit`, then `cca-audit install` and `cca-audit install-codex`, so the
+  copies in `.claude/` and the Codex skill carry the new Step 1 (`pipeline start` warns about any
+  that do not).
+* No setup is needed for the PRIOR FIXES block: it reads the ledger 0.12.0 already writes. With
+  no ledger yet, the block is empty and audits run as before.
+* The RE-call part is opt in: register a `recall-cca` MCP server for it, or leave it out.
+
 ## [0.12.1] - 2026-10-20
 
 **A P2 or P3 fix can now be proved without a red proof.** Until now a ledger row was `proved`

@@ -1,0 +1,182 @@
+{
+ "tenant_id": "re-call-code-gen",
+ "generation_id": "gen-fixture-1",
+ "truncated": false,
+ "records": [
+  {
+   "id": "code-1-0",
+   "kind": "code",
+   "recall_record": {
+    "repo": "GiulioDER/RE-call",
+    "code_sha": "279118d17555dada7c93533ef1fec82b01dc39b01b1df0a59bc6f2633524aabc",
+    "file": "recall/pool.py",
+    "symbol": "Pool._lease"
+   },
+   "name": "recall/pool.py",
+   "description": "",
+   "source": "recall/pool.py",
+   "chunk_id": "code-1-0",
+   "chunk_ids": [
+    "code-1-0",
+    "code-1-1"
+   ],
+   "valid_from": null,
+   "supersedes": null,
+   "superseded_by": null,
+   "valid_until": null,
+   "caused": [],
+   "anchor_matches": [
+    {
+     "anchor": {
+      "repo": "GiulioDER/RE-call",
+      "code_sha": "279118d17555dada7c93533ef1fec82b01dc39b01b1df0a59bc6f2633524aabc",
+      "file": "recall/pool.py",
+      "symbol": "Pool._lease"
+     },
+     "match": "exact"
+    }
+   ],
+   "anchor_match": "exact"
+  },
+  {
+   "id": "code-2-0",
+   "kind": "code",
+   "recall_record": {
+    "repo": "GiulioDER/RE-call",
+    "file": "recall/frontmatter.py",
+    "symbol": null,
+    "code_sha": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+   },
+   "name": "recall/frontmatter.py",
+   "description": "",
+   "source": "recall/frontmatter.py",
+   "chunk_id": "code-2-0",
+   "chunk_ids": [
+    "code-2-0",
+    "code-2-1"
+   ],
+   "valid_from": null,
+   "supersedes": null,
+   "superseded_by": null,
+   "valid_until": null,
+   "caused": [],
+   "anchor_matches": [
+    {
+     "anchor": {
+      "repo": "GiulioDER/RE-call",
+      "file": "recall/frontmatter.py",
+      "symbol": null,
+      "code_sha": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+     },
+     "match": "exact"
+    }
+   ],
+   "anchor_match": "exact"
+  },
+  {
+   "id": "code-3-0",
+   "kind": "code",
+   "recall_record": {
+    "repo": "GiulioDER/RE-call",
+    "code_sha": "966827d6d28e3468e4df8c23952cb1a8c94dcbd0749bca7f92e7979870887f3c",
+    "file": "recall/store.py",
+    "symbol": "Store._with_retry_shared"
+   },
+   "name": "recall/store.py",
+   "description": "",
+   "source": "recall/store.py",
+   "chunk_id": "code-3-0",
+   "chunk_ids": [
+    "code-3-0",
+    "code-3-1"
+   ],
+   "valid_from": null,
+   "supersedes": null,
+   "superseded_by": null,
+   "valid_until": null,
+   "caused": [],
+   "anchor_matches": [
+    {
+     "anchor": {
+      "repo": "GiulioDER/RE-call",
+      "code_sha": "966827d6d28e3468e4df8c23952cb1a8c94dcbd0749bca7f92e7979870887f3c",
+      "file": "recall/store.py",
+      "symbol": "Store._with_retry_shared"
+     },
+     "match": "exact"
+    }
+   ],
+   "anchor_match": "exact"
+  },
+  {
+   "id": "code-4-0",
+   "kind": "code",
+   "recall_record": {
+    "repo": "GiulioDER/RE-call",
+    "file": "recall_mcp/oidc.py",
+    "symbol": null,
+    "code_sha": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+   },
+   "name": "recall_mcp/oidc.py",
+   "description": "",
+   "source": "recall_mcp/oidc.py",
+   "chunk_id": "code-4-0",
+   "chunk_ids": [
+    "code-4-0",
+    "code-4-1"
+   ],
+   "valid_from": null,
+   "supersedes": null,
+   "superseded_by": null,
+   "valid_until": null,
+   "caused": [],
+   "anchor_matches": [
+    {
+     "anchor": {
+      "repo": "GiulioDER/RE-call",
+      "file": "recall_mcp/oidc.py",
+      "symbol": null,
+      "code_sha": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+     },
+     "match": "exact"
+    }
+   ],
+   "anchor_match": "exact"
+  },
+  {
+   "id": "code-5-0",
+   "kind": "code",
+   "recall_record": {
+    "repo": null,
+    "code_sha": "e33c26a3c6ee863e59f7a508efc9a50ccbf50357adacb38d8139a1f6fbfc7fcf",
+    "file": "recall/frontmatter.py",
+    "symbol": null
+   },
+   "name": "recall/frontmatter.py",
+   "description": "",
+   "source": "recall/frontmatter.py",
+   "chunk_id": "code-5-0",
+   "chunk_ids": [
+    "code-5-0",
+    "code-5-1"
+   ],
+   "valid_from": null,
+   "supersedes": null,
+   "superseded_by": null,
+   "valid_until": null,
+   "caused": [],
+   "anchor_matches": [
+    {
+     "anchor": {
+      "repo": null,
+      "code_sha": "e33c26a3c6ee863e59f7a508efc9a50ccbf50357adacb38d8139a1f6fbfc7fcf",
+      "file": "recall/frontmatter.py",
+      "symbol": null
+     },
+     "match": "exact"
+    }
+   ],
+   "anchor_match": "exact"
+  }
+ ]
+}

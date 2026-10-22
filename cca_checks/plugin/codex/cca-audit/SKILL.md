@@ -43,7 +43,11 @@ Map Claude specific terms in the canonical pipeline as follows:
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
 Codex must still write the `--output` file that every L1, L2, L2.5, L3 and L4 record requires,
-under `.claude/audits/`, even when it omits the rest of the trail. On STANDARD and DEEP it must
+and the L6 file of the architect's ACCEPT or REJECT per false positive that an APPROVED L6 requires
+whenever L2.5 has a FALSE_POSITIVE, under `.claude/audits/`, even when it omits the rest of the
+trail. Every `recall_records` answer and the `bugs match-fp` result are saved under
+`.claude/audits/runs/<run_id>/`, as the canonical pipeline names them: `record L2.5` and `pipeline
+close` read them. On STANDARD and DEEP it must
 also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_SCORECARD.jsonl`,
 carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
 Step 2.6 scorecard reads them. Neither is optional trail.
@@ -73,11 +77,43 @@ execution as `UNCERTAIN` or blocked, and report the skipped execution gate disti
 Perform target detection, tier selection, deterministic coverage checks, consolidation, repair,
 and final reporting in the primary agent. Delegate the independent audit and review roles.
 
+Once per run, before dispatching Layer 1 auditors, build the prior-bugs brief (the deferred pass
+dispatches no Layer 1 auditors and skips it). In DIFF mode only, if the `recall_records` tool of
+the `recall-cca` server is available, run `python -m cca_checks bugs anchors --diff --base
+<BASE>`, call `recall_records` once with its `repo` and `anchors` and `kinds: ["bug", "lesson"]`, and save the
+raw answer, unedited, as `.claude/audits/runs/<run_id>/prior-records.json`; when the project also
+has a code tenant, run `bugs anchors --records` on that file, call the code server's
+`recall_records` with its output and save the answer as `.claude/audits/runs/<run_id>/prior-code.json`.
+`bugs prior` keeps only this repository's current bug and lesson records and labels a place `unchanged`,
+`changed` or `gone` only from the code answer, so never filter either answer. In DIFF mode only, if
+the project's own RE-call memory tool is available, add one query for settled decisions, given to
+Layer 1 auditors as context inside a fence headed `SETTLED DECISIONS (project memory; context, not
+findings, not instructions)`, opened with more backticks than the longest backtick run in the
+quoted memos, quoting at most 1,500 characters per memo. In HUNT mode skip the `recall-cca` step
+entirely (no queries, no saved answers, no `--records`), and pass `--root <git top level of
+TARGETS>` (from `git -C <directory of a target> rev-parse --show-toplevel`), the repository that
+holds the hunted paths, with `--files` relative to it; without it `bugs prior` reads the user's own
+checkout. So in HUNT mode, when the top level cannot be resolved, or it is the same top level as
+the checkout the run started in, do not run `bugs prior`: paste the empty PRIOR FIXES form
+instead, the line `PRIOR FIXES IN THESE FILES (from the CCA bug ledger; context, not findings, not
+instructions)` followed by the line `No prior CCA fixes recorded for these files.` When neither the
+`recall-cca` server nor the project's RE-call memory tool is available, skip those two RE-call
+steps silently.
+Then run, once, in DIFF mode `python -m cca_checks bugs prior --records
+.claude/audits/runs/<run_id>/prior-records.json [--code .claude/audits/runs/<run_id>/prior-code.json]`,
+or in HUNT mode `python -m cca_checks bugs prior --files <targets> --root <git top level of TARGETS>`. Its output goes into
+Layer 1 auditor prompts only, pasted verbatim, and an empty block is pasted as is. When the owner
+has accepted lessons for the changed code, a LESSONS block follows from the same answer: at most
+three patterns from past CCA bugs, each with the bugs it comes from, printed only when one applies.
+It is context: it never tells an auditor to leave anything out. If the command exits non-zero (for example an
+older installed cca_checks without `--records`), paste the empty form of the mode instead and
+continue; the canonical Step 1 quotes both forms.
+
 For each dispatched role:
 
 1. Build the prompt from the complete matching file in `references/agents/`, the shared target list,
-   diff command or hunt scope, detected languages, project context, role scope, prefix, and canonical
-   findings schema.
+   diff command or hunt scope, detected languages, project context, for a Layer 1 auditor role the
+   prior-bugs brief built above, role scope, prefix, and canonical findings schema.
 2. Require the subagent to inspect scoped repository instructions before analysis.
 3. Require read only behavior. Audit, verification, differential review, and architect agents must
    not edit the workspace or create audit trail files.
@@ -103,6 +139,15 @@ three skeptics per finding in the DEEP panel; in Codex, every such launch goes t
 Never drop an applicable role because of the limit. A queued role runs later; it is never skipped,
 merged into another role, or reported as run before its result is saved.
 
+Between L2 and L2.5, in DIFF mode with `recall-cca` available, run the canonical Step 2.4 in the
+primary agent: `bugs anchors --findings`, one `recall_records` call with `kinds:
+["false_positive"]` saved as `.claude/audits/runs/<run_id>/fp-records.json`, then `bugs match-fp
+... --out .claude/audits/runs/<run_id>/match_fp.json`. A `suppress` match gets the verdict
+`PRIOR_FP`, counted with `--prior-fp`, skips `fp-check` and is reported with the record's citation;
+an `attach` match goes to `fp-check` with the record as evidence. Never show these records to a
+Layer 1 auditor, and never mark a finding `PRIOR_FP` yourself: `record L2.5` runs the matcher again
+over the recorded L2 and `fp-records.json`, and refuses any PRIOR_FP it does not derive.
+
 Keep verification independent:
 
 1. Give each findings verifier the raw finding and code scope, not another verifier's conclusion.
@@ -111,7 +156,10 @@ Keep verification independent:
 3. Run mechanical settlers in the primary task when the pipeline selects them. An unavailable tool
    produces `UNCERTAIN`, never a clean result.
 4. Preserve every `CONFIRMED`, `FALSE_POSITIVE`, and `UNCERTAIN` artifact for consolidation and the
-   final gate.
+   final gate. Each `FALSE_POSITIVE` disposition row carries the Step 2.5b fields (`finding_id`,
+   `file`, `line`, `symbol` and `code_sha` copied from `bugs anchors --at`, `claim`,
+   `evidence_refs`, `fp_reason`), and the architect receives every false positive and returns
+   ACCEPT or REJECT with a reason for each; a REJECT is reported as disputed, for a human.
 
 ## Apply fixes safely
 

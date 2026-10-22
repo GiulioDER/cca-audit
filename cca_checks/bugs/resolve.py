@@ -28,7 +28,7 @@ from .forward import Merge, rows_and_skips
 from .ledgers import fix_number
 from .model import SHA40, SHA_LEN, BugRow, render_memo
 from .pending import ABANDONED, PENDING, RECORDED, TMP_PREFIX
-from .store import LEDGER
+from .store import LEDGER, bug_rows
 from .store import write as write_rows
 
 DEFAULT_RUNNER = github.gh
@@ -145,6 +145,8 @@ class _Ordinals:
             for line in ledger.read_text(encoding="utf-8").splitlines():
                 try:  # as tolerant as store.existing_ids
                     row = json.loads(line)
+                    if row.get("kind", "bug") != "bug":
+                        continue  # a false positive, lesson or retraction has no ordinal
                     key = _key(row["project"], row["fix_commit"], row["finding_id"])
                     ordinal = int(row.get("ordinal", 1))
                     run_id = row.get("run_id")
@@ -187,6 +189,8 @@ class _Backfilled:
             for line in ledger.read_text(encoding="utf-8").splitlines():
                 try:
                     row = json.loads(line)
+                    if row.get("kind", "bug") != "bug":
+                        continue  # only bug rows can be the same bug as a forward row
                     sources = row.get("sources")
                     forward = isinstance(sources, list) and any(
                         isinstance(s, str) and s.startswith("run:") for s in sources)
@@ -250,11 +254,12 @@ def resolve(root: Path, *, write: bool, run: github.Runner | None = None,
             _stale(report, folder, meta, "waiting", now, stale_days)
     ordinals = _Ordinals(root / LEDGER)
     backfilled = _Backfilled(root / LEDGER)
+    known_rows = bug_rows(root / LEDGER)  # caused_by: the earlier fixes a row's lines came from
     batch = []
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     for folder, merge in merged:
         try:
-            pairs, skipped = rows_and_skips(folder, merge)
+            pairs, skipped = rows_and_skips(folder, merge, known_rows)
             for row, _ in pairs:  # a memo that cannot render must fail here, not mid-write
                 render_memo(row, stamp)
         except Exception as exc:  # one bad record must not stop the others
