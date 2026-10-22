@@ -80,11 +80,11 @@ and final reporting in the primary agent. Delegate the independent audit and rev
 Once per run, before dispatching Layer 1 auditors, build the prior-bugs brief (the deferred pass
 dispatches no Layer 1 auditors and skips it). In DIFF mode only, if the `recall_records` tool of
 the `recall-cca` server is available, run `python -m cca_checks bugs anchors --diff --base
-<BASE>`, call `recall_records` once with its `repo` and `anchors` and `kinds: ["bug"]`, and save the
+<BASE>`, call `recall_records` once with its `repo` and `anchors` and `kinds: ["bug", "lesson"]`, and save the
 raw answer, unedited, as `.claude/audits/runs/<run_id>/prior-records.json`; when the project also
 has a code tenant, run `bugs anchors --records` on that file, call the code server's
 `recall_records` with its output and save the answer as `.claude/audits/runs/<run_id>/prior-code.json`.
-`bugs prior` keeps only this repository's current bug records and labels a place `unchanged`,
+`bugs prior` keeps only this repository's current bug and lesson records and labels a place `unchanged`,
 `changed` or `gone` only from the code answer, so never filter either answer. In DIFF mode only, if
 the project's own RE-call memory tool is available, add one query for settled decisions, given to
 Layer 1 auditors as context inside a fence headed `SETTLED DECISIONS (project memory; context, not
@@ -102,8 +102,10 @@ steps silently.
 Then run, once, in DIFF mode `python -m cca_checks bugs prior --records
 .claude/audits/runs/<run_id>/prior-records.json [--code .claude/audits/runs/<run_id>/prior-code.json]`,
 or in HUNT mode `python -m cca_checks bugs prior --files <targets> --root <git top level of TARGETS>`. Its output goes into
-Layer 1 auditor prompts only, pasted verbatim, and an empty block is pasted as is. It is context:
-it never tells an auditor to leave anything out. If the command exits non-zero (for example an
+Layer 1 auditor prompts only, pasted verbatim, and an empty block is pasted as is. When the owner
+has accepted lessons for the changed code, a LESSONS block follows from the same answer: at most
+three patterns from past CCA bugs, each with the bugs it comes from, printed only when one applies.
+It is context: it never tells an auditor to leave anything out. If the command exits non-zero (for example an
 older installed cca_checks without `--records`), paste the empty form of the mode instead and
 continue; the canonical Step 1 quotes both forms.
 

@@ -743,6 +743,22 @@ def test_step1_queries_recall_records_by_anchor():
     assert step1.count("python -m cca_checks bugs prior --records") == 1
 
 
+def test_step1_asks_for_lessons_in_the_same_answer():
+    """Session 5, Task 5.2. Invariant: Step 1's one `recall_records` call asks for bugs and
+    lessons, and both texts describe the LESSONS block as context printed only when a lesson
+    applies.
+
+    Red 2026-10-22: against master 88d011e (`kinds: ["bug"]` in both texts); failed at
+    `assert 'kinds: ["bug", "lesson"]' in flat`.
+    """
+    for text in (_step1(), _codex_brief()):
+        flat = " ".join(text.split())
+        assert 'kinds: ["bug", "lesson"]' in flat
+        assert "LESSONS block" in flat and "at most three" in flat
+        assert "printed only when" in flat
+        assert "do not flag" not in flat.lower()
+
+
 def test_prior_fp_step_sits_between_l2_and_l25():
     """Task 4.3. Invariant: the matcher runs after L2 is recorded and before Step 2.5, its file
     under the run's directory, and the prompt names the switch.

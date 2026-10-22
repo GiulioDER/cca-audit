@@ -1201,6 +1201,28 @@ def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
     return prior.block_counts(prior.select_records(records, repo))
 
 
+def lessons_block_count(state: PipelineState, root) -> int | None:
+    """How many lessons the LESSONS block gave the auditors, or None without a saved answer.
+
+    Selected from the same answer as `prior_block_counts`, so a later replay can tell the runs
+    whose brief held lessons from those whose brief did not, and ablate the block.
+    """
+    path = deferred.runs_dir(root) / state.run_id / PRIOR_RECORDS
+    if state.mode != "DIFF" or not path.is_file():
+        return None
+    from .bugs import envelope, prior
+    from .bugs.gitread import GitError, remote_repo
+
+    records, _, why = envelope.load(path)
+    try:
+        repo = remote_repo(pathlib.Path(root))
+    except (OSError, GitError):
+        repo = None
+    if why or repo is None:
+        return 0
+    return len(prior.select_lessons(records, repo))
+
+
 def _write_summary(state: PipelineState, root) -> None:
     """Write runs/<run_id>/summary.json: what a later deferred pass reads about this run.
 
@@ -1222,6 +1244,7 @@ def _write_summary(state: PipelineState, root) -> None:
         # False positives the L6 architect rejected: reported as disputed, UNCERTAIN → human.
         "disputed_fp": disputed_fps(state, root),
         "prior_block": prior_block_counts(state, root),
+        "lessons_block": lessons_block_count(state, root),
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"
     try:
