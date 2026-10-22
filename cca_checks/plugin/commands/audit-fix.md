@@ -615,7 +615,8 @@ Each match names a finding, a record and an `action`:
 `fp-records.json`, and refuses a `PRIOR_FP` it does not derive and a suppression the L2.5 file does
 not mark `PRIOR_FP`: the verdict is the matcher's, never yours, and the match file only shows it. A
 finding that does not say whether it is `high_stakes` is treated as high stakes, and a checkout with
-no GitHub `origin` suppresses nothing. `CCA_PRIOR_FP=off` in the
+no GitHub `origin` suppresses nothing. Where this host keeps the bug ledger, only a record the
+ledger holds as authored suppresses, and a ledger that cannot be read in full suppresses nothing. `CCA_PRIOR_FP=off` in the
 environment turns every suppression into an attachment, for the day the match rule itself is wrong.
 Without the server, skip this step: write no match file, and no finding is `PRIOR_FP`.
 

@@ -16,6 +16,11 @@ Any other finding at that place is `attach`: it goes to fp-check as usual, with 
 evidence, so the verification DEEP requires for a high-stakes P1 is never bypassed. A finding
 at another place, a renamed file among them, matches nothing. Auditors never see these records.
 
+Where this host keeps the bug ledger, a record suppresses only when the ledger holds it as
+authored (`ledger_facts`): the saved answer is a file the orchestrator writes, and the ledger is
+the system of record. A ledger that cannot be read in full suppresses nothing, since a
+retraction could be on the line that failed. A host with no ledger at all trusts RE-call's answer.
+
 An anchor counts as `exact` when RE-call reported it so, or, for an anchor the query did not
 cover (reported `none` or `file_only`, typically a mitigation in another symbol), when the
 checkout's hash of that symbol equals the record's. `symbol_changed` is never exact.
@@ -28,6 +33,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 SWITCH = "CCA_PRIOR_FP"
 SUPPRESS = "suppress"
@@ -52,6 +58,28 @@ class Match:
 
 def enabled() -> bool:
     return os.environ.get(SWITCH, "").strip().lower() != "off"
+
+
+def ledger_facts(root: Path) -> tuple[set[str], dict[str, dict] | None, str | None]:
+    """(retracted record ids, false_positive records by id as authored, why nothing may suppress).
+
+    The records are None when `root` holds no ledger; then the answer is trusted as it stands.
+    """
+    from .records import FalsePositiveRow, RetractionRow, read_ledger, to_record
+    from .store import LEDGER
+
+    if not (Path(root) / LEDGER).exists():
+        return set(), None, None
+    try:
+        rows, skipped = read_ledger(Path(root))
+    except (OSError, UnicodeError) as exc:
+        return set(), {}, f"the bug ledger cannot be read ({type(exc).__name__})"
+    if skipped:
+        return set(), {}, f"{len(skipped)} bug ledger line(s) cannot be read"
+    retracted = {r.target_id for r in rows.values()
+                 if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"}
+    known = {r.id: to_record(r) for r in rows.values() if isinstance(r, FalsePositiveRow)}
+    return retracted, known, None
 
 
 def _key(anchor: object) -> tuple | None:
@@ -104,13 +132,15 @@ def _fp(record: dict, repo: str | None) -> dict | None:
 def match(findings: list[dict], response: dict, *, repo: str | None = None,
           retracted: frozenset[str] | set[str] = frozenset(),
           local: Callable[[dict], str | None] | None = None, today: str | None = None,
-          on: bool | None = None) -> list[Match]:
+          on: bool | None = None, known: dict[str, dict] | None = None,
+          blocked: str | None = None) -> list[Match]:
     """One Match per (finding, false_positive record at the finding's own place).
 
     `findings` are L2 findings, each with an `anchor` (`{file, symbol, code_sha}` of its place
     in the checkout). `response` is a `recall_records` envelope. `retracted` holds record ids
     the local ledger retracts (RE-call learns of a retraction one refresh later). `local`
-    hashes an anchor's symbol in the checkout. At most one record suppresses a finding.
+    hashes an anchor's symbol in the checkout. `known` and `blocked` are `ledger_facts`' records
+    and reason. At most one record suppresses a finding.
     """
     from .envelope import records
 
@@ -160,6 +190,10 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
                 reasons.append(f"{SWITCH}=off")
             if repo is None:
                 reasons.append("the repository is unknown, so the record is not scoped to it")
+            if blocked is not None:
+                reasons.append(blocked)
+            elif known is not None and known.get(rec["id"]) != rec:
+                reasons.append("the local bug ledger does not hold this record as authored")
             if not reasons and suppressed:
                 reasons.append("another record already suppresses this finding")
             action = ATTACH if reasons else SUPPRESS

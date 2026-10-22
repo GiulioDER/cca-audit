@@ -598,7 +598,6 @@ def _prior_fp_matches(state: PipelineState, root) -> dict[str, dict]:
         return {}
     from .bugs import envelope, match_fp, query_anchors
     from .bugs.gitread import GitError, remote_repo
-    from .bugs.records import RetractionRow, read_ledger
     from .bugs.store import bugs_dir
 
     _, value, why = envelope.load(path)
@@ -615,14 +614,10 @@ def _prior_fp_matches(state: PipelineState, root) -> dict[str, dict]:
         repo = remote_repo(pathlib.Path(root))
     except (OSError, GitError):
         repo = None
-    try:
-        rows, _ = read_ledger(bugs_dir())
-    except OSError:
-        rows = {}
-    retracted = {r.target_id for r in rows.values()
-                 if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"}
+    retracted, known, blocked = match_fp.ledger_facts(bugs_dir())
     matches = match_fp.match(query_anchors.locate(pathlib.Path(root), l2), value, repo=repo,
-                             retracted=retracted, local=query_anchors.local_sha(pathlib.Path(root)))
+                             retracted=retracted, local=query_anchors.local_sha(pathlib.Path(root)),
+                             known=known, blocked=blocked)
     return {m.finding_id: m.to_json() for m in matches if m.action == match_fp.SUPPRESS}
 
 

@@ -176,7 +176,6 @@ def _anchors(a: argparse.Namespace) -> int:
 
 def _match_fp(a: argparse.Namespace) -> int:
     from . import match_fp, query_anchors
-    from .records import RetractionRow, read_ledger
 
     try:
         findings = query_anchors.located(a.root, a.findings)
@@ -186,13 +185,11 @@ def _match_fp(a: argparse.Namespace) -> int:
     from . import envelope
 
     _, value, why = envelope.load(a.records)
-    rows, _ = read_ledger(bugs_dir())
-    retracted = {r.target_id for r in rows.values()
-                 if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"}
+    retracted, known, blocked = match_fp.ledger_facts(bugs_dir())
     on = match_fp.enabled()
     matches = [] if why else match_fp.match(
         findings, value, repo=_repo(a), retracted=retracted,
-        local=query_anchors.local_sha(a.root), on=on)
+        local=query_anchors.local_sha(a.root), on=on, known=known, blocked=blocked)
     out = {"schema": 1, "switch": "on" if on else "off", "repo": _repo(a),
            "generation_id": value.get("generation_id") if isinstance(value, dict) else None,
            "matches": [m.to_json() for m in matches], "errors": [why] if why else []}

@@ -307,3 +307,34 @@ def test_match_fp_cli_writes_the_match_file(git_repo, monkeypatch):
     assert out.exists()
     value = json.loads(out.read_text(encoding="utf-8"))
     assert value["switch"] == "on" and value["matches"] == [] and value["errors"] == []
+
+
+def test_a_record_the_local_ledger_does_not_hold_never_suppresses():
+    """Security review 2026-10-22. Invariant: where this host keeps the ledger, the saved answer
+    (a file the orchestrator writes) suppresses only with a record the ledger holds as authored.
+
+    Red 2026-10-22: mutation `elif known is not None and known.get(rec["id"]) != rec:` -> `elif
+    False:` in `match_fp.match`; failed at the first `assert got.action == "attach"`.
+    """
+    [got] = run(known={})
+    assert got.action == "attach"
+    [got] = run(known={RECORD["id"]: {**RECORD, "category": "other"}})
+    assert got.action == "attach"
+    [got] = run(known={RECORD["id"]: dict(RECORD)})
+    assert got.action == "suppress"
+
+
+def test_a_ledger_that_cannot_be_read_in_full_suppresses_nothing(tmp_path):
+    """Security review 2026-10-22. Invariant: an unreadable ledger line may be the retraction, so
+    nothing suppresses; a host with no ledger trusts the answer.
+
+    Red 2026-10-22: mutation `if skipped:` -> `if False:` in `match_fp.ledger_facts`; failed at
+    `assert blocked == "1 bug ledger line(s) cannot be read"`.
+    """
+    assert match_fp.ledger_facts(tmp_path) == (set(), None, None)
+    (tmp_path / "bugs.jsonl").write_text('{"kind": "false_positive", "id": 3}\n',
+                                         encoding="utf-8")
+    retracted, known, blocked = match_fp.ledger_facts(tmp_path)
+    assert blocked == "1 bug ledger line(s) cannot be read"
+    [got] = run(known=known, blocked=blocked)
+    assert got.action == "attach" and blocked in got.reasons
