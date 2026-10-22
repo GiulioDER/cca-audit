@@ -5,11 +5,16 @@ repositories are built in the test; nothing touches the network.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
+from dataclasses import replace
 
+import pytest
 from bugs_testkit import commit, make_repo, run_git
 
-from cca_checks.bugs import pending, run_facts
+from cca_checks.bugs import pending, prior, records, roundtrip, run_facts, store
+from cca_checks.bugs.__main__ import main
 from cca_checks.bugs.anchors import symbol_sha
 from cca_checks.bugs.caused_by import (
     backfill_caused_by,
@@ -18,7 +23,9 @@ from cca_checks.bugs.caused_by import (
     fix_diff,
     introducing_commits,
 )
-from cca_checks.bugs.model import EVIDENCED, BugRow
+from cca_checks.bugs.model import EVIDENCED, BugRow, memo_filename
+from cca_checks.bugs.records import parse_memo, to_record
+from cca_checks.bugs.store import append_annotations
 
 BASE_TEXT = "def lease():\n    conn = take()\n    ok = conn.closed\n    return conn\n"
 FIX_A_TEXT = "def lease():\n    conn = take()\n    ok = check(conn)\n    return conn\n"
@@ -220,36 +227,208 @@ def test_forward_rows_carry_anchors_and_caused_by_from_run_facts(tmp_path):
     assert rows_for(rec, MERGE)[0].caused_by == []
 
 
-def test_backfill_fills_only_empty_caused_by_and_keeps_other_lines(tmp_path):
-    """The back-fill sets caused_by on rows that have none, and leaves every other line's bytes.
+def _ledger_of(tmp_path, rows, legacy_first=False):
+    """A bugs dir whose ledger holds `rows`; with `legacy_first`, the first row has the shape
+    written before anchors, caused_by and kind existed."""
+    root = tmp_path / "bugs"
+    root.mkdir()
+    lines = []
+    for i, row in enumerate(rows):
+        value = row.to_json()
+        if legacy_first and i == 0:
+            for key in ("anchors", "caused_by", "kind"):
+                value.pop(key)
+        lines.append(json.dumps(value, sort_keys=True))
+    (root / "bugs.jsonl").write_text("".join(f"{x}\n" for x in lines), encoding="utf-8",
+                                     newline="\n")
+    return root
 
-    Dry run by default: without `write` the ledger is not touched.
 
-    Red 2026-10-21: mutation in `backfill_caused_by`, every line re-serialised rather than
-    only the changed one; failed at `assert lines[0] == original[0]` (the legacy line gained
-    keys).
+def _annotate(root, *pairs):
+    with (root / "caused_by.jsonl").open("a", encoding="utf-8", newline="\n") as fh:
+        for bug_id, causes in pairs:
+            fh.write(json.dumps({"bug_id": bug_id, "caused_by": causes}) + "\n")
+
+
+def _sha(path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_backfill_write_never_changes_the_ledger_bytes(tmp_path, monkeypatch, capsys):
+    """`backfill-caused-by --write` appends one annotation and leaves bugs.jsonl byte for byte.
+
+    The owner's rule (2026-10-22): "let's backfill without rewriting".
+
+    Red 2026-10-22: mutation in `backfill_caused_by`, the pre-2b in-place write restored after
+    the append (`ledger.write_text` of every line with the changed row amended); failed at
+    `assert _sha(ledger) == before`.
     """
     repo, fix_a, base, fix_b, _diff = _history(tmp_path)
     a, b = _row("acme/widgets", fix_a), _row("acme/widgets", fix_b, "BUG-2")
-    legacy = a.to_json()
-    for key in ("anchors", "caused_by", "kind"):
-        legacy.pop(key)
-    root = tmp_path / "bugs"
-    root.mkdir()
+    root = _ledger_of(tmp_path, [a, b], legacy_first=True)
     ledger = root / "bugs.jsonl"
-    original = [json.dumps(legacy, sort_keys=True), json.dumps(b.to_json(), sort_keys=True)]
-    ledger.write_text("".join(f"{x}\n" for x in original), encoding="utf-8", newline="\n")
+    before = _sha(ledger)
+    monkeypatch.setenv("CCA_BUGS_DIR", str(root))
 
+    assert main(["backfill-caused-by", "--repo-root", str(repo), "--write", "--json"]) == 0
+
+    assert _sha(ledger) == before
+    out = json.loads(capsys.readouterr().out)
+    assert out["changed"] == {b.bug_id: [a.bug_id]} and out["appended"] == 1
+    assert "rerender --all" in out["note"]
+    lines = (root / "caused_by.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    note = json.loads(lines[0])
+    assert set(note) == {"bug_id", "caused_by", "method", "base_commit", "fix_commit",
+                         "derived_at"}
+    assert note["bug_id"] == b.bug_id and note["caused_by"] == [a.bug_id]
+    assert note["method"] == "git-blame"
+    assert (note["base_commit"], note["fix_commit"]) == (base, fix_b)
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", note["derived_at"])
+
+
+def test_backfill_dry_run_writes_nothing(tmp_path):
+    """Without `write` the back-fill reports what it would append and creates no file.
+
+    Red 2026-10-22: mutation `if write:` to `if True:` in `backfill_caused_by`; failed at
+    `assert not (root / "caused_by.jsonl").exists()`.
+    """
+    repo, fix_a, _base, fix_b, _diff = _history(tmp_path)
+    a, b = _row("acme/widgets", fix_a), _row("acme/widgets", fix_b, "BUG-2")
+    root = _ledger_of(tmp_path, [a, b])
+    before = _sha(root / "bugs.jsonl")
     dry = backfill_caused_by(root, repo, write=False)
+    assert not (root / "caused_by.jsonl").exists()
+    assert _sha(root / "bugs.jsonl") == before
     assert dry.changed == {b.bug_id: [a.bug_id]}
-    assert ledger.read_text(encoding="utf-8").splitlines() == original
+    assert dry.appended == 0
 
-    done = backfill_caused_by(root, repo, write=True)
-    assert done.changed == {b.bug_id: [a.bug_id]}
-    lines = ledger.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == original[0]
-    assert json.loads(lines[1]) == {**b.to_json(), "caused_by": [a.bug_id]}
-    assert backfill_caused_by(root, repo, write=True).changed == {}
+
+def test_backfill_rerun_appends_nothing(tmp_path):
+    """A second run derives the same edge, finds it already effective, and appends nothing.
+
+    Red 2026-10-22: mutation in `backfill_caused_by`, the skip compared with the row's own
+    caused_by instead of its effective one (`if causes == row.caused_by:`); failed at
+    `assert again.changed == {}` (the edge was derived again for appending).
+    """
+    repo, fix_a, _base, fix_b, _diff = _history(tmp_path)
+    a, b = _row("acme/widgets", fix_a), _row("acme/widgets", fix_b, "BUG-2")
+    root = _ledger_of(tmp_path, [a, b])
+    assert backfill_caused_by(root, repo, write=True).appended == 1
+    log = (root / "caused_by.jsonl").read_bytes()
+    again = backfill_caused_by(root, repo, write=True)
+    assert again.changed == {}
+    assert again.appended == 0
+    assert (root / "caused_by.jsonl").read_bytes() == log
+
+
+def test_effective_caused_by_is_the_last_annotation(tmp_path):
+    """Two annotations for one row: the later line wins; a torn line is skipped.
+
+    Red 2026-10-22: mutation in `caused_by_annotations`, `out[bug_id] = ...` to
+    `out.setdefault(bug_id, ...)` (first wins); failed at
+    `assert rows[b.bug_id].caused_by == ["acme:late"]` with `['acme:early']`.
+    """
+    a, b = _row("acme/widgets", "a" * 40), _row("acme/widgets", "b" * 40, "BUG-2")
+    root = _ledger_of(tmp_path, [a, b])
+    _annotate(root, (b.bug_id, ["acme:early"]), (b.bug_id, ["acme:late"]))
+    torn = json.dumps({"bug_id": b.bug_id, "caused_by": ["acme:torn"]})[:-6]
+    with (root / "caused_by.jsonl").open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write(torn)  # an append cut short, with no newline
+    rows, skipped = records.read_ledger(root)
+    assert skipped == []
+    assert rows[b.bug_id].caused_by == ["acme:late"]
+    assert rows[a.bug_id].caused_by == []
+    # the next append starts on a fresh line, so the torn one does not swallow it
+    append_annotations(root, [{"bug_id": a.bug_id, "caused_by": ["acme:next"]}])
+    assert records.read_ledger(root)[0][a.bug_id].caused_by == ["acme:next"]
+
+
+def test_a_rows_own_caused_by_wins_over_an_annotation(tmp_path):
+    """A forward row's own caused_by (from run_facts.json) beats any annotation, and the
+    back-fill never derives one for it.
+
+    Red 2026-10-22, two mutations, each run alone:
+    * `effective_caused_by` returning the annotation when there is one, before `own`; failed
+      at `assert rows[b.bug_id].caused_by == ["acme:own"]` with `['acme:annotated']`.
+    * the `if row.caused_by: continue` skip removed from `backfill_caused_by`; failed at
+      `assert backfill_caused_by(...).changed == {}` (the blamed edge differed from `own`).
+    """
+    repo, fix_a, _base, fix_b, _diff = _history(tmp_path)
+    a = _row("acme/widgets", fix_a)
+    b = _row("acme/widgets", fix_b, "BUG-2")
+    b.caused_by = ["acme:own"]
+    root = _ledger_of(tmp_path, [a, b])
+    _annotate(root, (b.bug_id, ["acme:annotated"]))
+    rows, _ = records.read_ledger(root)
+    assert rows[b.bug_id].caused_by == ["acme:own"]
+    assert backfill_caused_by(root, repo, write=False).changed == {}
+
+
+def test_to_record_and_roundtrip_check_use_the_effective_value(tmp_path):
+    """A back-filled edge reaches the record, so a record served with it round-trips and one
+    served without it is reported changed.
+
+    Red 2026-10-22: mutation in `records.read_ledger`, `with_effective_caused_by(row, ...)` to
+    `row`; failed at `assert to_record(rows[b.bug_id])["caused_by"] == [a.bug_id]` with `[]`.
+    """
+    a, b = _row("acme/widgets", "a" * 40), _row("acme/widgets", "b" * 40, "BUG-2")
+    root = _ledger_of(tmp_path, [a, b])
+    _annotate(root, (b.bug_id, [a.bug_id]))
+    rows, _ = records.read_ledger(root)
+    assert to_record(rows[b.bug_id])["caused_by"] == [a.bug_id]
+    with_edge = replace(b, caused_by=[a.bug_id])
+    served = {"records": [{"recall_record": to_record(r)} for r in (a, with_edge)]}
+    assert roundtrip.check(root, [served]).ok
+    stale = {"records": [{"recall_record": to_record(r)} for r in (a, b)]}
+    assert roundtrip.check(root, [stale]).changed == [f"{b.bug_id}: caused_by"]
+
+
+READERS = {
+    "store.bug_rows": lambda root: {r.bug_id: r.caused_by
+                                    for r in store.bug_rows(root / "bugs.jsonl")},
+    "records.read_ledger": lambda root: {i: r.caused_by
+                                         for i, r in records.read_ledger(root)[0].items()},
+    "prior.load_rows": lambda root: {r["bug_id"]: r["caused_by"]
+                                     for r in prior.load_rows(root / "bugs.jsonl")},
+}
+
+
+@pytest.mark.parametrize("reader", sorted(READERS))
+def test_no_reader_ignores_an_annotation(tmp_path, reader):
+    """Every ledger reader returns the annotated edge, so one that skips the log is caught.
+
+    Red 2026-10-22, one mutation per reader, each run alone, each failing at
+    `assert READERS[reader](root)[b.bug_id] == [a.bug_id]` with `[]` for its own id only:
+    * `store.bug_rows`: `with_effective_caused_by(BugRow.from_json(value), ...)` to
+      `BugRow.from_json(value)`.
+    * `records.read_ledger`: `with_effective_caused_by(row, ...)` to `row`.
+    * `prior.load_rows`: the `value["caused_by"] = effective_caused_by(...)` line removed.
+    """
+    a, b = _row("acme/widgets", "a" * 40), _row("acme/widgets", "b" * 40, "BUG-2")
+    root = _ledger_of(tmp_path, [a, b])
+    _annotate(root, (b.bug_id, [a.bug_id]))
+    assert READERS[reader](root)[b.bug_id] == [a.bug_id]
+    assert READERS[reader](root)[a.bug_id] == []
+
+
+def test_rerender_all_writes_the_annotated_edge_into_the_memo(tmp_path, monkeypatch):
+    """`rerender --all`, the one sanctioned memo rewrite, renders the effective caused_by.
+
+    Red 2026-10-22: the `records.read_ledger` mutation above; failed at
+    `assert "## Caused by" in memo`.
+    """
+    a, b = _row("acme/widgets", "a" * 40), _row("acme/widgets", "b" * 40, "BUG-2")
+    root = _ledger_of(tmp_path, [a, b])
+    _annotate(root, (b.bug_id, [a.bug_id]))
+    before = _sha(root / "bugs.jsonl")
+    monkeypatch.setenv("CCA_BUGS_DIR", str(root))
+    assert main(["rerender", "--all", "--modified", "2026-10-22T00:00:00Z"]) == 0
+    memo = (root / "memos" / memo_filename(b.bug_id)).read_text(encoding="utf-8")
+    assert "## Caused by" in memo
+    assert f"* `{a.bug_id}`" in memo
+    assert parse_memo(memo).caused_by == [a.bug_id]
+    assert _sha(root / "bugs.jsonl") == before
 
 
 GAPPED_BASE = "def lease():\n\n    conn = take()\n    ok = conn.closed\n    return conn\n"
@@ -334,37 +513,6 @@ def test_backfill_blames_each_row_on_its_own_files(tmp_path):
         encoding="utf-8", newline="\n")
     done = backfill_caused_by(root, repo, write=False)
     assert done.changed == {on_a.bug_id: [x.bug_id], on_b.bug_id: [y.bug_id]}
-
-
-def test_backfill_keeps_a_row_appended_while_it_ran(tmp_path, monkeypatch):
-    """`resolve --write` may append while the back-fill blames; that row must survive the write.
-
-    Red 2026-10-22, against the pre-fix implementation at cf060bf: failed at
-    `assert late in ledger.read_text(...)` (the appended row was overwritten).
-    """
-    from cca_checks.bugs import caused_by
-
-    repo, fix_a, base, fix_b, _diff = _history(tmp_path)
-    a, b = _row("acme/widgets", fix_a), _row("acme/widgets", fix_b, "BUG-2")
-    root = tmp_path / "bugs"
-    root.mkdir()
-    ledger = root / "bugs.jsonl"
-    ledger.write_text("".join(json.dumps(r.to_json(), sort_keys=True) + "\n" for r in (a, b)),
-                      encoding="utf-8", newline="\n")
-    late = json.dumps(_row("acme/widgets", "d" * 40, "BUG-77").to_json(), sort_keys=True)
-    real = caused_by.introducing_commits
-
-    def appending(*args, **kwargs):
-        with ledger.open("a", encoding="utf-8", newline="\n") as fh:
-            fh.write(late + "\n")
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(caused_by, "introducing_commits", appending)
-    done = backfill_caused_by(root, repo, write=True)
-    assert done.changed == {b.bug_id: [a.bug_id]}
-    text = ledger.read_text(encoding="utf-8")
-    assert late in text
-    assert json.loads(text.splitlines()[1])["caused_by"] == [a.bug_id]
 
 
 def test_forward_drops_anchors_capture_could_not_have_written(tmp_path):

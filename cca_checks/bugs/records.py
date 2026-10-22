@@ -15,9 +15,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, TypeVar, cast
 
 from .anchors import Anchor
 from .model import ABSENT, CONDITIONS, NOT_REQUIRED, BugRow, _slug, memo_filename
@@ -206,6 +206,38 @@ def from_record(record: dict) -> Row:
     if row.id != record["id"]:
         raise ValueError(f"record id {record['id']!r} is not the row's {row.id!r}")
     return row
+
+
+_T = TypeVar("_T")
+
+
+def no_nul(value: _T) -> _T:
+    """`value` with U+0000 in every string replaced by U+FFFD, through lists, dicts and rows.
+
+    PostgreSQL jsonb cannot store U+0000, so RE-call refuses such a record at index time and
+    `roundtrip-check` would list it as missing. Summaries come from commit subjects and model
+    output CCA does not control, so every writer of the ledger, the caused_by log and memos
+    passes what it writes through this first, as `model._printable` does for display.
+
+    The result has the input's type: `_scrub` rebuilds each container and dataclass as its own
+    kind, which is what the cast states.
+    """
+    return cast(_T, _scrub(value))
+
+
+def _scrub(value: object) -> object:
+    if isinstance(value, str):
+        return value.replace("\x00", "\ufffd")
+    if isinstance(value, list):
+        return [_scrub(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_scrub(v) for v in value)
+    if isinstance(value, dict):
+        return {_scrub(k): _scrub(v) for k, v in value.items()}
+    if is_dataclass(value) and not isinstance(value, type):
+        return replace(value, **{f.name: _scrub(getattr(value, f.name))
+                                 for f in fields(value) if f.init})
+    return value
 
 
 def one_line(text: str) -> str:
@@ -411,11 +443,14 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
     """Every row of the ledger under `root` by id, and "line N: reason" for each unreadable line.
 
     The first line of an id wins, as in `store.existing_ids`. Lines are split on LF only, so a
-    line separator inside a value written before `one_line` existed cannot split a row.
+    line separator inside a value written before `one_line` existed cannot split a row. A bug
+    row carries its effective caused_by (`store.effective_caused_by`), so `to_record`, its memo
+    and the round-trip check all see a back-filled edge.
     """
-    from .store import LEDGER
+    from .store import LEDGER, caused_by_annotations, with_effective_caused_by
 
     ledger = root / LEDGER
+    annotations = caused_by_annotations(root)
     lines = ledger.read_text(encoding="utf-8").split("\n") if ledger.exists() else []
     rows: dict[str, Row] = {}
     skipped: list[str] = []
@@ -428,7 +463,7 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
         except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as exc:
             skipped.append(f"line {number}: {type(exc).__name__}: {exc}")
             continue
-        rows.setdefault(row_id, row)
+        rows.setdefault(row_id, with_effective_caused_by(row, annotations))
     return rows, skipped
 
 
@@ -444,12 +479,16 @@ def rerender_all(root: Path, modified: str) -> RerenderReport:
     report = RerenderReport(skipped=skipped)
     memos = root / MEMOS
     memos.mkdir(parents=True, exist_ok=True)
-    for row_id, row in rows.items():
-        target = memos / memo_filename(row_id)
+    known: set[str] = set()
+    for row in rows.values():
+        # A line written before no_nul existed may hold U+0000; its memo, and so its name,
+        # must not. roundtrip-check then reports that row changed rather than missing.
+        clean = no_nul(row)
+        target = memos / memo_filename(clean.id)
+        known.add(target.name)
         tmp = target.with_name(f".tmp-{target.name}-{os.getpid()}")
-        tmp.write_text(render_memo(row, modified=modified), encoding="utf-8", newline="\n")
+        tmp.write_text(render_memo(clean, modified=modified), encoding="utf-8", newline="\n")
         os.replace(tmp, target)
         report.rendered += 1
-    known = {memo_filename(i) for i in rows}
     report.stray = sorted(p.name for p in memos.glob("*.md") if p.name not in known)
     return report

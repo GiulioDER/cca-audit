@@ -13,6 +13,10 @@ Blame needs the checkout, so the run computes the commits (`introducing_commits`
 them in its record; the mapping to bug ids (`bugs_for_commits`) needs the ledger and runs
 where the ledger is. `caused_by_for_fix` is both, for a caller that has both.
 
+Historical rows are back-filled by `backfill_caused_by`, which never rewrites a ledger line: it
+appends annotations to `caused_by.jsonl` (owner's decision, 2026-10-22: "let's backfill without
+rewriting"), so the ledger stays append-only and every memo traceable to its sources.
+
 A fix merged with a merge commit rather than a squash keeps its own commits on the branch, so
 blame names those and not the ledger's merge sha: such a cause is missed, never invented. The
 forward path has one diff per run, not per fix, so two findings fixed in the same file share
@@ -21,7 +25,6 @@ that file's causes.
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -29,7 +32,6 @@ from pathlib import Path
 
 from .gitread import GitError, git, remote_repo
 from .model import BugRow
-from .records import one_line
 
 _HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@")
 _PORCELAIN = re.compile(r"([0-9a-f]{40}) \d+ \d+(?: \d+)?")
@@ -192,45 +194,55 @@ def fix_diff(repo_root: Path, base: str, head: str) -> str:
 
 @dataclass
 class BackfillReport:
-    # bug_id -> caused_by, for every row that gained one.
+    # bug_id -> caused_by, for every annotation appended (or, in a dry run, that would be).
     changed: dict[str, list[str]] = field(default_factory=dict)
-    # "bug_id: reason" for rows of this repository whose fix could not be blamed, and any
-    # reason the ledger was not written.
+    # "bug_id: reason" for rows of this repository whose fix could not be blamed.
     failed: list[str] = field(default_factory=list)
+    # Lines appended to caused_by.jsonl; 0 in a dry run.
+    appended: int = 0
 
 
 def backfill_caused_by(root: Path, repo_root: Path, *, write: bool) -> BackfillReport:
-    """Set caused_by on this repository's ledger rows that have none, from their fix commits.
+    """Derive caused_by for this repository's ledger rows that have none, from their fix commits.
 
-    Each fix is blamed against its first parent, on the row's own files. Only a row whose
-    caused_by is empty and whose computed one is not is changed, and only that line is
-    rewritten: every other line keeps its bytes. Dry run unless `write`; with it, the ledger as
-    it was is kept beside it as `bugs.jsonl.before-caused-by-<UTC stamp>`, and rows appended
-    while the blame ran (by `resolve --write`) are kept. If the ledger changed in any other
-    way meanwhile, nothing is written.
+    The ledger is only read: an edge is appended to `caused_by.jsonl` as an annotation
+    (`store.append_annotations`), and readers take a row's effective caused_by from there
+    (`store.effective_caused_by`). Each fix is blamed against its first parent, on the row's
+    own files. A row with its own caused_by (a forward row) is skipped, and an annotation is
+    appended only when the derived list differs from the row's current effective one, so a
+    second run appends nothing. Dry run unless `write`. Memos change only through
+    `bugs rerender --all`.
     """
-    from .store import LEDGER
+    from .store import (
+        LEDGER,
+        append_annotations,
+        caused_by_annotations,
+        effective_caused_by,
+    )
 
     report = BackfillReport()
     repo = remote_repo(Path(repo_root))
     ledger = root / LEDGER
     if repo is None or not ledger.exists():
         return report
-    original = ledger.read_text(encoding="utf-8")
-    lines = original.split("\n")
-    parsed: list[tuple[int, dict, BugRow]] = []
-    for i, line in enumerate(lines):
+    rows: list[BugRow] = []
+    for line in ledger.read_text(encoding="utf-8").split("\n"):
         try:
             value = json.loads(line)
-            if value.get("kind", "bug") != "bug":
-                continue
-            parsed.append((i, value, BugRow.from_json(value)))
-        except (ValueError, KeyError, TypeError, AttributeError):
+            if value.get("kind", "bug") == "bug":
+                rows.append(BugRow.from_json(value))
+        except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
             continue
-    rows = [row for _, _, row in parsed]
+    annotations = caused_by_annotations(root)
+    derived_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     diffs: dict[str, tuple[str, str]] = {}
-    for i, value, row in parsed:
-        if row.caused_by or not _same_repo(row.repo, repo):
+    seen: set[str] = set()
+    pending: list[dict] = []
+    for row in rows:
+        if row.bug_id in seen or not _same_repo(row.repo, repo):
+            continue
+        seen.add(row.bug_id)  # the first line of an id wins, as in records.read_ledger
+        if row.caused_by:
             continue
         try:
             if row.fix_commit not in diffs:
@@ -242,20 +254,12 @@ def backfill_caused_by(root: Path, repo_root: Path, *, write: bool) -> BackfillR
             report.failed.append(f"{row.bug_id}: {exc}")
             continue
         causes = [c for c in bugs_for_commits(commits, repo, rows) if c != row.bug_id]
-        if causes:
-            report.changed[row.bug_id] = causes
-            lines[i] = one_line(json.dumps({**value, "caused_by": causes},
-                                           ensure_ascii=False, sort_keys=True))
-    if write and report.changed:
-        now = ledger.read_text(encoding="utf-8")
-        if not now.startswith(original):
-            report.failed.append("the ledger changed other than by appending while the "
-                                 "back-fill ran; nothing was written")
-            return report
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        ledger.with_name(f"{ledger.name}.before-caused-by-{stamp}").write_text(
-            now, encoding="utf-8", newline="\n")
-        tmp = ledger.with_name(f".tmp-{ledger.name}-{os.getpid()}")
-        tmp.write_text("\n".join(lines) + now[len(original):], encoding="utf-8", newline="\n")
-        os.replace(tmp, ledger)
+        if causes == effective_caused_by(row.bug_id, row.caused_by, annotations):
+            continue
+        report.changed[row.bug_id] = causes
+        pending.append({"bug_id": row.bug_id, "caused_by": causes, "method": "git-blame",
+                        "base_commit": parent, "fix_commit": row.fix_commit,
+                        "derived_at": derived_at})
+    if write:
+        report.appended = append_annotations(root, pending)
     return report

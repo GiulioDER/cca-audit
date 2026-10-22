@@ -13,9 +13,9 @@ and exits 0 on any data or environment problem (a missing ledger or origin print
 block), and 2 on a usage error (argparse). `rerender --all` rewrites every memo from the
 ledger, the one sanctioned overwrite of memos, and never writes the ledger; it exits 1 when a
 ledger line could not be read (that memo is left as it was). `backfill-caused-by` blames each
-fix of one checked-out repository against its parent; with --write it rewrites only the lines
-it changed, keeping the old ledger as `bugs.jsonl.before-caused-by`. Run `rerender --all`
-after it, so the memos carry the edges. `roundtrip-check` exits 0 only when every ledger row
+fix of one checked-out repository against its parent; it only reads the ledger, and with
+--write it appends each new edge to `caused_by.jsonl` beside it. Run `rerender --all` after
+it, so the memos carry the edges. `roundtrip-check` exits 0 only when every ledger row
 has an equal record in RE-call's dump and the dump holds nothing else, 1 when it lists a
 difference, and 2 when the dump cannot be read or is truncated.
 """
@@ -177,9 +177,13 @@ def _backfill_caused_by(a: argparse.Namespace) -> int:
     from dataclasses import asdict
 
     from .caused_by import backfill_caused_by
+    from .store import ANNOTATIONS
 
     report = backfill_caused_by(bugs_dir(), a.repo_root, write=a.write)
-    data = {**asdict(report), "written": bool(a.write and report.changed)}
+    data = {**asdict(report), "log": str(bugs_dir() / ANNOTATIONS),
+            "note": ("bugs.jsonl was only read. Memos change only through "
+                     "`python -m cca_checks.bugs rerender --all`."
+                     if a.write else "dry run: nothing was written; --write appends to the log")}
     if a.json:
         print(json.dumps(data, indent=2))
     else:
@@ -264,11 +268,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="the memos' `modified` stamp (default: now, UTC)")
     w.add_argument("--json", action="store_true")
     c = sub.add_parser("backfill-caused-by",
-                       help="set caused_by on ledger rows of one checked-out repository")
+                       help="derive caused_by for ledger rows of one checked-out repository")
     c.add_argument("--repo-root", type=Path, required=True, metavar="PATH",
                    help="a clone of the repository whose rows to fill")
     c.add_argument("--write", action="store_true",
-                   help="rewrite the changed ledger lines (the old ledger is kept beside it)")
+                   help="append the annotations to caused_by.jsonl (bugs.jsonl is never "
+                        "written; memos change through `rerender --all`)")
     c.add_argument("--json", action="store_true")
     t = sub.add_parser("roundtrip-check",
                        help="compare the ledger with RE-call's dump of the records it serves")
