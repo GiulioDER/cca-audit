@@ -36,6 +36,11 @@ there), built against saved `recall_records` answers until the live server is de
   stakes, and a checkout with no GitHub `origin` suppresses nothing.
   `CCA_PRIOR_FP=off` turns every suppression into an attachment; `bugs retract-fp ID --reason`
   retracts a record.
+* **Follow-ups.** A record is current by `superseded_by` and `valid_until` as RE-call returns them;
+  a `valid_until` or retraction date that does not parse counts as lapsed or in effect. PRIOR_FP
+  is refused outside DIFF mode. `bugs anchors --diff` no longer depends on the user's diff prefix
+  or path-quoting config. `pipeline close` prints each false positive it did not record. A FAST
+  run creates no false-positive record, and Step 6 says so.
 
 ## [0.13.0] - 2026-10-21
 

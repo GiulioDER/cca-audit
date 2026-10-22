@@ -594,7 +594,9 @@ def _prior_fp_matches(state: PipelineState, root) -> dict[str, dict]:
     suppressed.
     """
     path = deferred.runs_dir(root) / state.run_id / FP_RECORDS
-    if not path.exists():
+    if state.mode != "DIFF" or not path.exists():
+        # Step 2.4 runs in DIFF mode only: a hunt reads no record of the user's own projects,
+        # and a deferred run's pool was already through fp-check's verdicts once.
         return {}
     from .bugs import envelope, match_fp, query_anchors
     from .bugs.gitread import GitError, remote_repo

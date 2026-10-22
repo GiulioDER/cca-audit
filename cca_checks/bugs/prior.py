@@ -206,14 +206,20 @@ ANCHORS_SHOWN = 3
 
 
 def select_records(records: list[dict], repo: str, before: str | None = None,
-                   limit: int = 8) -> list[dict]:
+                   limit: int = 8, today: str | None = None) -> list[dict]:
     """The bug records of `repo` the block lists, best first, at most `limit`.
 
     Kept: kind bug, same repository, an anchor match of at least file_only, not superseded,
-    not expired, dated before `before` when given. Every other kind is dropped here, a false
+    not expired by `today` (a future `valid_until` is still current, as for the PRIOR_FP
+    matcher), dated before `before` when given. Every other kind is dropped here, a false
     positive above all: auditors are never shown one. Order: exact, then symbol_changed,
     then file_only; within each, proved before historical, then newest.
     """
+    from datetime import date
+
+    from .envelope import expired
+
+    today = today or date.today().isoformat()
     target = repo.lower()
     found = []
     for record in records:
@@ -224,7 +230,7 @@ def select_records(records: list[dict], repo: str, before: str | None = None,
             continue
         if record.get("anchor_match") not in MATCH_ORDER:
             continue
-        if record.get("superseded_by") is not None or record.get("valid_until") is not None:
+        if record.get("superseded_by") is not None or expired(record.get("valid_until"), today):
             continue
         if before is not None and str(rec.get("date", "")) >= before:
             continue

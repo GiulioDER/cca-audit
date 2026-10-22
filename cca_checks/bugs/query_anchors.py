@@ -141,7 +141,10 @@ def _changed_lines(diff: str) -> dict[str, list[int]]:
 
 def for_diff(root: Path, base: str, repo: str | None) -> dict:
     """The anchors of every symbol the working tree changes against `base`."""
-    diff = git(Path(root), "diff", "-U0", "--no-color", "--no-ext-diff", base, "--")
+    # Fixed prefixes and unquoted paths, whatever the user's diff.noprefix, diff.mnemonicPrefix
+    # or core.quotePath say: `_changed_lines` reads `+++ b/<path>`.
+    diff = git(Path(root), "-c", "core.quotePath=false", "diff", "-U0", "--no-color",
+               "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", base, "--")
     anchors: list[Anchor] = []
     for file, numbers in _changed_lines(diff).items():
         if not (Path(root) / file).is_file():

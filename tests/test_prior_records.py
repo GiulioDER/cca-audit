@@ -231,3 +231,60 @@ def test_anchors_diff_names_the_changed_symbols(git_repo, capsys):
     out = json.loads(capsys.readouterr().out)
     symbols = [(a["file"], a["symbol"]) for a in out["anchors"]]
     assert symbols == [("app.py", "g")] and out["repo"] == "a/b" and not out["truncated"]
+
+
+def _changed_g(git_repo, name="app.py"):
+    body = "x = 1\n\n\ndef f():\n    return 1\n\n\ndef g():\n    return {}\n"
+    (git_repo / name).write_text(body.format(2), encoding="utf-8")
+    subprocess.run(["git", "-C", str(git_repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(git_repo), "commit", "-qm", "f g"], check=True)
+    (git_repo / name).write_text(body.format(3), encoding="utf-8")
+
+
+def test_anchors_diff_ignores_the_users_diff_prefix_config(git_repo, capsys):
+    """Deferred minor 2, final review 2026-10-22. Invariant: `diff.noprefix` (or
+    `diff.mnemonicPrefix`) in the user's config does not empty the brief's query.
+
+    Red 2026-10-22: mutation dropping `"--src-prefix=a/", "--dst-prefix=b/"` in
+    `query_anchors.for_diff`; failed at `assert symbols == [("app.py", "g")]` ([] != [...]).
+    """
+    _changed_g(git_repo)
+    subprocess.run(["git", "-C", str(git_repo), "config", "diff.noprefix", "true"], check=True)
+    assert main(["anchors", "--diff", "--root", str(git_repo), "--repo-name", "a/b"]) == 0
+    symbols = [(a["file"], a["symbol"]) for a in json.loads(capsys.readouterr().out)["anchors"]]
+    assert symbols == [("app.py", "g")]
+
+
+def test_anchors_diff_reads_a_non_ascii_path(git_repo, capsys):
+    """Deferred minor 2. Invariant: a path git would quote under the default core.quotePath
+    still anchors.
+
+    Red 2026-10-22: mutation dropping `"-c", "core.quotePath=false",` in
+    `query_anchors.for_diff`; failed at `assert symbols == [("caf\u00e9.py", "g")]`.
+    """
+    _changed_g(git_repo, "caf\u00e9.py")
+    assert main(["anchors", "--diff", "--root", str(git_repo), "--repo-name", "a/b"]) == 0
+    symbols = [(a["file"], a["symbol"]) for a in json.loads(capsys.readouterr().out)["anchors"]]
+    assert symbols == [("caf\u00e9.py", "g")]
+
+
+def test_the_brief_and_the_matcher_agree_on_valid_until():
+    """Deferred minor 3, final review 2026-10-22. Invariant: a record valid until a future date
+    is current in the brief, as it is for the PRIOR_FP matcher; a lapsed one is hidden.
+
+    Red 2026-10-22: mutation `expired(record.get("valid_until"), today)` ->
+    `record.get("valid_until") is not None` in `prior.select_records`; failed at
+    `assert "RE-call:0123456789ab:BUG-001" in ids` for the future date.
+    Red 2026-10-22: mutation `except ValueError: return True` -> `return False` in
+    `envelope.expired`; failed at the `"not a date"` assertion (a malformed value sorted after
+    every real date and read as current, which this test found in the first version).
+    """
+    def ids(valid_until):
+        records = _records()
+        for r in records:
+            if r["id"] == "RE-call:0123456789ab:BUG-001":
+                r["valid_until"] = valid_until
+        return [r["id"] for r in prior.select_records(records, REPO, today="2026-10-22")]
+    assert "RE-call:0123456789ab:BUG-001" in ids("2026-12-31")
+    assert "RE-call:0123456789ab:BUG-001" not in ids("2026-10-01")
+    assert "RE-call:0123456789ab:BUG-001" not in ids("not a date")

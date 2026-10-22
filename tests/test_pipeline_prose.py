@@ -882,3 +882,14 @@ def test_nonzero_exit_pastes_the_empty_block():
         assert hits
         assert any("paste the empty form" in s and "continue" in s and "--records" in s
                    for s in hits), hits
+
+
+def test_the_prompt_says_fast_creates_no_false_positive_records():
+    """Deferred minor 5, final review 2026-10-22. Invariant: Step 6 says a FAST run records no
+    false positive, and that close names the ones it did not record.
+
+    Red 2026-10-22: against master 6c36299; failed at `assert "A FAST run creates none" in step6`.
+    """
+    step6 = " ".join(PIPELINE.split("## Step 6", 1)[1].split("## Step 7", 1)[0].split())
+    assert "A FAST run creates none" in step6
+    assert "prints each false positive it did not record" in step6

@@ -8,6 +8,9 @@ guard of its own (see `build`):
 * the run's final L6 verdict is APPROVED;
 * every anchor (its own place and each evidence location) resolved to code with a `code_sha`.
 
+A FAST run writes no disposition ledger rows (Step 2.5b is STANDARD and DEEP only), so it has no
+rows here and creates no record; its false positives still go to the architect at L6.
+
 The anchors come from `fp_anchors.json`, which `pipeline record L2.5` computed over the code
 fp-check judged, so a record pins that code and lapses once it changes. The rows do not wait
 for the run's pull request: the hashes already say which code they are about.
@@ -70,6 +73,8 @@ def build(rows: list[dict], anchors: dict, acceptance: object, verdict: str, *,
 def eligible(rows: list[dict], anchors: dict, acceptance: object,
              verdict: str) -> tuple[list[tuple[dict, list[Anchor]]], list[str]]:
     """The rows that pass every guard, each with its anchors, and "id: why not" for the rest."""
+    if not rows:
+        return [], []
     if str(verdict).strip().upper() != APPROVED:
         return [], [f"L6 verdict is {str(verdict).strip() or 'missing'}, not {APPROVED}"]
     decided = _decisions(acceptance)

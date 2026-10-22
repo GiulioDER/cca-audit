@@ -323,3 +323,20 @@ def test_the_record_takes_the_findings_fields_from_l2(repo, _private_bugs_dir):
     ps.close(root=repo)
     rows = _ledger(_private_bugs_dir)
     assert rows[0]["priority"] == "P3"
+
+
+def test_close_prints_the_false_positives_it_did_not_record(repo, capsys):
+    """Deferred minor 1, final review 2026-10-22. Invariant: a false positive that becomes no
+    record is named at close, with the reason, rather than only in the captured record.
+
+    Red 2026-10-22: mutation `if skipped:` -> `if False:` in `pending._report_skipped`; failed
+    at `assert "F-1: fp_reason 'out_of_scope'" in err`.
+    """
+    through_l25(repo, lambda run: [fp_row(repo, run, "F-1", reason="out_of_scope")])
+    ps.record("L6", detail="APPROVED", output=write_output(repo, acceptance(F_1="ACCEPT")),
+              root=repo)
+    capsys.readouterr()
+    ps.close(root=repo)
+    err = capsys.readouterr().err
+    assert "false positives not recorded" in err
+    assert "F-1: fp_reason 'out_of_scope'" in err

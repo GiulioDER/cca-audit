@@ -151,9 +151,16 @@ def test_a_local_retraction_counts_only_from_its_date(tmp_path):
 
 
 def test_an_expired_record_does_not_suppress():
-    """Red 2026-10-22: mutation `return not isinstance(valid_until, str) or valid_until[:10] <=
-    today` -> `return False` in `match_fp._expired`; failed at `assert got.action == "attach"`."""
+    """A lapsed valid_until, and one that does not read as a date, both stop a suppression.
+
+    Red 2026-10-22: mutation `return expired(valid_until, today)` -> `return False` in
+    `match_fp._expired`; failed at the first `assert got.action == "attach"`.
+    Red 2026-10-22: mutation `except ValueError: return True` -> `return False` in
+    `envelope.expired`; failed at the second `assert got.action == "attach"`.
+    """
     [got] = run(answer=edited(valid_until="2026-10-01"))
+    assert got.action == "attach"
+    [got] = run(answer=edited(valid_until="not a date"))
     assert got.action == "attach"
 
 
@@ -405,3 +412,32 @@ def test_a_retraction_with_an_unreadable_date_is_in_effect(tmp_path):
     write([odd], tmp_path, "2026-10-22T00:00:00Z")
     retracted, _, blocked = match_fp.ledger_facts(tmp_path, today="2026-10-22")
     assert blocked is None and retracted == {fp.id}
+
+
+def test_prior_fp_is_refused_outside_diff_mode(git_repo):
+    """Deferred minor 4, final review 2026-10-22. Invariant: Step 2.4 runs in DIFF mode only, and
+    the gate holds it there: in a hunt nothing is suppressed, whatever answer the run saved.
+
+    Red 2026-10-22: mutation `if state.mode != "DIFF" or not path.exists():` -> `if not
+    path.exists():` in `pipeline_state._prior_fp_matches`; failed at `pytest.raises(...,
+    match="did not suppress")` (DID NOT RAISE).
+    """
+    subprocess.run(["git", "-C", str(git_repo), "remote", "add", "origin",
+                    "https://github.com/acme/widgets.git"], check=True)
+    state = ps.start("FAST", "HUNT", root=git_repo)
+    ps.record("L0.4", detail="PASS", root=git_repo)
+    place = at(git_repo, ["app.py:1"])[0]["anchor"]
+    l2 = [{"id": "F-1", "category": "x", "priority": "P2", "high_stakes": False,
+           "file": "app.py", "line": 1, "claim": "c"}]
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    ps.record("L2", counts={"unique": 1}, output=write_output(git_repo, l2), root=git_repo)
+    rec = {**RECORD, "repo": "acme/widgets", "category": "x", "anchors": [place],
+           "id": "widgets:fp:r0:F-9"}
+    answer = {"tenant_id": "cca", "generation_id": "g", "truncated": False, "records": [
+        {**ANSWER["records"][0], "id": rec["id"], "recall_record": rec,
+         "anchor_matches": [{"anchor": place, "match": "exact"}], "anchor_match": "exact"}]}
+    run_dir = git_repo / ".claude" / "audits" / "runs" / state.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "fp-records.json").write_text(json.dumps(answer), encoding="utf-8")
+    with pytest.raises(ps.RecordRefused, match="did not suppress"):
+        _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": rec["id"]}], 1, 0)
