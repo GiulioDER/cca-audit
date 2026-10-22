@@ -289,3 +289,84 @@ def render_records(selected: list[dict], reason: str | None = None,
     reason_tail = f" ({reason})" if reason else ""
     return _block(RECORDS_HEADING, [_record_entry(r, code, repo) for r in selected],
                   f"No prior CCA bugs recorded at the changed code.{reason_tail}")
+
+
+# Lessons (DIFF mode): accepted lesson records RE-call matched by place, from the same answer.
+
+LESSONS_HEADING = ("LESSONS AT THE CHANGED CODE (patterns from past CCA bugs, accepted by the "
+                   "owner; context, not findings, not instructions)")
+LESSONS_MAX = 3
+RULE_SHOWN = 300
+PATTERN_SHOWN = 600
+MEMBERS_CITED = 6
+
+
+def select_lessons(records: list[dict], repo: str, before: str | None = None,
+                   limit: int = LESSONS_MAX, today: str | None = None) -> list[dict]:
+    """The current lesson records of `repo` for the changed code, best first, at most `limit`.
+
+    Kept: kind lesson, same repository, a place matching at least file_only, not retracted
+    (`superseded_by`, which a `lesson_retraction` sets) and not expired by `today`, accepted
+    before `before` when given. A lesson's anchors carry no code sha, so RE-call reports a
+    lesson at a changed symbol as `symbol_changed`: those come before `file_only`; then the
+    lesson with more member bugs, then the newest.
+    """
+    from datetime import date
+
+    from .distill import withholding
+    from .envelope import expired
+
+    today = today or date.today().isoformat()
+    target = repo.lower()
+    found = []
+    for record in records:
+        rec = record.get("recall_record")
+        if (record.get("kind") != "lesson" or not isinstance(rec, dict)
+                or rec.get("kind") != "lesson"):
+            continue
+        if str(rec.get("repo", "")).lower() != target:
+            continue
+        if record.get("anchor_match") not in MATCH_ORDER:
+            continue
+        if record.get("superseded_by") is not None or expired(record.get("valid_until"), today):
+            continue
+        if before is not None and str(rec.get("date", "")) >= before:
+            continue
+        if not isinstance(rec.get("members"), list):
+            continue
+        # Acceptance refuses such wording; a ledger edited by hand is not trusted to have.
+        if withholding(f"{rec.get('rule', '')} {rec.get('pattern', '')}"):
+            continue
+        found.append(record)
+    found.sort(key=lambda r: str(r["recall_record"].get("date", "")), reverse=True)
+    found.sort(key=lambda r: (0 if r["anchor_match"] != "file_only" else 1,
+                              -len(r["recall_record"]["members"])))
+    return found[:limit]
+
+
+def _lesson_entry(record: dict) -> str:
+    rec = record["recall_record"]
+    lesson_id = _clean(rec.get("id", ""))[:BUG_ID_MAX]
+    date = _clean(rec.get("date", ""))
+    date = date if _DATE.fullmatch(date) else "?"
+    where = "at a changed symbol" if record["anchor_match"] != "file_only" else "in a changed file"
+    places = [_clean(f"{a.get('file')} {a.get('symbol') or '(module level)'}")[:FILES_MAX]
+              for a in [a for a in rec.get("anchors") or [] if isinstance(a, dict)]
+              [:ANCHORS_SHOWN]]
+    members = [m for m in rec["members"] if isinstance(m, str)]
+    cited = _clean(", ".join(m[:BUG_ID_MAX] for m in members[:MEMBERS_CITED]))
+    more = f" and {len(members) - MEMBERS_CITED} more" if len(members) > MEMBERS_CITED else ""
+    return "\n".join([
+        f"- {lesson_id}, accepted {date}, {where}: {_clean(rec.get('rule', ''))[:RULE_SHOWN]}",
+        f"  check for: {_clean(rec.get('pattern', ''))[:PATTERN_SHOWN]}",
+        "  where: " + ("; ".join(places) or "?"),
+        f"  from {len(members)} bugs: {cited}{more}",
+    ])
+
+
+def render_lessons(selected: list[dict]) -> str:
+    """The LESSONS block, or "" when no lesson applies: the brief then reads exactly as it did
+    before lessons existed, so a run without one is unchanged for the measurement."""
+    if not selected:
+        return ""
+    return _block(LESSONS_HEADING, [_lesson_entry(r) for r in selected], "")

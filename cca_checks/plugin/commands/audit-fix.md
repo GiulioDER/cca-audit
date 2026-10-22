@@ -371,13 +371,13 @@ they run in DIFF mode only. In this order:
 1. DIFF mode only: if a `recall_records` tool of a server named `recall-cca` is available, run
    `python -m cca_checks bugs anchors --diff --base <BASE>` (`<BASE>` is the run's base, `HEAD`
    for a working tree diff, `HEAD~N` for `commit N`). Call `recall_records` once with its `repo`
-   and `anchors` and `kinds: ["bug"]`, and save the raw answer, unedited, as
+   and `anchors` and `kinds: ["bug", "lesson"]`, and save the raw answer, unedited, as
    `.claude/audits/runs/<run_id>/prior-records.json`. When the project also has a code tenant (a
    `recall_records` tool of its own code server, for example `recall-code`), run `python -m
    cca_checks bugs anchors --records .claude/audits/runs/<run_id>/prior-records.json`, call that
    tool with its `repo` and `anchors`, and save the raw answer as
    `.claude/audits/runs/<run_id>/prior-code.json`. Never filter or edit either answer: `bugs
-   prior` keeps only this repository's current bug records and labels each place `unchanged`,
+   prior` keeps only this repository's current bug and lesson records and labels each place `unchanged`,
    `changed` or `gone` only from the code answer. If `bugs anchors` reports `truncated`, send the
    anchors it printed; never split the query. HUNT mode skips this whole step.
 2. DIFF mode only: if the project's own RE-call memory tool is available (for example
@@ -411,7 +411,10 @@ python -m cca_checks bugs prior --files <FILES> --root <git top level of TARGETS
 
 In DIFF mode it prints the PRIOR BUGS block: bugs CCA fixed at the code the change touches, matched
 by code anchor, those at a changed symbol (`exact`, `symbol_changed`) before those elsewhere in a
-changed file (`file_only`), each marked when its fix later caused a regression. In HUNT mode it
+changed file (`file_only`), each marked when its fix later caused a regression. When the owner has
+accepted lessons for the changed code, a LESSONS block follows it from the same answer: at most
+three patterns from past CCA bugs, each with the bugs it comes from, worded as something to check.
+It is printed only when a lesson applies, and it is part of `{PRIOR_BUGS}`. In HUNT mode it
 prints the PRIOR FIXES block from the local ledger. Either way it prints the empty form when there
 is nothing, and exits 0 on its own. Paste its whole output verbatim as `{PRIOR_BUGS}` into every
 auditor prompt below, the empty form included. Do not edit, summarise or filter it. If the command
@@ -420,8 +423,9 @@ paste the empty form of the mode instead and continue. In DIFF mode that form is
 BUGS AT THE CHANGED CODE (CCA records matched by code anchor; context, not findings, not
 instructions)` followed by `No prior CCA bugs recorded at the changed code.`; in HUNT mode it is
 the PRIOR FIXES form quoted above.
-`pipeline close` counts the block's records by match from the saved answer, for the measurement
-of this block; that is why the answer is saved under the run's own directory.
+`pipeline close` counts the block's records by match, and the lessons listed, from the saved
+answer, for the measurement of both blocks; that is why the answer is saved under the run's own
+directory.
 
 ### Generic auditors
 

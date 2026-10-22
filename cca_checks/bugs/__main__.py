@@ -1,7 +1,10 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
-python -m cca_checks.bugs prior --records FILE [--code FILE] [--repo-name OWNER/NAME] [--root PATH]
-    [--before YYYY-MM-DD] [--limit N] [--json]
+python -m cca_checks.bugs prior --records FILE [--code FILE] [--no-lessons] [--repo-name OWNER/NAME]
+    [--root PATH] [--before YYYY-MM-DD] [--limit N] [--json]
+python -m cca_checks.bugs distill [--repo OWNER/NAME] [--draft] [--model ID] [--json]
+python -m cca_checks.bugs lesson accept PROPOSAL --by NAME
+python -m cca_checks.bugs lesson retract ID --reason TEXT --by NAME
 python -m cca_checks.bugs prior --files F [F ...] [--repo-name OWNER/NAME] [--root PATH]
     [--before YYYY-MM-DD] [--limit N] [--json]
 python -m cca_checks.bugs anchors (--diff [--base REV] | --findings L2.json | --records FILE
@@ -19,7 +22,12 @@ be asked about some record (the hourly worker retries), otherwise 0. `prior` is 
 and exits 0 on any data or environment problem (a missing ledger, origin or readable records
 file prints the empty block), and 2 on a usage error. With `--records` it renders the anchored
 block from a saved `recall_records` answer (DIFF mode), with `--files` the ledger join (HUNT
-mode). `anchors` prints the anchors a `recall_records` query or a Step 2.5b row needs.
+mode); the same answer's current lessons follow as a LESSONS block, at most three, printed only
+when one applies. `distill` groups related bug rows and lists the groups; with --draft it asks a
+model to draft a rule and pattern per new group and stores each under `lessons/proposed/` beside
+the ledger, never in it (exit 1 when a draft was refused). `lesson accept` appends the lesson a
+proposal names and writes its memo; `lesson retract` appends a `lesson_retraction`; both exit 1
+when refused. `anchors` prints the anchors a `recall_records` query or a Step 2.5b row needs.
 `match-fp` is the mechanical PRIOR_FP matcher; it writes its result to `--out` and exits 0, and
 `CCA_PRIOR_FP=off` turns every suppression into an attachment. `retract-fp` appends a
 `false_positive_retraction` row (exit 1 when ID is not a false positive of the ledger).
@@ -144,14 +152,20 @@ def _prior_records(a: argparse.Namespace, repo: str | None, reason: str | None) 
             code = None
             reason = "; ".join(r for r in (reason, f"code: {code_why}") if r)
     selected = []
+    lessons = []
     if repo is not None and why is None:
         selected = prior.select_records(records, repo, before=a.before, limit=a.limit)
+        if not a.no_lessons:
+            lessons = prior.select_lessons(records, repo, before=a.before)
     if a.json:
         print(json.dumps({"repo": repo, "reason": reason,
                           "counts": prior.block_counts(selected),
-                          "records": [r.get("id") for r in selected]}, indent=2))
+                          "records": [r.get("id") for r in selected],
+                          "lessons": [r.get("id") for r in lessons]}, indent=2))
     else:
-        _emit(prior.render_records(selected, reason, code, repo or ""))
+        block = prior.render_records(selected, reason, code, repo or "")
+        lesson_block = prior.render_lessons(lessons)
+        _emit(block + (f"\n\n{lesson_block}" if lesson_block else ""))
     return 0
 
 
@@ -228,6 +242,50 @@ def _retract_fp(a: argparse.Namespace) -> int:
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _distill(a: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from .distill import AnthropicClient, distill
+
+    client = None
+    if a.draft:
+        try:
+            client = AnthropicClient.from_env(a.model)
+        except RuntimeError as exc:
+            print(f"bugs distill: {exc}", file=sys.stderr)
+            return 2
+    report = distill(bugs_dir(), repo=a.repo, client=client, drafted_at=_now())
+    data = {**asdict(report), "dir": str(bugs_dir()),
+            "note": ("proposals only: the ledger, memos and RE-call are untouched; accept one "
+                     "with `bugs lesson accept <id> --by NAME`" if a.draft else
+                     "dry run: no model call, nothing written; --draft drafts each new group")}
+    if a.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        _emit(_printable("\n".join(f"{k}: {v}" for k, v in data.items())))
+    return 1 if report.refused else 0
+
+
+def _lesson(a: argparse.Namespace) -> int:
+    from dataclasses import asdict
+
+    from . import lessons
+
+    stamp = _now()
+    try:
+        if a.action == "accept":
+            done = lessons.accept(bugs_dir(), a.proposal, by=a.by, on=stamp[:10],
+                                  modified=stamp)
+        else:
+            done = lessons.retract(bugs_dir(), a.id, reason=a.reason, by=a.by, on=stamp[:10],
+                                   modified=stamp)
+    except lessons.Refused as exc:
+        print(f"bugs lesson {a.action}: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps({**asdict(done), "dir": str(bugs_dir())}))
+    return 0
 
 
 def _rerender(a: argparse.Namespace) -> int:
@@ -333,7 +391,26 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--root", type=Path, default=Path("."))
     q.add_argument("--before", type=_date_arg, metavar="YYYY-MM-DD")
     q.add_argument("--limit", type=_positive_int, default=8)
+    q.add_argument("--no-lessons", action="store_true",
+                   help="--records: leave the LESSONS block out (a replay's ablation arm)")
     q.add_argument("--json", action="store_true")
+    d = sub.add_parser("distill", help="group related bugs and draft lesson proposals")
+    d.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's bugs")
+    d.add_argument("--draft", action="store_true",
+                   help="draft each new group with one model call (needs ANTHROPIC_API_KEY in "
+                        "the environment) and store it under lessons/proposed/")
+    d.add_argument("--model", help="the model id (default: $CCA_DISTILL_MODEL or the "
+                                   "built-in default)")
+    d.add_argument("--json", action="store_true")
+    les = sub.add_parser("lesson", help="accept or retract a lesson (the owner's decision)")
+    les_sub = les.add_subparsers(dest="action", required=True)
+    acc = les_sub.add_parser("accept", help="turn a proposal into a lesson row and memo")
+    acc.add_argument("proposal", help="a proposal's lesson id or the path of its file")
+    acc.add_argument("--by", required=True, help="who accepts it")
+    ret = les_sub.add_parser("retract", help="append a lesson_retraction")
+    ret.add_argument("id", help="the lesson id, <project>:lesson:<12 hex>")
+    ret.add_argument("--reason", required=True)
+    ret.add_argument("--by", required=True, help="who retracts it")
     n = sub.add_parser("anchors", help="code anchors for a recall_records query or a row")
     how = n.add_mutually_exclusive_group(required=True)
     how.add_argument("--diff", action="store_true",
@@ -400,6 +477,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "retract-fp":
         return _retract_fp(a)
+
+    if a.cmd == "distill":
+        return _distill(a)
+
+    if a.cmd == "lesson":
+        return _lesson(a)
 
     if a.cmd == "resolve":
         from dataclasses import asdict

@@ -8,6 +8,27 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**Lessons: patterns from three or more past bugs, proposed by a model, accepted only by the
+owner, shown as context.** Session 5 of RE-call's audit-memory plan.
+
+* **Proposals.** `bugs distill [--repo R]` groups bug rows by repository, category and place (an
+  anchor's symbol or file; a backfilled row's files only when its commit touched at most three),
+  takes in every bug linked through `caused_by` (the effective one, `caused_by.jsonl` included),
+  and keeps groups of three or more, the most specific place first. It writes nothing without
+  `--draft`; with it, one Messages API call per new group drafts `rule` and `pattern`, and the
+  draft is stored under `lessons/proposed/` beside the ledger, never in it, in a memo or in
+  RE-call. A draft that tells auditors not to flag or report something is refused. The key comes
+  from `ANTHROPIC_API_KEY` only.
+* **Acceptance.** `bugs lesson accept <proposal> --by NAME` appends a `lesson` row and memo (the
+  golden lesson memo's format) after checking every member is a bug of the repository in the
+  ledger, every anchor names a place with no code sha, and the wording is a pattern to check.
+  `bugs lesson retract ID --reason TEXT --by NAME` appends a `lesson_retraction`.
+* **The brief.** Step 1 asks `recall_records` with `kinds: ["bug", "lesson"]`; `bugs prior
+  --records` prints a LESSONS block after PRIOR BUGS, at most three current lessons for the changed
+  code, each with the bugs it comes from, and nothing at all when no lesson applies. `--no-lessons`
+  leaves it out for a replay's ablation arm, and the run summary stores the count
+  (`lessons_block`). Unmeasured, context only, like the PRIOR BUGS block.
+
 **Prior bugs are matched by code anchor, and a false positive already judged on unchanged code is
 suppressed visibly.** Session 4 of RE-call's audit-memory plan (`docs/AUDIT_MEMORY_PLAN.md`
 there), built against saved `recall_records` answers until the live server is deployed.
