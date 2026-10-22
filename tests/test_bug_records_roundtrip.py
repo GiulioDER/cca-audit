@@ -34,7 +34,8 @@ SCHEMA = json.loads((FIXTURES / "recall_record.v1.json").read_text(encoding="utf
 MODIFIED = "2026-10-21T00:00:00Z"
 
 #: sha256 of each contract file as `git show <RECALL_CONTRACT_COMMIT>:<path>` printed it in
-#: RE-call on 2026-10-21, so an edit to a copy, or a re-pin without a re-copy, fails here.
+#: RE-call (taken 2026-10-21 at c526ced82; compared byte for byte with 20baf3a8 on 2026-10-22,
+#: all equal), so an edit to a copy, or a re-pin without a re-copy, fails here.
 PINNED = {
     "recall_record.v1.json": "b820181d015a3aec249d8e4952a62cb78eea8cddad1f6f44f1286d9d79dabc92",
     "anchor_vectors.json": "59ef286415d13654fd9c2220f983ce58e8b5e46dd8b93d3655b2d0a9e6cb6adb",
@@ -119,7 +120,7 @@ def test_contract_copies_match_pinned_recall_commit():
     `recall_record.v1.json`; failed at `assert got == PINNED`, the schema's digest differing
     (af2545e6... != b820181d...).
     """
-    assert records.RECALL_CONTRACT_COMMIT == "c526ced82c08ff59da3ce15599cde90aa5d7b0eb"
+    assert records.RECALL_CONTRACT_COMMIT == "20baf3a8b330d38887b7f8b3b75fd4ac5cd477c1"
     got = {p.relative_to(FIXTURES).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
            for p in FIXTURES.rglob("*") if p.is_file()}
     assert got == PINNED
