@@ -28,8 +28,17 @@ remains a refusal and is not rewritten as a successful local envelope. Local rec
 `local-prior.json`; hosted replies keep their separate `prior-records.json` contract and
 measurement counters. No local record authorizes false-positive suppression.
 
-For standalone Codex auditors, copy the packaged `codex/auditor-memory/SKILL.md` to
-`~/.codex/skills/auditor-memory/SKILL.md` and reference that skill in the local auditor
-dispatch guidance. CCA's regular installer continues to install its own CCA skill.
+For standalone auditors, copy the same packaged `codex/auditor-memory/SKILL.md` to both
+`~/.codex/skills/auditor-memory/SKILL.md` and `~/.claude/skills/auditor-memory/SKILL.md`.
+This is one portable skill resource despite its package directory name. Reference it in
+each client's auditor dispatch guidance. CCA's regular installer continues to install its own CCA skill.
 The explicit handoff is necessary for clean-checkout reviews because SubagentStart has
 no target-file prompt. The existing native hook can still add context for committed diffs.
+
+Claude Code and Codex use the same `cca_checks.bugs.store.write` and
+`cca_checks.bugs.records.render_memo`, not separate client serializers. The default shared
+ledger and memo root is `~/.claude/cca-bugs`. Agree any environment override in both clients.
+All record kinds use the pinned v1 contract and golden front matter; do not add client tags
+to those records or replace their actual run provenance. The same repository, target files,
+corpus and validity instant must yield the same brief in both clients. Hook event envelopes
+remain client-specific, outside the stored record and shared brief.
