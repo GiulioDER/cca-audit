@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from . import anchor_log
 from .model import BugRow, memo_filename
 from .records import Row, ledger_line, no_nul, one_line, render_memo
 
@@ -48,17 +49,21 @@ def existing_ids(ledger: Path) -> set[str]:
 
 
 def bug_rows(ledger: Path) -> list[BugRow]:
-    """Every bug row the ledger holds, with its effective caused_by; a line that does not read
-    is skipped, as above."""
+    """Every bug row with effective caused_by and recovered anchors; unreadable rows are skipped.
+
+    Neither derived field changes an authored ledger line.
+    """
     if not ledger.exists():
         return []
     annotations = caused_by_annotations(ledger.parent)
+    recovered = anchor_log.read(ledger.parent)
     rows = []
     for line in ledger.read_text(encoding="utf-8").splitlines():
         try:
             value = json.loads(line)
             if value.get("kind", "bug") == "bug":
-                rows.append(with_effective_caused_by(BugRow.from_json(value), annotations))
+                row = with_effective_caused_by(BugRow.from_json(value), annotations)
+                rows.append(anchor_log.apply(row, recovered))
         except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
             continue
     return rows

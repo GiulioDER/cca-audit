@@ -9,6 +9,19 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_git_environment(monkeypatch):
+    """Keep recovery fixtures independent of the caller's repository and Git configuration."""
+    for name in list(os.environ):
+        if name.startswith("GIT_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+
 
 def run_git(repo: Path, *args: str) -> str:
     return subprocess.run(

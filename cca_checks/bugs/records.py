@@ -445,12 +445,15 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
     The first line of an id wins, as in `store.existing_ids`. Lines are split on LF only, so a
     line separator inside a value written before `one_line` existed cannot split a row. A bug
     row carries its effective caused_by (`store.effective_caused_by`), so `to_record`, its memo
-    and the round-trip check all see a back-filled edge.
+    and the round-trip check all see a back-filled edge. Recovered anchors from `anchors.jsonl`
+    are projected through `anchor_log.apply`; authored anchors always take precedence.
     """
+    from . import anchor_log
     from .store import LEDGER, caused_by_annotations, with_effective_caused_by
 
     ledger = root / LEDGER
     annotations = caused_by_annotations(root)
+    recovered = anchor_log.read(root)
     lines = ledger.read_text(encoding="utf-8").split("\n") if ledger.exists() else []
     rows: dict[str, Row] = {}
     skipped: list[str] = []
@@ -463,7 +466,8 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
         except (ValueError, KeyError, TypeError, AttributeError, RecursionError) as exc:
             skipped.append(f"line {number}: {type(exc).__name__}: {exc}")
             continue
-        rows.setdefault(row_id, with_effective_caused_by(row, annotations))
+        effective = with_effective_caused_by(row, annotations)
+        rows.setdefault(row_id, anchor_log.apply(effective, recovered))
     return rows, skipped
 
 

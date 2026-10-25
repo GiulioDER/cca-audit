@@ -1,0 +1,104 @@
+{
+  "date": "2026-10-25",
+  "run_id": "20261025T194500Z-recovery-audit",
+  "baseline": "uncommitted recovery implementation over 0a19647a4766f7d5aeb3c0ad361e2d49f09e22ff",
+  "baseline_sha256": {
+    "cca_checks/bugs/anchor_log.py": {
+      "sha": "6262c21437950219161711449e31c5fe5034dc715c5877feb2e37472af2ce418"
+    },
+    "cca_checks/bugs/recover_anchors.py": {
+      "sha": "aa71d4e2dcbabb8a1019ce024e9e159ba79c3b25ae4745847e44e7f919ae1744"
+    },
+    "cca_checks/bugs/prior.py": {
+      "sha": "b862638703d777785b60f3fe8fe81ae43bb44c672c2a7e6842edfe29374ece11"
+    },
+    "cca_checks/bugs/records.py": {
+      "sha": "307b64e9529ccc522bbf4ded498779326cd759b98b6511c45af48624284a54e2"
+    },
+    "cca_checks/bugs/store.py": {
+      "sha": "e9b987a075dfea97652d7e33d2b1726d677ff097d224596680bedc6163731c7b"
+    }
+  },
+  "proofs": [
+    {
+      "finding": "FIX-001",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_archive_parent_links_are_refused",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-002",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_duplicate_symbol_repair_cannot_pin_other_occurrence",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-003",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_archive_read_is_bounded_even_with_stale_size",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-003",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_nonregular_metadata_is_rejected_before_read",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-004",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_prior_malformed_files_has_a_safe_public_result",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-005",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_malformed_run_has_a_structured_public_result",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-006",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_repository_case_preserves_authored_identity",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-008",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_each_archive_is_one_immutable_snapshot",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-009",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_repaired_symbol_hashes_are_not_recomputed",
+      "verdict": "RED"
+    },
+    {
+      "finding": "FIX-011",
+      "nodeid": "tests/test_anchor_recovery_audit.py::test_independent_annotation_sources_do_not_erase_each_other",
+      "verdict": "RED"
+    }
+  ],
+  "environment_isolation_proof": {
+    "nodeid": "tests/test_anchor_recovery_audit.py::test_git_fixture_clears_ambient_repository_overrides",
+    "mutation": "replace isolated_git_environment body with pass; inject GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE",
+    "red": "AssertionError, 1 failed in 11.22s",
+    "green": "1 passed in 9.41s"
+  },
+  "review_regressions": {
+    "agent": "security_audit as differential-review",
+    "status": "COMPLETE",
+    "regression_risk": [
+      "FIX-002 duplicate parent ambiguity",
+      "FIX-008 eager unrelated snapshots"
+    ],
+    "new_regression_red": {
+      "nodes": [
+        "test_duplicate_parent_cannot_transfer_a_unique_child",
+        "test_unneeded_archives_are_not_loaded"
+      ],
+      "result": "2 failed at intended assertions in 12.49s",
+      "baseline": "first L4 implementation"
+    }
+  },
+  "command": "python -X utf8 -B -m pytest tests/test_anchor_recovery_audit.py tests/test_anchor_recovery.py tests/test_bug_records_roundtrip.py tests/test_caused_by.py tests/test_bugs_prior.py -q",
+  "limits": [
+    "No remote or full suite tests",
+    "No VPS2 writes or refresh",
+    "Windows path-handle controls exercised locally; POSIX branch requires separate CI coverage"
+  ],
+  "green": "104 passed in 101.41s",
+  "static_checks": "ruff clean; pyright six changed production modules: 0 errors"
+}

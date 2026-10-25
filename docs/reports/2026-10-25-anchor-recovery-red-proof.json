@@ -1,0 +1,160 @@
+{
+  "date": "2026-10-25",
+  "baseline": "0a19647a4766f7d5aeb3c0ad361e2d49f09e22ff",
+  "proofs": [
+    {
+      "mutation": "apply-overlay",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "return replace(row, anchors=[Anchor(**a) for a in anchors]) if anchors else row",
+      "with": "return row",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_all_readers_rerender_and_roundtrip_preserve_the_ledger",
+        "tests/test_anchor_recovery.py::test_plan_is_idempotent_and_accounts_for_missing_archives"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "2 failed in 10.49s"
+    },
+    {
+      "mutation": "identity-binding",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "or repo.lower() != note[\"repo\"].lower()\n            or row.get(\"fix_commit\") != note[\"fix_commit\"]\n            or row.get(\"run_id\") != note[\"run_id\"]",
+      "with": "or False\n            or False\n            or False",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_annotation_is_bound_to_repo_fix_and_run"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "3 failed in 7.36s"
+    },
+    {
+      "mutation": "anchor-validation",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "if not (well_formed_file(a[\"file\"]) and well_formed_symbol(a[\"symbol\"])\n                and isinstance(sha, str) and _SHA.fullmatch(sha)):",
+      "with": "if False:",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_malformed_anchor_notes_grant_nothing"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "3 failed in 7.26s"
+    },
+    {
+      "mutation": "authored-precedence",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "if own:\n",
+      "with": "if False and own:\n",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_authored_anchors_always_win"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 6.79s"
+    },
+    {
+      "mutation": "torn-separator",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "if torn:\n",
+      "with": "if False and torn:\n",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_torn_append_is_separated_and_latest_valid_annotation_wins"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 6.78s"
+    },
+    {
+      "mutation": "last-annotation",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "out[value[\"bug_id\"]] = value",
+      "with": "out.setdefault(value[\"bug_id\"], value)",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_torn_append_is_separated_and_latest_valid_annotation_wins"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 8.16s"
+    },
+    {
+      "mutation": "audited-lines",
+      "production_file": "cca_checks/bugs/recover_anchors.py",
+      "replace": "snapshot = summary.get(\"base_tree\")",
+      "with": "snapshot = head",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_recovery_uses_input_tree_lines_and_hashes_the_landed_repair"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 9.36s"
+    },
+    {
+      "mutation": "landed-repair",
+      "production_file": "cca_checks/bugs/recover_anchors.py",
+      "replace": "if sha != symbol_sha(captured, symbol):",
+      "with": "if False:",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_recovery_refuses_a_different_landed_symbol"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 10.12s"
+    },
+    {
+      "mutation": "finding-membership",
+      "production_file": "cca_checks/bugs/recover_anchors.py",
+      "replace": "or file not in row.files",
+      "with": "or False",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_recovery_needs_finding_level_file_support"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 10.86s"
+    },
+    {
+      "mutation": "unsafe-line-fallback",
+      "production_file": "cca_checks/bugs/recover_anchors.py",
+      "replace": "snapshot = summary.get(\"base_tree\")",
+      "with": "snapshot = summary.get(\"base_tree\") or summary.get(\"base_commit\")",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_missing_input_snapshot_only_yields_file_context"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 10.45s"
+    },
+    {
+      "mutation": "ledger-rewrite",
+      "production_file": "cca_checks/bugs/anchor_log.py",
+      "replace": "root.mkdir(parents=True, exist_ok=True)\n    path = root / NAME",
+      "with": "root.mkdir(parents=True, exist_ok=True)\n    path = root / \"bugs.jsonl\"",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_all_readers_rerender_and_roundtrip_preserve_the_ledger"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed in 8.30s"
+    },
+    {
+      "mutation": "trusted-git",
+      "production_file": "cca_checks/bugs/recover_anchors.py",
+      "replace": "git = resolve_tool(\"git\", str(repo))",
+      "with": "git = \"git\"",
+      "nodes": [
+        "tests/test_anchor_recovery.py::test_untrusted_git_resolution_never_launches_a_command"
+      ],
+      "intended_assertion_failure": true,
+      "exit": 1,
+      "summary": "1 failed: DID NOT RAISE Unavailable"
+    }
+  ],
+  "command_prefix": [
+    "python",
+    "-B",
+    "-m",
+    "pytest"
+  ],
+  "command_suffix": [
+    "-q"
+  ]
+}
