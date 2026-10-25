@@ -1,6 +1,7 @@
 """Bounded local archive reads with every ancestor pinned and links refused."""
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from contextlib import contextmanager
@@ -84,7 +85,15 @@ def _opened(path: Path, directory: bool):
                 flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
                 if isdir:
                     flags |= os.O_DIRECTORY
-                fds.append(os.open(part, flags, dir_fd=fds[-1]))
+                try:
+                    fd = os.open(part, flags, dir_fd=fds[-1])
+                except OSError as exc:
+                    # O_NOFOLLOW reports ELOOP for a file symlink, but Linux
+                    # reports ENOTDIR with O_DIRECTORY. Both are unsafe paths.
+                    if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                        raise UnsafeArchive("linked or wrong-type archive component") from None
+                    raise
+                fds.append(fd)
             yield fds[-1]
         finally:
             for fd in reversed(fds):

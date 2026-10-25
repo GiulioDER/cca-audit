@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-25",
+  "baseline": "c66f1489cc8ad7a3c5c20e19912e268b8e0f2f65",
+  "failed_ci_run": 40230900203,
+  "failure": "All four Linux Python jobs failed test_archive_parent_links_are_refused with NotADirectoryError (ENOTDIR); each had 1580 passed and 1 skipped. Packaging passed.",
+  "production_symbol": "cca_checks.bugs.archive_io._opened",
+  "invariant": "ELOOP and ENOTDIR from no-follow component opens become UnsafeArchive, then public plan raises Unavailable. Ancestor descriptors close and unrelated OSError identities remain unchanged.",
+  "test_node": "tests/test_archive_io_refusals.py::test_posix_component_refusal_preserves_public_contract",
+  "baseline_red": "2 failed at intended domain-contract assertions, 1 permission-error control passed in 18.79s",
+  "green_command": "python -X utf8 -B -m pytest tests/test_archive_io_refusals.py tests/test_anchor_recovery_audit.py tests/test_anchor_recovery.py -q",
+  "green": "31 passed in 71.19s",
+  "static_checks": "Ruff clean on both changed Python files; Pyright archive_io.py zero errors",
+  "limits": "The OS adapter regression executes POSIX error handling on any host. Actual Linux no-follow behavior remains covered by the unchanged original CI regression. No VPS2 operation or test-expectation weakening."
+}
