@@ -38,6 +38,7 @@ import json
 import re
 from pathlib import Path
 
+from . import anchor_log
 from .model import _printable
 from .store import caused_by_annotations, effective_caused_by
 
@@ -54,7 +55,7 @@ _TIERS = ("proved", "historical")
 
 
 def load_rows(ledger: Path) -> list[dict]:
-    """The ledger's lines as objects; a bug row's `caused_by` is its effective one."""
+    """The ledger's objects with effective caused_by and recovered anchors on bug rows."""
     try:
         text = ledger.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
@@ -63,6 +64,10 @@ def load_rows(ledger: Path) -> list[dict]:
         annotations = caused_by_annotations(ledger.parent)
     except (OSError, UnicodeError):
         annotations = {}
+    try:
+        recovered = anchor_log.read(ledger.parent)
+    except (OSError, UnicodeError):
+        recovered = {}
     rows: list[dict] = []
     for line in text.splitlines():
         if not line.strip():
@@ -77,6 +82,9 @@ def load_rows(ledger: Path) -> list[dict]:
                 own = value.get("caused_by")
                 if own is None or isinstance(own, list):
                     value["caused_by"] = effective_caused_by(bug_id, own, annotations)
+                anchors = anchor_log.effective(value, recovered)
+                if anchors:
+                    value["anchors"] = anchors
             rows.append(value)
     return rows
 

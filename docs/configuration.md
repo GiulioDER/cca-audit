@@ -114,3 +114,27 @@ does not depend on these files). Files that may be created:
 | `AUDIT_DIFFREVIEW.md` | Differential review of the fix diff (Step 5.5) |
 | `FIXES.md` | Consolidated fix plan |
 | `EXECUTION_LOG.md` | Run history |
+
+## Recovering anchors from older runs
+
+Older ledger rows may have no finding anchors. Recover them from local archived runs and
+git objects with a dry run first:
+
+```bash
+python -m cca_checks.bugs.recover_anchors --repo /path/to/clone --json
+```
+
+Repeat `--repo` for each repository. The default archive is `recorded/` under the bug ledger
+directory; repeat `--archive /path/to/archive-parent` to inspect other captured runs. A row
+must match the archive's repository and run, and its finding file must appear in both L2
+and its own L4 fix. Symbol locations come from the archived input tree, with their hashes
+taken from the landed fix. The captured repair must match that landed symbol or file.
+Missing input trees can supply file context, but never a guessed symbol. Unsupported rows
+remain unanchored and appear in `unresolved` with a reason.
+
+After reviewing the plan, rerun with `--write` to append provenance-bearing annotations to
+`anchors.jsonl`, then run `python -m cca_checks bugs rerender --all` to update generated memos.
+Neither command rewrites the bug ledger. Record, prior-brief and bug-row readers share these rules:
+authored anchors take precedence, and an annotation must match the row's repository, fix
+commit, run and recorded files. Repeating recovery skips rows already carrying effective
+anchors. No network request, dependency installation or audited repository command is needed.
