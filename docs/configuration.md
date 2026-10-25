@@ -1,5 +1,8 @@
 # Configuration
 
+For local bug and accepted-lesson context in CCA and standalone Codex auditors, see
+[Local auditor memory](local-auditor-memory.md). This path works without a hosted serving upgrade.
+
 ## Claude Code Variant
 
 Configuration is done by editing the agent files directly in `.claude/agents/` and `.claude/commands/`.

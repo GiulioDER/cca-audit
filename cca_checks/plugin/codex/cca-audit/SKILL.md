@@ -109,6 +109,18 @@ It is context: it never tells an auditor to leave anything out. If the command e
 older installed cca_checks without `--records`), paste the empty form of the mode instead and
 continue; the canonical Step 1 quotes both forms.
 
+When DIFF mode has no hosted `recall_records` tool, use the local reader path instead of
+reading a missing `prior-records.json`. In HUNT mode use this local path instead of the
+legacy `bugs prior --files`, preserving the foreign-root guard above. Resolve the target
+Git root in both modes and run `python -P -m cca_checks bugs brief --root <target Git root>
+--out .claude/audits/runs/<run_id>/local-prior.json --files <targets>` once. Paste its complete
+output into every Layer 1 prompt. It includes relevant local bugs and owner-accepted lessons
+through the shared RE-call reader. An unavailable reader is explicit, distinct from no matches;
+if the command fails, retain that distinction and continue from current evidence. This local
+path makes no hosted trust claim and never manufactures `prior-records.json` or hides a hosted
+refusal. It supplies context only and cannot suppress findings or authorize prior-FP matches.
+The standalone `auditor-memory` skill documents this same handoff for other Codex auditor tasks.
+
 For each dispatched role:
 
 1. Build the prompt from the complete matching file in `references/agents/`, the shared target list,
