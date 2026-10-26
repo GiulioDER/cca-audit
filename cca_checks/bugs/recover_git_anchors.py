@@ -35,6 +35,10 @@ _QUOTED = re.compile(rf"`({_IDENTIFIER})(?:\([^`]*\))?`")
 _CALL = re.compile(rf"(?<![\w.])({_IDENTIFIER})\(")
 
 
+def _proof_path(file: str) -> bool:
+    return any(p in {"test", "tests", "fixtures", "examples"} for p in file.split("/"))
+
+
 def references(summary: str, files: list[str]) -> list[dict[str, str]]:
     """Unambiguous authored filename references, excluding trailing test/proof paths."""
     refs: dict[str, dict[str, str]] = {}
@@ -46,8 +50,7 @@ def references(summary: str, files: list[str]) -> list[dict[str, str]]:
             continue
         file = matches[0]
         prefix = summary[:match.start()].strip(" `*()[]:")
-        proof_path = any(p in {"test", "tests", "fixtures", "examples"} for p in file.split("/"))
-        if proof_path and prefix:
+        if _proof_path(file) and prefix:
             continue
         refs.setdefault(file, {"file": file, "token": token})
     return list(refs.values())
@@ -145,7 +148,7 @@ def symbol_references(row: BugRow, repo: Path) -> tuple[str, list[dict]]:
         if len(matches) != 1:
             continue
         found = matches[0]
-        if found["file"] not in row.files or found["file"].startswith(("tests/", "test/")):
+        if found["file"] not in row.files or _proof_path(found["file"]):
             continue
         refs.setdefault(found["file"], {**found, "token": token})
     return parent, list(refs.values())

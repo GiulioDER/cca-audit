@@ -12,6 +12,9 @@ its targets. Both clients run the same installed package once per shared scope:
 python -X utf8 -P -m cca_checks bugs brief --root <absolute target Git root> --files <root-relative targets>
 ```
 
+On Python 3.10, omit `-P` and run the installed command from a trusted directory;
+keep `--root` absolute. The child reader handles that version's import path separately.
+
 Paste the complete output into the auditor's launch prompt. For a CCA run, also pass
 `--out <absolute run directory>/local-prior.json` to preserve the dispatch receipt. This
 replaces the legacy bugs-only `bugs prior --files` brief when no hosted `recall_records`

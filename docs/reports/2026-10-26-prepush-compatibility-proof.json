@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-26",
+  "baseline": "3dae98c",
+  "red_command": "python -X utf8 -B -m pytest tests/test_git_anchor_recovery.py::test_proof_symbol_does_not_supply_production_file_context tests/test_local_auditor_brief.py::test_python310_reader_launch_avoids_unsupported_flag -q",
+  "red_result": "5 failed in their intended behavioral assertions",
+  "proofs": [
+    {
+      "node": "tests/test_git_anchor_recovery.py::test_proof_symbol_does_not_supply_production_file_context",
+      "parameters": ["pkg/tests", "pkg/test", "pkg/fixtures", "pkg/examples"],
+      "production_symbol": "cca_checks.bugs.recover_git_anchors.symbol_references",
+      "invariant": "A trailing proof symbol cannot supply a production finding's missing file anchor.",
+      "red_reason": "All four cases returned a proof-only file anchor instead of raising Unavailable.",
+      "repair": "Use the same proof-directory component guard in filename and symbol recovery."
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_python310_reader_launch_avoids_unsupported_flag",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "invariant": "The local reader launches on the supported Python 3.10 interpreter without -P.",
+      "red_reason": "An emulated Python 3.10 option rejection returned unavailable instead of the operator reader's ok result.",
+      "repair": "Pass -P only on Python 3.11 and later; remove the empty current-directory import path in the child before loading operator code.",
+      "boundary": "The option rejection is emulated, while the accepted child command runs a real interpreter and fixture reader. Native Python 3.10 remains a Linux CI check.",
+      "reference": "https://docs.python.org/3.11/using/cmdline.html#cmdoption-P"
+    }
+  ],
+  "green_command": "python -X utf8 -B -m pytest tests/test_git_anchor_recovery.py tests/test_local_auditor_brief.py -q",
+  "green_result": "38 passed in 77.38s",
+  "ruff_command": "python -m ruff check cca_checks tests",
+  "ruff_result": "All checks passed",
+  "pyright_command": "python -m pyright",
+  "pyright_result": "0 errors, 0 warnings, 0 informations",
+  "limits": "Focused serial Windows tests only. No full local suite, Linux run, VPS2 change, database change, or new native Claude model audit."
+}

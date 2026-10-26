@@ -20,7 +20,9 @@ MARKER = "<!-- recall:auditor-brief -->"
 MAX_OUTPUT = 32000  # worst-case JSON escaping of a bounded 4000-character block
 MAX_BLOCK = 4000
 _CHILD = """
-import json, sys, time
+import sys
+sys.path[:] = [p for p in sys.path if p]  # Python 3.10 equivalent of -P for -c
+import json, time
 from datetime import datetime, timezone
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
@@ -84,8 +86,9 @@ def build(root: Path, files: list[str]) -> dict[str, str]:
         if not (reader / "recall_hooks" / "auditor_brief.py").is_file():
             raise OSError("operator reader is not installed")
         anchors = _file_anchors(root, files)
+        safe_path = ["-P"] if sys.version_info >= (3, 11) else []
         completed = subprocess.run(
-            [sys.executable, "-P", "-X", "utf8", "-c", _CHILD, str(reader.resolve())],
+            [sys.executable, *safe_path, "-X", "utf8", "-c", _CHILD, str(reader.resolve())],
             input=json.dumps({"root": str(root.resolve()), "prompt": prompt, "anchors": anchors}),
             text=True, encoding="utf-8", capture_output=True, timeout=25,
             cwd=Path.home(), env=environment, check=False,

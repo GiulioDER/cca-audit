@@ -4,6 +4,9 @@
 operator-installed `recall_hooks.auditor_brief` reader for local CCA bugs and accepted lessons.
 This supports installations whose hosted RE-call server does not expose `recall_records`.
 It requires that shared reader and its RE-call Python dependencies. It does not upgrade them.
+On Python 3.10, omit the CLI's `-P` flag and run the installed command from a trusted
+directory with an absolute `--root`. The child reader omits that unsupported flag and
+removes the empty current-directory import path before loading the operator reader.
 
 The default reader lives at `~/.claude/hooks`. `CCA_RECALL_ROOT` can name another trusted
 installation, containing `recall_hooks/auditor_brief.py`. The child interpreter runs outside

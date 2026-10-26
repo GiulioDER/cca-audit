@@ -127,6 +127,23 @@ def test_unicode_block_is_delivered_without_json_expansion_loss(tmp_path, monkey
     assert result["block"].endswith("記憶" * 1000)
 
 
+def test_python310_reader_launch_avoids_unsupported_flag(tmp_path, monkeypatch):
+    """RED at 3dae98c: Python 3.10 rejects -P before the shared reader can run."""
+    _reader(tmp_path, monkeypatch, '''def build_block(*args, **kwargs):
+    return "<!-- recall:auditor-brief --> operator"
+''')
+    run = subprocess.run
+
+    def python310(command, **kwargs):
+        if "-P" in command:
+            return subprocess.CompletedProcess(command, 2, "", "Unknown option: -P")
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(local_brief.sys, "version_info", (3, 10, 0))
+    monkeypatch.setattr(subprocess, "run", python310)
+    assert local_brief.build(tmp_path, ["a.py"])["status"] == "ok"
+
+
 def test_real_reader_preserves_spaced_unicode_scope_on_clean_checkout(tmp_path, monkeypatch):
     """Optional integration: real operator reader, synthetic Git and native memos, no DB/network."""
     runtime = Path.home() / ".claude/hooks"

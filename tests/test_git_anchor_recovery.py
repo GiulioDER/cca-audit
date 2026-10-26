@@ -162,6 +162,22 @@ def test_named_changed_definition_supplies_file_context(tmp_path):
     assert anchor_log.valid(note)
 
 
+@pytest.mark.parametrize("directory", ["pkg/tests", "pkg/test", "pkg/fixtures", "pkg/examples"])
+def test_proof_symbol_does_not_supply_production_file_context(tmp_path, directory):
+    """RED at 3dae98c: a nested proof function became the production finding's anchor."""
+    from cca_checks.bugs.recover_anchors import Unavailable
+    from cca_checks.bugs.recover_git_anchors import recover
+
+    r, repo = git_history(tmp_path)
+    file = directory + "/test_pool.py"
+    summary = "repair lease handling; regression covered by `test_lease()`"
+    head = commit(repo, file, "def test_lease():\n    assert True\n",
+                  "fix: audit fixes from CCA\n\nP2:\n- BUG-1: " + summary + "\n")
+    r = replace(r, fix_commit=head, summary=summary, files=["pool.py", file])
+    with pytest.raises(Unavailable, match="unambiguous"):
+        recover(r, repo)
+
+
 @pytest.mark.parametrize("case", ["unchanged", "duplicated", "wrong_repo"])
 def test_named_definition_requires_a_unique_changed_target(tmp_path, case):
     from cca_checks.bugs.recover_anchors import Unavailable
