@@ -99,6 +99,7 @@ def test_install_writes_agents_commands_and_checkers(tmp_path):
     commands = {p.name for p in (tmp_path / ".claude" / "commands").glob("*.md")}
     tools = {p.name for p in (tmp_path / ".claude" / "tools").glob("*.py")}
     hooks = {p.name for p in (tmp_path / ".claude" / "hooks").glob("*.py")}
+    guides = {p.name for p in (tmp_path / ".claude" / "guides").glob("*.md")}
 
     assert agents == {name for name, _ in plugin.iter_agents()}
     assert commands == {name for name, _ in plugin.iter_commands()}
@@ -107,7 +108,9 @@ def test_install_writes_agents_commands_and_checkers(tmp_path):
     # delivers the layers but not the guard leaves them advisory again, which is
     # indistinguishable from a correct install until a layer is skipped.
     assert hooks == {name for name, _ in plugin.iter_hooks()}
-    assert result.installed == len(agents) + len(commands) + len(tools) + len(hooks)
+    # DOC-001 deliberately extends the installed resource set with its guide.
+    assert guides == {"qwen-tests.md"}
+    assert result.installed == len(agents) + len(commands) + len(tools) + len(hooks) + len(guides)
     assert result.backed_up == 0
 
 

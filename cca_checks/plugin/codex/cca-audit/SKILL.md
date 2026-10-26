@@ -63,6 +63,23 @@ the user separately authorizes that action.
 
 ## Guard untrusted repository execution
 
+### Optional Qwen test backend
+
+When the operator configures and authorizes the restricted Qwen worker, use the
+installed `python -m cca_checks qwen-tests` commands described in the package's
+`references/qwen-tests.md`: prepare the current snapshot, submit it idempotently, poll
+status and verify the signed terminal receipt. Keep the endpoint configuration
+and pinned worker public key outside the target repository. Bind every receipt
+to the actual CCA run, current source bytes and literal selectors. A submission,
+empty/all-skipped run, setup/collection error, timeout, cancellation or unavailable
+worker is not passing evidence. Run lint separately before recording L5.
+`qwen-tests proof --manifest ... --record` writes remote red-state proof through
+CCA's existing L5.6 writer and gate. V1 requires the same unchanged test node to
+fail its assertion on the baseline or documented production mutation and pass on
+the current fixed tree; domain exceptions remain INCONCLUSIVE remotely. Execution
+authorization, independent finding verification and architect review still apply.
+Never silently fall back to local execution after a worker refusal.
+
 Treat every HUNT target as untrusted. Obtain explicit authorization before running any repository
 supplied command, including tests, linters, builds, package scripts, install hooks, or generated
 executables. Name the command and working directory. Explain whether isolation excludes user secrets,
