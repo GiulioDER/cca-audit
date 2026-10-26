@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-26",
+  "baseline": "dd28c3eaf2c94c43acc79dc7aacd85e1d8c7dbf9",
+  "failed_ci_run": "https://github.com/GiulioDER/cca-audit/actions/runs/40295661450",
+  "ci_failure": "The same prose-contract assertion failed on Python 3.10, 3.11, 3.12 and 3.13. Each job otherwise passed 1620 tests with two skips. The package job passed.",
+  "node": "tests/test_pipeline_prose.py::test_codex_builds_the_brief_once_before_the_role_list",
+  "invariant": "Exactly one shared-brief policy must precede the per-role loop; extra fallback paragraphs do not change its scope.",
+  "repair": "Select the policy by its leading scope declaration within the pre-role section, instead of selecting the final paragraph. Retain the existing content and role-loop assertions.",
+  "mutations": [
+    {
+      "production_text": "cca_checks/plugin/codex/cca-audit/SKILL.md",
+      "method": "An external pytest plugin replaces the module's loaded CODEX text before the real test runs, without editing the production file.",
+      "change": "Move the complete Once per run policy paragraph after For each dispatched role:",
+      "red_result": "AssertionError: build the shared brief once before the per-role list; len(policies) was 0."
+    },
+    {
+      "production_text": "cca_checks/plugin/codex/cca-audit/SKILL.md",
+      "method": "The same external plugin duplicates the policy in the pre-role section.",
+      "change": "Insert a second complete Once per run policy immediately before For each dispatched role:",
+      "red_result": "AssertionError: build the shared brief once before the per-role list; len(policies) was 2."
+    }
+  ],
+  "green_command": "python -X utf8 -B -m pytest tests/test_pipeline_prose.py tests/test_codex_skill.py tests/test_codex_hunt_safety.py -q",
+  "green_result": "79 passed, 1 skipped in 12.22s",
+  "skip": "Existing Windows directory symlink privilege check",
+  "ruff_command": "python -m ruff check tests/test_pipeline_prose.py",
+  "ruff_result": "All checks passed",
+  "limits": "Focused serial Windows checks only. Full Linux validation runs in GitHub Actions. No production code, workflow instructions, VPS2 service, or database was changed by this repair."
+}

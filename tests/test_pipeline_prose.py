@@ -856,9 +856,17 @@ def test_hunt_skips_recall_cca():
 def test_codex_builds_the_brief_once_before_the_role_list():
     """Final review item 1. Invariant: the brief is built once per run, before the per role
     list, and goes into Layer 1 auditor prompts only. Red against fbe4dd8: the `bugs prior` and
-    `recall-cca` sentences sat inside item 1 of the per role list."""
-    brief = _codex_brief().strip().split("\n\n")[-1]
-    assert brief.startswith("Once per run, before dispatching Layer 1 auditors")
+    `recall-cca` sentences sat inside item 1 of the per role list.
+
+    Select the policy paragraph by its scope rather than its position among paragraphs:
+    a local fallback can follow it without moving the policy into the role loop. The
+    pre-role section must still contain exactly one once-per-run policy. Mutation proof
+    and CI reproduction are recorded in the 2026-10-26 pipeline-prose proof receipt.
+    """
+    policies = [paragraph for paragraph in _codex_brief().strip().split("\n\n")
+                if paragraph.startswith("Once per run, before dispatching Layer 1 auditors")]
+    assert len(policies) == 1, "build the shared brief once before the per-role list"
+    brief = policies[0]
     for needle in ("bugs prior --files", "recall-cca", "--records", "Layer 1 auditor prompts only",
                    "an empty block is pasted as is"):
         assert needle in " ".join(brief.split()), needle
