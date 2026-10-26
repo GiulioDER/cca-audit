@@ -223,6 +223,10 @@ def _run_tool(name: str, args: list[str]) -> int:
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "qwen-tests":
+        from .qwen_tests import main as qwen_main
+
+        return qwen_main(argv[1:])
     if argv and argv[0] in _TOOLS:
         # Before argparse, so every remaining word reaches the tool untouched, flags
         # included (`--json`, `--record`, `--proof A=B`, `--help`).
@@ -265,6 +269,10 @@ def main(argv=None) -> int:
     bg.add_argument("bugs_args", nargs=argparse.REMAINDER)
 
     pipeline_cli.add_parser(sub)
+
+    qt = sub.add_parser("qwen-tests", add_help=False,
+                        help="bounded remote tests and signed CCA proof receipts")
+    qt.add_argument("qwen_args", nargs=argparse.REMAINDER)
 
     a = p.parse_args(argv)
     if a.cmd == "bugs":

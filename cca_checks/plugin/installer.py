@@ -196,6 +196,11 @@ def _iter_tree(subdir: str):
     return walk(root, pathlib.PurePosixPath())
 
 
+def iter_guides():
+    """Yield packaged operator workflow guides."""
+    return _iter_resources("guides", "*.md")
+
+
 def iter_codex_skill():
     """Yield the complete Codex skill, reusing canonical pipeline resources.
 
@@ -209,6 +214,8 @@ def iter_codex_skill():
     pipeline = commands.get("audit-fix.md")
     if pipeline is not None:
         yield "references/pipeline.md", pipeline
+    for name, text in iter_guides():
+        yield f"references/{name}", text
     for name, text in iter_agents():
         yield f"references/agents/{name}", text
     for name, text in iter_tools():
@@ -464,6 +471,8 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
             "incomplete -- reinstall with `pip install --force-reinstall cca-audit`"
         )
 
+    guides_dir = root / ".claude" / "guides"
+    guides_dir.mkdir(parents=True, exist_ok=True)
     agents_dir = root / ".claude" / "agents"
     commands_dir = root / ".claude" / "commands"
     tools_dir = root / ".claude" / "tools"
@@ -478,6 +487,8 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
     # a pre-existing collision is harder to attribute.
     _warn_on_shadowing_agents(agents_dir, result)
 
+    for name, text in iter_guides():
+        _write(guides_dir / name, text, result)
     for name, text in agents:
         _write(agents_dir / name, text, result)
     for name, text in commands:
@@ -539,6 +550,7 @@ def install_codex(target: str | pathlib.Path | None = None) -> InstallResult:
         "SKILL.md",
         "agents/openai.yaml",
         "references/pipeline.md",
+        "references/qwen-tests.md",
         "scripts/cca_scorecard.py",
         "scripts/cca_tautology_check.py",
         *(f"references/agents/{name}" for name in _REQUIRED_CODEX_AGENT_FILES),

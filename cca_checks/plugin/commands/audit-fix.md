@@ -927,6 +927,23 @@ scope, whether it broke something adjacent, or whether the test that went green 
 
 ## Step 5: Layer 5 — Re-verify
 
+**Optional Qwen execution backend.** When the operator configures and authorizes
+the restricted worker, use `python -m cca_checks qwen-tests prepare`, `submit`,
+`status` and `verify` as documented in the installed `qwen-tests.md` guide
+(`.claude/guides/qwen-tests.md` for Claude, `references/qwen-tests.md` for Codex). Keep configuration
+and the pinned worker public key outside the audited repository. Use the actual
+open run ID, exact source snapshot and literal selectors. Verify the signed
+terminal receipt against the current working tree; submission or completion
+alone does not pass L5. Missing execution, zero collection, all-skipped tests,
+setup/collection errors, timeout and cancellation remain explicit gaps. Lint is
+a separate gate. For L5.6, `qwen-tests proof --manifest ... --record` reuses the
+normal proof writer and pipeline gate. V1 remote proof requires one unchanged
+test node to fail its assertion on the baseline or documented production mutation
+and pass on the current fixed tree. A domain exception remains INCONCLUSIVE in
+this backend. Repository execution authorization, independent finding verification
+and architect review still apply. Never fall back to local execution after a
+worker refusal without the applicable authorization and resource checks.
+
 1. `{TEST_CMD}` on the relevant test file(s) — baseline + any new P1 tests must pass.
 2. `{LINT_CMD}` on changed files — clean (pre-existing warnings OK).
 If tests fail: diagnose, fix, re-run. Do NOT skip. Each re-fix **increments `attempts[FIX-id]`** for the
