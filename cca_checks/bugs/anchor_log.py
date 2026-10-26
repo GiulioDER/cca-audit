@@ -5,6 +5,7 @@ always win. This log enriches bug context only; it cannot create an accepted FP.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -23,10 +24,15 @@ _SHA = re.compile(r"[0-9a-f]{64}")
 
 
 def valid(value: object) -> bool:
-    if not isinstance(value, dict) or type(value.get("v")) is not int or value["v"] != 1:
+    if (not isinstance(value, dict) or type(value.get("v")) is not int
+            or value["v"] not in (1, 2)):
         return False
     if not all(isinstance(value.get(k), str) and value[k]
-               for k in ("bug_id", "repo", "run_id", "fix_commit")):
+               for k in ("bug_id", "repo", "fix_commit")):
+        return False
+    run = value.get("run_id")
+    if ("run_id" not in value or not (isinstance(run, str) and run)
+            and not (value["v"] == 2 and run is None)):
         return False
     if not SHA40.fullmatch(value["fix_commit"]):
         return False
@@ -41,9 +47,41 @@ def valid(value: object) -> bool:
                 and isinstance(sha, str) and _SHA.fullmatch(sha)):
             return False
     provenance = value.get("provenance")
+    if value["v"] == 2:
+        return _git_provenance(value, provenance)
     return (isinstance(provenance, dict)
             and all(isinstance(provenance.get(k), str) and _SHA.fullmatch(provenance[k])
                     for k in ("meta_sha256", "summary_sha256", "l2_sha256", "l4_sha256")))
+
+
+def _git_provenance(note: dict, provenance: object) -> bool:
+    if not isinstance(provenance, dict):
+        return False
+    if (provenance.get("method") not in ("git-finding-file", "git-finding-symbol-file")
+            or provenance.get("commit") != note["fix_commit"]
+            or not isinstance(provenance.get("finding_id"), str)
+            or not provenance["finding_id"]
+            or type(provenance.get("ordinal")) is not int or provenance["ordinal"] < 1
+            or not all(isinstance(provenance.get(k), str) and _SHA.fullmatch(provenance[k])
+                       for k in ("message_sha256", "summary_sha256"))
+            or any(a["symbol"] is not None for a in note["anchors"])):
+        return False
+    refs = provenance.get("references")
+    if provenance["method"] == "git-finding-symbol-file":
+        if (not isinstance(provenance.get("parent"), str)
+                or not SHA40.fullmatch(provenance["parent"])
+                or not isinstance(refs, list)
+                or not all(isinstance(r, dict) and isinstance(r.get("symbol"), str)
+                           and well_formed_symbol(r["symbol"])
+                           and r.get("before_sha") != r.get("after_sha")
+                           and all(k in r and (r[k] is None or isinstance(r[k], str)
+                                              and _SHA.fullmatch(r[k]))
+                                   for k in ("before_sha", "after_sha")) for r in refs)):
+            return False
+    return (isinstance(refs, list) and len(refs) == len(note["anchors"])
+            and all(isinstance(r, dict) and well_formed_file(r.get("file"))
+                    and isinstance(r.get("token"), str) and r["token"] for r in refs)
+            and {r["file"] for r in refs} == {a["file"] for a in note["anchors"]})
 
 
 def read(root: Path) -> dict[str, dict]:
@@ -76,6 +114,20 @@ def effective(row: dict, annotations: dict[str, dict]) -> list:
             or row.get("fix_commit") != note["fix_commit"]
             or row.get("run_id") != note["run_id"]):
         return []
+    if note["v"] == 2:
+        provenance = note["provenance"]
+        summary = row.get("summary")
+        if not isinstance(summary, str):
+            return []
+        try:
+            summary_sha = hashlib.sha256(summary.encode("utf-8")).hexdigest()
+        except UnicodeError:
+            return []
+        if (summary_sha != provenance["summary_sha256"]
+                or row.get("finding_id") != provenance["finding_id"]
+                or type(row.get("ordinal", 1)) is not int
+                or row.get("ordinal", 1) != provenance["ordinal"]):
+            return []
     files = row.get("files")
     if (not isinstance(files, list) or not all(isinstance(f, str) for f in files)
             or not all(a["file"] in files for a in note["anchors"])):

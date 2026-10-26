@@ -1,0 +1,258 @@
+"""Recover file context from a finding's own immutable Git commit bullet.
+
+Unlike archived-run recovery, this supports legacy rows with a null run ID.
+No run, anchor symbol, line, severity or proof is inferred. A file, or a uniquely
+changed Python definition in it, must be named in the exact original finding
+bullet, belong to that row, change in the fix, and be a regular UTF-8 Git blob.
+Ambiguous basenames, definitions and proof-only test
+references grant no anchor. Only anchors.jsonl is appended by --write.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+from collections import Counter
+from dataclasses import asdict
+from functools import lru_cache
+from pathlib import Path
+
+from . import anchor_log, records
+from .anchors import code_sha, normalize, resolve_symbols, well_formed_file
+from .gitread import normalize_remote
+from .model import SHA40, BugRow
+from .parse import parse_message
+from .recover_anchors import Report, Unavailable, _blob, _git
+from .store import bugs_dir
+
+_FILE = re.compile(
+    r"(?<![\w/\\])(?:[\w.-]+[/\\])*[\w.-]+\.(?:pyi?|sh|ps1|md|ya?ml|json|toml|[jt]sx?|sql|rs|txt)"
+    r"(?::[0-9]+)?(?![\w./\\-])"
+)
+_IDENTIFIER = r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"
+_QUOTED = re.compile(rf"`({_IDENTIFIER})(?:\([^`]*\))?`")
+_CALL = re.compile(rf"(?<![\w.])({_IDENTIFIER})\(")
+
+
+def _proof_path(file: str) -> bool:
+    return any(p in {"test", "tests", "fixtures", "examples"} for p in file.split("/"))
+
+
+def references(summary: str, files: list[str]) -> list[dict[str, str]]:
+    """Unambiguous authored filename references, excluding trailing test/proof paths."""
+    refs: dict[str, dict[str, str]] = {}
+    for match in _FILE.finditer(summary):
+        token = match.group().split(":", 1)[0].replace("\\", "/")
+        matches = [f for f in files if well_formed_file(f)
+                   and (f == token or f.endswith("/" + token))]
+        if len(matches) != 1:
+            continue
+        file = matches[0]
+        prefix = summary[:match.start()].strip(" `*()[]:")
+        if _proof_path(file) and prefix:
+            continue
+        refs.setdefault(file, {"file": file, "token": token})
+    return list(refs.values())
+
+
+@lru_cache(maxsize=128)
+def _commit(repo: Path, sha: str) -> tuple[bytes, frozenset[str]]:
+    raw = _git(repo, "cat-file", "commit", sha)
+    if len(raw) > 2 * 1024 * 1024 or b"\n\n" not in raw:
+        raise Unavailable("commit message unavailable or oversized")
+    headers, message = raw.split(b"\n\n", 1)
+    if sum(line.startswith(b"parent ") for line in headers.splitlines()) != 1:
+        raise Unavailable("fix does not have one unambiguous parent")
+    changed = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", sha)
+    return message, frozenset(p.decode("utf-8") for p in changed.split(b"\0") if p)
+
+
+def _definitions(source: str) -> dict[str, str | None]:
+    spans = resolve_symbols(source)
+    counts = Counter(s.symbol.split("#", 1)[0] for s in spans)
+    lines = normalize(source).split("\n")
+    result: dict[str, str | None] = {}
+    for span in spans:
+        parts = span.symbol.split("#", 1)[0].split(".")
+        if any(counts[".".join(parts[:i])] > 1 for i in range(1, len(parts) + 1)):
+            result[span.symbol] = None
+            continue
+        result[span.symbol] = code_sha("\n".join(lines[span.start_line - 1:span.end_line]))
+    return result
+
+
+def _tree(repo: Path, sha: str, files: list[str]) -> dict[str, str | None]:
+    """Regular, bounded blobs for the selected paths, in one Git object listing."""
+    entries = _git(repo, "ls-tree", "-l", "-z", sha, "--", *files)
+    result = {}
+    for entry in entries.split(b"\0"):
+        if not entry:
+            continue
+        metadata, name = entry.split(b"\t", 1)
+        mode, kind, blob, size = metadata.split()
+        name = name.decode("utf-8")
+        result[name] = None
+        if (mode in (b"100644", b"100755") and kind == b"blob"
+                and int(size) <= 2 * 1024 * 1024):
+            result[name] = blob.decode("ascii")
+    return result
+
+
+def _definition_blob(repo: Path, blob: str) -> dict[str, str | None]:
+    if not SHA40.fullmatch(blob):
+        raise Unavailable("invalid source blob")
+    return _definitions(_git(repo, "cat-file", "blob", blob).decode("utf-8"))
+
+
+@lru_cache(maxsize=8)
+def _catalog(repo: Path, sha: str) -> tuple[str, tuple[dict, ...]]:
+    """Changed unambiguous definitions in regular Python files at one immutable fix."""
+    _, changed = _commit(repo, sha)
+    parent = _git(repo, "rev-parse", sha + "^").decode().strip()
+    files = sorted(f for f in changed if f.endswith(".py") and well_formed_file(f))
+    if not files:
+        return parent, ()
+    landed = _tree(repo, sha, files)
+    prior = _tree(repo, parent, files)
+    result = []
+    for file in files:
+        landed_blob, prior_blob = landed.get(file), prior.get(file)
+        if not landed_blob or file in prior and not prior_blob:
+            continue
+        try:
+            before = _definition_blob(repo, prior_blob) if prior_blob else {}
+            after = _definition_blob(repo, landed_blob)
+        except (Unavailable, SyntaxError, UnicodeError):
+            continue
+        for symbol in before.keys() | after.keys():
+            if (symbol in before and before[symbol] is None
+                    or symbol in after and after[symbol] is None):
+                continue
+            if before.get(symbol) != after.get(symbol):
+                result.append({"file": file, "symbol": symbol,
+                               "before_sha": before.get(symbol), "after_sha": after.get(symbol)})
+    return parent, tuple(result)
+
+
+def symbol_references(row: BugRow, repo: Path) -> tuple[str, list[dict]]:
+    """Quoted identifiers and explicit calls locate only one changed definition each."""
+    tokens = {m.group(1) for pattern in (_QUOTED, _CALL) for m in pattern.finditer(row.summary)}
+    if not tokens:
+        return "", []
+    parent, catalog = _catalog(repo, row.fix_commit)
+    refs = {}
+    for token in sorted(tokens):
+        matches = [r for r in catalog if r["symbol"] == token
+                   or "." not in token and r["symbol"].rsplit(".", 1)[-1] == token]
+        if len(matches) != 1:
+            continue
+        found = matches[0]
+        if found["file"] not in row.files or _proof_path(found["file"]):
+            continue
+        refs.setdefault(found["file"], {**found, "token": token})
+    return parent, list(refs.values())
+
+
+def recover(row: BugRow, repo: Path) -> dict:
+    """One finding-bound file annotation, or an explicit reason to abstain."""
+    identity = normalize_remote(_git(repo, "remote", "get-url", "origin").decode().strip())
+    return _recover(row, repo, identity)
+
+
+def _recover(row: BugRow, repo: Path, identity: str | None) -> dict:
+    if not isinstance(row.repo, str) or not identity or identity.lower() != row.repo.lower():
+        raise Unavailable("local repository identity differs")
+    if not isinstance(row.fix_commit, str) or not SHA40.fullmatch(row.fix_commit):
+        raise Unavailable("invalid fix commit")
+    if (not isinstance(row.summary, str) or not isinstance(row.finding_id, str)
+            or not isinstance(row.files, list) or not all(isinstance(f, str) for f in row.files)):
+        raise Unavailable("invalid finding summary or file identity")
+    message, changed = _commit(repo, row.fix_commit)
+    try:
+        body = message.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Unavailable("commit message is not UTF-8") from None
+    bullets = [b for b in parse_message(body)
+               if b.finding_id == row.finding_id and b.summary == row.summary]
+    if len(bullets) != 1:
+        raise Unavailable("exact finding bullet is absent or ambiguous")
+    refs = references(row.summary, row.files)
+    parent = ""
+    if not refs:
+        parent, refs = symbol_references(row, repo)
+    if not refs:
+        raise Unavailable("finding has no unambiguous source file reference")
+    anchors = []
+    for ref in refs:
+        file = ref["file"]
+        if file not in changed:
+            raise Unavailable("finding file was not changed by the fix")
+        entry = _git(repo, "ls-tree", "-z", row.fix_commit, "--", file).split(b"\0")[0]
+        if not entry.startswith((b"100644 blob ", b"100755 blob ")):
+            raise Unavailable("finding file is not a regular Git blob")
+        anchors.append({"file": file, "symbol": None,
+                        "code_sha": code_sha(_blob(repo, row.fix_commit, file))})
+    note = {"v": 2, "bug_id": row.id, "repo": row.repo, "run_id": row.run_id,
+            "fix_commit": row.fix_commit, "anchors": anchors,
+            "provenance": {"method": "git-finding-symbol-file" if parent else "git-finding-file",
+                           "commit": row.fix_commit,
+                           "message_sha256": hashlib.sha256(message).hexdigest(),
+                           "summary_sha256": hashlib.sha256(row.summary.encode()).hexdigest(),
+                           "finding_id": row.finding_id, "ordinal": row.ordinal,
+                           "references": refs}}
+    if parent:
+        note["provenance"]["parent"] = parent
+    if not anchor_log.valid(note):
+        raise Unavailable("derived Git annotation is invalid")
+    return note
+
+
+def plan(root: Path, repos: list[Path]) -> Report:
+    """Dry-run effective unanchored bug rows; preserve individual refusal reasons."""
+    rows, errors = records.read_ledger(root)
+    if errors:
+        raise Unavailable("ledger contains unreadable rows")
+    clones = {}
+    for repo in repos:
+        identity = normalize_remote(_git(repo, "remote", "get-url", "origin").decode().strip())
+        if identity:
+            clones[identity.lower()] = repo
+    report = Report()
+    for row in rows.values():
+        if not isinstance(row, BugRow):
+            continue
+        if row.anchors:
+            report.already_anchored += 1
+            continue
+        repo = clones.get(row.repo.lower()) if isinstance(row.repo, str) else None
+        if repo is None:
+            report.unresolved[row.id] = "no matching local repository"
+            continue
+        try:
+            report.annotations.append(_recover(row, repo, row.repo))
+        except (OSError, ValueError, RecursionError) as exc:
+            report.unresolved[row.id] = str(exc)
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo", type=Path, action="append", required=True)
+    parser.add_argument("--write", action="store_true")
+    args = parser.parse_args(argv)
+    try:
+        report = plan(bugs_dir(), args.repo)
+        if args.write:
+            report.written = anchor_log.append(bugs_dir(), report.annotations)
+    except (OSError, ValueError, RecursionError) as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
+    data = asdict(report)
+    data["reasons"] = dict(Counter(report.unresolved.values()))
+    print(json.dumps(data, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

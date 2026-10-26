@@ -1,0 +1,93 @@
+{
+  "date": "2026-10-25",
+  "scope": "focused serial local adapter and optional installed-reader integration",
+  "proofs": [
+    {
+      "node": "tests/test_local_auditor_brief.py::test_cli_delivers_both_kinds_with_explicit_local_provenance",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "mutation": {
+        "from": "block = build_block(request['root'], request['prompt'], deadline=time.monotonic() + 20)",
+        "to": "block = build_block(request['root'], request['prompt'], deadline=time.monotonic() + 20).split('LESSON')[0]"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_audited_checkout_and_pythonpath_cannot_supply_reader",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "mutation": {
+        "from": "str(reader.resolve())]",
+        "to": "str(root.resolve())]"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_scope_is_data_and_root_is_absolute",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "mutation": {
+        "from": "anchors.append({\"file\": file, \"symbol\": None, \"code_sha\": digest})",
+        "to": "anchors.append({\"file\": \"wrong.py\", \"symbol\": None, \"code_sha\": digest})"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_empty_and_unavailable_are_distinct",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "mutation": {
+        "from": "return {\"status\": \"unavailable\", \"block\": \"\", \"reason\": type(exc).__name__}",
+        "to": "return {\"status\": \"empty\", \"block\": \"\", \"reason\": type(exc).__name__}"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_timeout_is_explicit_and_fail_open",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "mutation": {
+        "from": "return {\"status\": \"unavailable\", \"block\": \"\", \"reason\": type(exc).__name__}",
+        "to": "return {\"status\": \"empty\", \"block\": \"\", \"reason\": type(exc).__name__}"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_malformed_reader_output_is_unavailable",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "mutation": {
+        "from": "if value[\"status\"] == \"ok\" and MARKER not in value[\"block\"]:",
+        "to": "if False:"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_cli_delivers_both_kinds_with_explicit_local_provenance",
+      "production_symbol": "cca_checks.bugs.__main__._brief",
+      "mutation": {
+        "from": "a.out.write_text(json.dumps(result, ensure_ascii=True)",
+        "to": "a.out.write_text(json.dumps({**result, \"block\": \"\"}, ensure_ascii=True)"
+      },
+      "behavioral_red": true
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_unicode_block_is_delivered_without_json_expansion_loss",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "baseline": "staged initial adapter, before structured scope and JSON size repair",
+      "behavioral_red": true,
+      "baseline_sha256": "785e7fe880fe8be38ecea75eb872d53ddfd843d7391589da6ba57dc0277beb18",
+      "baseline_artifact": "initial adapter wheel, preserved in the local deployment receipt"
+    },
+    {
+      "node": "tests/test_local_auditor_brief.py::test_real_reader_preserves_spaced_unicode_scope_on_clean_checkout",
+      "production_symbol": "cca_checks.bugs.local_brief.build",
+      "baseline": "staged initial adapter, before structured scope and JSON size repair",
+      "behavioral_red": true,
+      "baseline_sha256": "785e7fe880fe8be38ecea75eb872d53ddfd843d7391589da6ba57dc0277beb18",
+      "baseline_artifact": "initial adapter wheel, preserved in the local deployment receipt"
+    }
+  ],
+  "green": {
+    "passed": 52,
+    "skipped": 1,
+    "skip_reason": "Windows directory symlink privilege unavailable in existing installer test",
+    "ruff": "clean",
+    "pyright": "clean"
+  },
+  "limits": "No full suite, Linux CI, hosted structured-record API, or complete CCA audit pipeline was run."
+}

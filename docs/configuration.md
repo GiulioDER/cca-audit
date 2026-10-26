@@ -1,5 +1,8 @@
 # Configuration
 
+For local bug and accepted-lesson context in CCA and standalone Codex auditors, see
+[Local auditor memory](local-auditor-memory.md). This path works without a hosted serving upgrade.
+
 ## Claude Code Variant
 
 Configuration is done by editing the agent files directly in `.claude/agents/` and `.claude/commands/`.
@@ -138,3 +141,28 @@ Neither command rewrites the bug ledger. Record, prior-brief and bug-row readers
 authored anchors take precedence, and an annotation must match the row's repository, fix
 commit, run and recorded files. Repeating recovery skips rows already carrying effective
 anchors. No network request, dependency installation or audited repository command is needed.
+
+### Older findings without run IDs
+
+Some historical rows were parsed from fix commit messages and have no run ID. Inspect a
+separate Git evidence plan with:
+
+```bash
+python -m cca_checks.bugs.recover_git_anchors --repo /path/to/clone
+```
+
+Repeat `--repo` for each local clone. Recovery requires the exact finding ID and summary in
+that commit's own parsed bullet. A source filename must be unambiguous within the row's files
+and actually changed by the fix. Alternatively, an explicitly quoted Python definition or
+function call must identify one changed definition. Duplicate definition families are refused.
+Trailing test and fixture references cannot supply a production location.
+
+These annotations provide file context only. Their hashes come from regular UTF-8 blobs at
+the recorded fix commit, never the working tree. Version 2 provenance binds the original null
+or non-null run ID, finding, ordinal and summary to the commit message hash and explicit
+references. Definition-based references also retain the parent and both definition hashes.
+The historical evidence tier is preserved; this does not establish a verified false positive.
+
+After reviewing the JSON plan, add `--write` to append supported annotations, then run
+`python -m cca_checks bugs rerender --all`. Existing annotations and authored anchors retain
+precedence. No ledger row, missing run ID, severity or proof flag is rewritten.

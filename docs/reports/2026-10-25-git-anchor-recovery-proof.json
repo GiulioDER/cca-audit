@@ -1,0 +1,189 @@
+{
+  "date": "2026-10-25",
+  "baseline": "af3f6bfdbae68790f3ce720fb0b7bec630c5278c",
+  "initial_red": {
+    "node": "tests/test_git_anchor_recovery.py::test_null_run_annotation_reaches_all_readers_without_ledger_edits",
+    "result": "1 intended AssertionError in 9.43s",
+    "symbol": "anchor_log.valid",
+    "reason": "version 1 rejects the real null run identity"
+  },
+  "mutation_red_proofs": [
+    {
+      "mutation": "finding_binding",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/anchor_log.py",
+          "old": "if note[\"v\"] == 2:",
+          "new": "if False:"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_legacy_annotation_stays_bound_to_the_finding",
+        "tests/test_git_anchor_recovery.py::test_legacy_summary_with_surrogate_is_refused"
+      ],
+      "failed": 5,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "provenance",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/anchor_log.py",
+          "old": "if (\"run_id\" not in value or not (isinstance(run, str) and run)",
+          "new": "if (False and (\"run_id\" not in value or not (isinstance(run, str) and run))"
+        },
+        {
+          "file": "cca_checks/bugs/anchor_log.py",
+          "old": "and not (value[\"v\"] == 2 and run is None)):",
+          "new": "and not (value[\"v\"] == 2 and run is None)):"
+        },
+        {
+          "file": "cca_checks/bugs/anchor_log.py",
+          "old": "return _git_provenance(value, provenance)",
+          "new": "return True"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_legacy_provenance_is_required"
+      ],
+      "failed": 6,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "file_attribution",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "refs = references(row.summary, row.files)",
+          "new": "refs = [{\"file\": row.files[0], \"token\": row.files[0]}]"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_git_bullet_refuses_unsupported_locations[no_file]",
+        "tests/test_git_anchor_recovery.py::test_git_bullet_refuses_unsupported_locations[ambiguous_file]",
+        "tests/test_git_anchor_recovery.py::test_git_bullet_refuses_unsupported_locations[unchanged_file]",
+        "tests/test_git_anchor_recovery.py::test_git_bullet_refuses_unsupported_locations[proof_file]"
+      ],
+      "failed": 4,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "bullet_identity",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "b.finding_id == row.finding_id and b.summary == row.summary",
+          "new": "b.finding_id == row.finding_id"
+        },
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "if len(bullets) != 1:",
+          "new": "if not bullets:"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_git_bullet_refuses_unsupported_locations[wrong_bullet]",
+        "tests/test_git_anchor_recovery.py::test_git_bullet_refuses_unsupported_locations[duplicate_bullet]"
+      ],
+      "failed": 2,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "symbol_identity",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "if before.get(symbol) != after.get(symbol):",
+          "new": "if True:"
+        },
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "if (symbol in before and before[symbol] is None\n                    or symbol in after and after[symbol] is None):",
+          "new": "if False:"
+        },
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "if not isinstance(row.repo, str) or not identity or identity.lower() != row.repo.lower():",
+          "new": "if False:"
+        },
+        {
+          "file": "cca_checks/bugs/anchor_log.py",
+          "old": "and r.get(\"before_sha\") != r.get(\"after_sha\")",
+          "new": "and True"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_named_definition_requires_a_unique_changed_target"
+      ],
+      "failed": 3,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "source_recovery",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "refs = references(row.summary, row.files)",
+          "new": "refs = []"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_git_bullet_yields_only_authored_file_context",
+        "tests/test_git_anchor_recovery.py::test_git_plan_is_idempotent_and_preserves_evidence"
+      ],
+      "failed": 2,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "symbol_recovery",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "parent, refs = symbol_references(row, repo)",
+          "new": "parent, refs = \"\", []"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_named_changed_definition_supplies_file_context"
+      ],
+      "failed": 1,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "idempotence",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "if row.anchors:",
+          "new": "if False and row.anchors:"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_git_plan_is_idempotent_and_preserves_evidence"
+      ],
+      "failed": 1,
+      "result": "intended behavioral failure"
+    },
+    {
+      "mutation": "malformed_finding",
+      "edits": [
+        {
+          "file": "cca_checks/bugs/recover_git_anchors.py",
+          "old": "if (not isinstance(row.summary, str) or not isinstance(row.finding_id, str)\n            or not isinstance(row.files, list) or not all(isinstance(f, str) for f in row.files)):",
+          "new": "if False:"
+        }
+      ],
+      "nodes": [
+        "tests/test_git_anchor_recovery.py::test_malformed_git_finding_has_a_domain_refusal"
+      ],
+      "failed": 1,
+      "result": "intended behavioral failure"
+    }
+  ],
+  "coupled_defenses": "Unchanged-definition admission is rejected both by the catalog and provenance validator. Both checks were deliberately bypassed to prove that negative case.",
+  "green_command": "python -X utf8 -B -m pytest tests/test_git_anchor_recovery.py tests/test_anchor_recovery.py tests/test_anchor_recovery_audit.py tests/test_archive_io_refusals.py tests/test_bug_records_roundtrip.py tests/test_bugs_prior.py tests/test_caused_by.py -q",
+  "green": "132 passed in 154.57s",
+  "ruff": "both changed production modules and new test file clean",
+  "pyright": "both changed production modules zero errors",
+  "limits": "Focused Windows verification; full suite and Linux execution not performed in this follow-up. No VPS2 execution."
+}

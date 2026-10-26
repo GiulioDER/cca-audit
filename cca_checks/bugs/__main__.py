@@ -1,5 +1,6 @@
 """python -m cca_checks.bugs backfill --repo PATH [--repo PATH ...] [--ledger PATH[=OWNER/NAME]]
 python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
+python -m cca_checks.bugs brief [--root PATH] [--files F ...] [--out FILE] [--json]
 python -m cca_checks.bugs prior --records FILE [--code FILE] [--no-lessons] [--repo-name OWNER/NAME]
     [--root PATH] [--before YYYY-MM-DD] [--limit N] [--json]
 python -m cca_checks.bugs distill [--repo OWNER/NAME] [--draft] [--model ID] [--json]
@@ -136,6 +137,20 @@ def _prior(a: argparse.Namespace) -> int:
         print(json.dumps({"repo": repo, "reason": reason, "rows": out}, indent=2))
     else:
         _emit(prior.render(selected, reason))
+    return 0
+
+
+def _brief(a: argparse.Namespace) -> int:
+    from . import local_brief
+
+    result = local_brief.build(a.root, a.files)
+    if a.out is not None:
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        a.out.write_text(json.dumps(result, ensure_ascii=True) + "\n", encoding="utf-8")
+    if a.json:
+        print(json.dumps(result, ensure_ascii=True))
+    else:
+        _emit(local_brief.render(result))
     return 0
 
 
@@ -394,6 +409,13 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--no-lessons", action="store_true",
                    help="--records: leave the LESSONS block out (a replay's ablation arm)")
     q.add_argument("--json", action="store_true")
+    brief = sub.add_parser("brief", help="local bugs and accepted lessons via the shared reader")
+    brief.add_argument("--root", type=Path, default=Path("."))
+    brief.add_argument("--files", nargs="+", default=[],
+                       help="files relative to --root; otherwise the committed diff")
+    brief.add_argument("--json", action="store_true")
+    brief.add_argument("--out", type=Path,
+                       help="save the local status and block for this auditor dispatch")
     d = sub.add_parser("distill", help="group related bugs and draft lesson proposals")
     d.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's bugs")
     d.add_argument("--draft", action="store_true",
@@ -468,6 +490,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "prior":
         return _prior(a)
+    if a.cmd == "brief":
+        return _brief(a)
 
     if a.cmd == "anchors":
         return _anchors(a)
