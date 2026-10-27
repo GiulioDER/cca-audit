@@ -249,3 +249,28 @@ def _no_remote_semgrep_unless_asked(monkeypatch):
     """
     if os.environ.get("CCA_TESTS_USE_REMOTE") != "1":
         monkeypatch.delenv("CCA_REMOTE_SEMGREP", raising=False)
+
+
+@pytest.fixture
+def east_of_utc_late_evening(monkeypatch):
+    """The clock of a host two hours east of UTC, stopped at 2026-10-22 23:30 UTC, which is
+    already 01:30 on 2026-10-23 there: the UTC date and the host's local date differ.
+
+    Patches the `datetime` that `cca_checks.bugs.envelope` reads; `raising=False` so a test can
+    run against code that predates that import and fail in its own assertion.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from cca_checks.bugs import envelope
+
+    instant = datetime(2026, 10, 22, 23, 30, tzinfo=timezone.utc)
+    host = timezone(timedelta(hours=2))
+
+    class HostClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz is not None else \
+                instant.astimezone(host).replace(tzinfo=None)
+
+    monkeypatch.setattr(envelope, "datetime", HostClock, raising=False)
+    return instant

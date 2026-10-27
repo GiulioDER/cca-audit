@@ -164,6 +164,50 @@ def test_an_expired_record_does_not_suppress():
     assert got.action == "attach"
 
 
+def test_a_record_still_suppresses_on_its_valid_until_day():
+    """NUM-001, 2026-10-27. Invariant: as in RE-call, a date-only `valid_until` holds through
+    the end of that day, so the record suppresses on the day and not after it.
+
+    Red 2026-10-27 against the pre-fix `envelope.expired` (`<=`, be13f2f):
+    `tests/test_match_fp.py::test_a_record_still_suppresses_on_its_valid_until_day` failed at
+    the first `assert got.action == "suppress"` (attach, reason `expired 2026-10-22`).
+    """
+    [got] = run(answer=edited(valid_until="2026-10-22"))
+    assert got.action == "suppress"
+    [got] = run(answer=edited(valid_until="2026-10-21"))
+    assert (got.action, got.reasons[0]) == ("attach", "expired 2026-10-21")
+
+
+def test_the_matcher_judges_expiry_on_the_utc_date(east_of_utc_late_evening):
+    """NUM-001, 2026-10-27. Invariant: with no `today` given, the matcher's date is the UTC
+    date, not the host's, which is already the next day on this clock.
+
+    Red 2026-10-27 against be13f2f (`date.today()`, the host's real local date):
+    `tests/test_match_fp.py::test_the_matcher_judges_expiry_on_the_utc_date` failed at
+    `assert got.action == "suppress"`. Red 2026-10-27: mutation `datetime.now(timezone.utc)`
+    -> `datetime.now()` in `envelope.utc_today` (the host's date on this clock, 2026-10-23);
+    failed at the same assertion.
+    """
+    [got] = match_fp.match([finding()], edited(valid_until="2026-10-22"), repo=REPO, on=True,
+                           local=agrees)
+    assert got.action == "suppress"
+
+
+def test_recalls_expired_flag_decides_the_match():
+    """NUM-001, 2026-10-27. Invariant: RE-call's computed `expired` (RE-call #1011 (draft)) wins over
+    `valid_until` in both directions.
+
+    Red 2026-10-27 against be13f2f (the flag unread):
+    `tests/test_match_fp.py::test_recalls_expired_flag_decides_the_match` failed at
+    the first `assert got.action == "attach"` (it suppressed).
+    """
+    [got] = run(answer=edited(expired=True))
+    assert got.action == "attach"
+    assert got.reasons[0] == "expired"
+    [got] = run(answer=edited(expired=False, valid_until="2026-10-01"))
+    assert got.action == "suppress"
+
+
 def test_another_category_does_not_suppress():
     """Red 2026-10-22: mutation `if finding.get("category") != rec.get("category"):` -> `if
     False:` in `match_fp.match`; failed at `assert got.action == "attach"`."""

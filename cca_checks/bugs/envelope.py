@@ -5,6 +5,7 @@ carries `id`, `kind`, `recall_record` exactly as authored, `name`, `description`
 `chunk_id`, `chunk_ids`, `valid_from`, `supersedes`, `superseded_by`, `valid_until`, `caused`,
 `anchor_matches` (`[{"anchor", "match"}]`) and `anchor_match`, the best of them. A code tenant
 returns one `kind: "code"` record per distinct anchor, its `recall_record` the `code_anchor`.
+RE-call #1011 (draft) adds `expired`, a boolean it computes; answers saved before that carry none.
 
 A saved answer is untrusted JSON: an MCP client may wrap it as `{"result": "<json>"}`, and any
 record whose fields have the wrong type is dropped here rather than read by a caller.
@@ -12,7 +13,7 @@ record whose fields have the wrong type is dropped here rather than read by a ca
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 
 MATCHES = ("exact", "symbol_changed", "file_only", "none")
 
@@ -26,19 +27,39 @@ def _unwrap(value: object) -> object:
     return value
 
 
-def expired(valid_until: object, today: str) -> bool:
-    """Whether a record whose `valid_until` is this has lapsed by `today` (YYYY-MM-DD).
+def utc_today() -> str:
+    """Today's date in UTC (YYYY-MM-DD): RE-call's validity windows are in UTC, not this host's
+    time zone, so a host whose local date is already tomorrow must not expire a record early.
+    """
+    return datetime.now(timezone.utc).date().isoformat()
 
-    None never lapses. Fail closed: a value that does not read as a date is not proof the record
-    is current. The brief and the PRIOR_FP matcher share this one rule.
+
+def expired(valid_until: object, today: str) -> bool:
+    """Whether a record whose `valid_until` is this has lapsed by `today` (YYYY-MM-DD, in UTC).
+
+    RE-call's rule (`recall.frontmatter.validity_bounds`): a date-only `valid_until` holds
+    through 23:59:59.999999 UTC of that day, so the record is current on the day itself and
+    lapsed from the next. None never lapses. Fail closed: a value that does not read as a date
+    is not proof the record is current. The brief and the PRIOR_FP matcher share this one rule.
     """
     if valid_until is None:
         return False
     try:
         # Parsed, not compared as text: a malformed value would sort after every real date.
-        return date.fromisoformat(str(valid_until)[:10]) <= date.fromisoformat(today[:10])
+        return date.fromisoformat(str(valid_until)[:10]) < date.fromisoformat(today[:10])
     except ValueError:
         return True
+
+
+def record_expired(record: dict, today: str) -> bool:
+    """Whether a `recall_records` entry has lapsed by `today`: RE-call's own `expired` when the
+    entry carries one (RE-call #1011 (draft) computes it at its `now` by the rule above), otherwise
+    `expired` on the entry's `valid_until`.
+    """
+    flag = record.get("expired")
+    if isinstance(flag, bool):
+        return flag
+    return expired(record.get("valid_until"), today)
 
 
 def _record(raw: object) -> dict | None:
@@ -56,6 +77,8 @@ def _record(raw: object) -> dict | None:
     for key in ("superseded_by", "valid_until", "source", "chunk_id", "id"):
         if raw.get(key) is not None and not isinstance(raw.get(key), str):
             return None
+    if raw.get("expired") is not None and not isinstance(raw.get("expired"), bool):
+        return None
     caused = raw.get("caused", [])
     if not isinstance(caused, list):
         return None

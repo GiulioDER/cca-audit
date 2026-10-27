@@ -288,3 +288,51 @@ def test_the_brief_and_the_matcher_agree_on_valid_until():
     assert "RE-call:0123456789ab:BUG-001" in ids("2026-12-31")
     assert "RE-call:0123456789ab:BUG-001" not in ids("2026-10-01")
     assert "RE-call:0123456789ab:BUG-001" not in ids("not a date")
+
+
+BUG_001 = "RE-call:0123456789ab:BUG-001"
+
+
+def _ids(today=None, **fields):
+    records = _records()
+    for r in records:
+        if r["id"] == BUG_001:
+            r.update(fields)
+    return [r["id"] for r in prior.select_records(records, REPO, today=today)]
+
+
+def test_the_brief_keeps_a_record_on_its_valid_until_day():
+    """NUM-001, 2026-10-27. Invariant: as in RE-call and the brief rendered through it, a
+    date-only `valid_until` holds through the end of that day.
+
+    Red 2026-10-27 against the pre-fix `envelope.expired` (`<=`, be13f2f):
+    `tests/test_prior_records.py::test_the_brief_keeps_a_record_on_its_valid_until_day` failed
+    at `assert BUG_001 in _ids("2026-10-22", valid_until="2026-10-22")`.
+    """
+    assert BUG_001 in _ids("2026-10-22", valid_until="2026-10-22")
+    assert BUG_001 not in _ids("2026-10-23", valid_until="2026-10-22")
+
+
+def test_the_brief_judges_expiry_on_the_utc_date(east_of_utc_late_evening):
+    """NUM-001, 2026-10-27. Invariant: with no `today` given, the brief's date is the UTC date,
+    not the host's, which is already the next day on this clock.
+
+    Red 2026-10-27 against be13f2f (`date.today()`, the host's real local date):
+    `tests/test_prior_records.py::test_the_brief_judges_expiry_on_the_utc_date` failed at
+    `assert BUG_001 in _ids(valid_until="2026-10-22")`. Red 2026-10-27: mutation
+    `datetime.now(timezone.utc)` -> `datetime.now()` in `envelope.utc_today`; failed at the
+    same assertion.
+    """
+    assert BUG_001 in _ids(valid_until="2026-10-22")
+
+
+def test_the_brief_follows_recalls_expired_flag():
+    """NUM-001, 2026-10-27. Invariant: RE-call's computed `expired` (RE-call #1011 (draft)) wins over
+    `valid_until` in both directions.
+
+    Red 2026-10-27 against be13f2f (the flag unread):
+    `tests/test_prior_records.py::test_the_brief_follows_recalls_expired_flag` failed at
+    `assert BUG_001 not in _ids("2026-10-22", expired=True, valid_until="2099-12-31")`.
+    """
+    assert BUG_001 not in _ids("2026-10-22", expired=True, valid_until="2099-12-31")
+    assert BUG_001 in _ids("2026-10-22", expired=False, valid_until="2026-10-01")

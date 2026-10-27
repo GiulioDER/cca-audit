@@ -71,6 +71,11 @@ there), built against saved `recall_records` answers until the live server is de
   is refused outside DIFF mode. `bugs anchors --diff` no longer depends on the user's diff prefix
   or path-quoting config. `pipeline close` prints each false positive it did not record. A FAST
   run creates no false-positive record, and Step 6 says so.
+* **Expiry as RE-call reads it.** A date-only `valid_until` now holds through the end of that day
+  in UTC, as RE-call's `validity_bounds` and the brief rendered through RE-call hold it; CCA had
+  dropped the record on the day itself, by the host's local date. The brief, the lessons block and
+  PRIOR_FP read RE-call's computed `expired` flag (RE-call #1011 (draft)) when an answer carries one, and
+  fall back to that rule on `valid_until` when it does not.
 
 **The ledger as records RE-call can serve.** Sessions 2 and 3 of the same plan, the layer the
 sections above read.
