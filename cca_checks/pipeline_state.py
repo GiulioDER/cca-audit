@@ -1096,6 +1096,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         if layer in OUTPUT_LAYERS:
             data = _read_output(layer, output, root)
             _check_shape(layer, state, counts, data, root)
+            if layer == "L1":
+                _check_prior_brief(state, root)
         elif layer == "L6":
             # Optional: only an APPROVED verdict over false positives requires the file.
             data = _read_output(layer, output, root) if output is not None else None
@@ -1176,6 +1178,32 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 
 #: The saved `recall_records` answer Step 1 renders the prior-bugs block from.
 PRIOR_RECORDS = "prior-records.json"
+#: The receipt `bugs brief --out` writes: Step 1's local reader path.
+LOCAL_PRIOR = "local-prior.json"
+
+
+def _check_prior_brief(state: PipelineState, root) -> None:
+    """Refuse a DIFF or HUNT run's L1 unless Step 1 left a prior-bugs brief in its run directory.
+
+    Step 1 was prose with no gate, and measured 2026-10-27 over the previous 48 hours, 13
+    Claude Code runs dispatched their auditors without building the brief while every Codex
+    run built it. Either file shows the step ran: the hosted answer or the local receipt,
+    which `bugs brief` writes even when the reader is unavailable. A deferred pass dispatches
+    no L1 auditors, so it is not asked for one.
+    """
+    if state.mode not in ("DIFF", "HUNT"):
+        return
+    run = deferred.runs_dir(root) / state.run_id
+    if (run / LOCAL_PRIOR).is_file() or (run / PRIOR_RECORDS).is_file():
+        return
+    where = f".claude/audits/runs/{state.run_id}"
+    raise RecordRefused(
+        f"L1 needs the prior-bugs brief first, and {where}/ holds neither {LOCAL_PRIOR} nor "
+        f"{PRIOR_RECORDS}. Run `python -P -m cca_checks bugs brief --root <target Git root> "
+        f"--out {where}/{LOCAL_PRIOR} --files <FILES>` (or save the hosted recall_records "
+        f"answer as {where}/{PRIOR_RECORDS}), paste its output into every auditor prompt as "
+        "Step 1 of audit-fix.md says, then record again"
+    )
 
 
 def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | None] | None:

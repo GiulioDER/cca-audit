@@ -365,8 +365,11 @@ Launch ALL applicable auditors (per the tier table) in a SINGLE message — para
 sequential. Each agent gets the same FILES, DIFF_CMD, LANGUAGES, and the Findings Schema above.
 
 Before launching, build the prior-bugs brief once per run (DIFF and HUNT modes alike; the deferred
-pass skips this because it dispatches no L1 auditors). The RE-call steps below are optional, and
-they run in DIFF mode only. In this order:
+pass skips this because it dispatches no L1 auditors). A gate holds the step: in a DIFF or HUNT
+run, `pipeline record L1` is refused until `.claude/audits/runs/<run_id>/` holds `local-prior.json`
+(written by `bugs brief --out` below) or `prior-records.json` (the hosted answer), and the refusal
+names the command to run. The RE-call steps below are optional, and they run in DIFF mode only. In
+this order:
 
 1. DIFF mode only: if a `recall_records` tool of a server named `recall-cca` is available, run
    `python -m cca_checks bugs anchors --diff --base <BASE>` (`<BASE>` is the run's base, `HEAD`

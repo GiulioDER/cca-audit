@@ -917,3 +917,18 @@ def test_the_prompt_says_fast_creates_no_false_positive_records():
     step6 = " ".join(PIPELINE.split("## Step 6", 1)[1].split("## Step 7", 1)[0].split())
     assert "A FAST run creates none" in step6
     assert "prints each false positive it did not record" in step6
+
+
+def test_step1_says_the_l1_gate_holds_the_brief():
+    """Invariant: both texts tell the orchestrator that `pipeline record L1` refuses a DIFF or
+    HUNT run until the run directory holds `local-prior.json` or `prior-records.json`, so the
+    refusal is expected rather than a surprise mid-run.
+
+    Red 2026-10-27: against origin/master 64d410e (neither text names the gate); failed at
+    `assert "pipeline record L1` is refused" in flat` for the audit-fix.md Step 1 text.
+    """
+    for text in (_step1(), _codex_brief()):
+        flat = " ".join(text.split())
+        assert "`pipeline record L1` is refused" in flat
+        assert "`local-prior.json`" in flat and "`prior-records.json`" in flat
+        assert "DIFF or HUNT" in flat

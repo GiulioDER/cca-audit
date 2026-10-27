@@ -95,7 +95,10 @@ Perform target detection, tier selection, deterministic coverage checks, consoli
 and final reporting in the primary agent. Delegate the independent audit and review roles.
 
 Once per run, before dispatching Layer 1 auditors, build the prior-bugs brief (the deferred pass
-dispatches no Layer 1 auditors and skips it). In DIFF mode only, if the `recall_records` tool of
+dispatches no Layer 1 auditors and skips it). A gate holds the step: in a DIFF or HUNT run,
+`pipeline record L1` is refused until `.claude/audits/runs/<run_id>/` holds `local-prior.json`
+(written by `bugs brief --out` below) or `prior-records.json` (the hosted answer), and the refusal
+names the command to run. In DIFF mode only, if the `recall_records` tool of
 the `recall-cca` server is available, run `python -m cca_checks bugs anchors --diff --base
 <BASE>`, call `recall_records` once with its `repo` and `anchors` and `kinds: ["bug", "lesson"]`, and save the
 raw answer, unedited, as `.claude/audits/runs/<run_id>/prior-records.json`; when the project also
