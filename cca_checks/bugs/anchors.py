@@ -95,8 +95,9 @@ def resolve_symbols(source: str) -> list[SymbolSpan]:
 
 
 def _statement_bodies(node: ast.stmt) -> list[list[ast.stmt]]:
-    bodies = [getattr(node, f) for f in ("body", "orelse", "finalbody") if hasattr(node, f)]
+    bodies = [getattr(node, f) for f in ("body",) if hasattr(node, f)]
     bodies += [h.body for h in getattr(node, "handlers", [])]
+    bodies += [getattr(node, f) for f in ("orelse", "finalbody") if hasattr(node, f)]
     bodies += [c.body for c in getattr(node, "cases", [])]
     return [b for b in bodies if isinstance(b, list)]
 

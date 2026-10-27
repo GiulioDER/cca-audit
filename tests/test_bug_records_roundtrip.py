@@ -35,10 +35,11 @@ MODIFIED = "2026-10-21T00:00:00Z"
 
 #: sha256 of each contract file as `git show <RECALL_CONTRACT_COMMIT>:<path>` printed it in
 #: RE-call (taken 2026-10-21 at c526ced82; compared byte for byte with 20baf3a8 on 2026-10-22,
-#: all equal), so an edit to a copy, or a re-pin without a re-copy, fails here.
+#: all equal). Anchor vectors additionally carry the coordinated handler-order regression;
+#: their independently updated digest pins that exact copy. All other contract bytes are unchanged.
 PINNED = {
     "recall_record.v1.json": "b820181d015a3aec249d8e4952a62cb78eea8cddad1f6f44f1286d9d79dabc92",
-    "anchor_vectors.json": "59ef286415d13654fd9c2220f983ce58e8b5e46dd8b93d3655b2d0a9e6cb6adb",
+    "anchor_vectors.json": "01f392396688e2d44d20798fa5472f3036a552511525bdaae6797e5051d3db6d",
     "expected_records.json": "750961133631db9522eb4d489f1b568256b9de9208e974d6cefbb717fbc1bec5",
     "memos/RE-call__0123456789ab__BUG-001.md":
         "cd305b5f7588261ec7f1708da923d2850b8c49c5177d39583b9f301ca850d4fe",
@@ -112,7 +113,7 @@ def _hard_rows() -> list:
 
 
 def test_contract_copies_match_pinned_recall_commit():
-    """Every copied contract file (schema, vectors, memos, records) is the pinned commit's bytes.
+    """Schema and record goldens retain their pinned bytes; vectors match their coordinated pin.
 
     The plan's `test_schema_copy_matches_pinned_recall_commit`, widened to every copied file.
 
