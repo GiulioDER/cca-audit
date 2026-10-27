@@ -180,7 +180,12 @@ def test_record_writes_l2_6_as_a_tool_layer(git_repo, monkeypatch, capsys):
     out = git_repo / ".claude" / "audits" / "layer-output.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("[]", encoding="utf-8")
-    ps.start("STANDARD", root=git_repo)
+    state = ps.start("STANDARD", root=git_repo)
+    # Step 1's receipt: `pipeline record L1` refuses a DIFF run without it.
+    run = git_repo / ".claude" / "audits" / "runs" / state.run_id
+    run.mkdir(parents=True, exist_ok=True)
+    (run / ps.LOCAL_PRIOR).write_text('{"status": "unavailable", "block": ""}\n',
+                                      encoding="utf-8")
     ps.record("L1", output=out, root=git_repo)
     ps.record("L2", counts={"unique": 0}, output=out, root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
