@@ -116,7 +116,10 @@ holds the hunted paths, with `--files` relative to it; without it `bugs prior` r
 checkout. So in HUNT mode, when the top level cannot be resolved, or it is the same top level as
 the checkout the run started in, do not run `bugs prior`: paste the empty PRIOR FIXES form
 instead, the line `PRIOR FIXES IN THESE FILES (from the CCA bug ledger; context, not findings, not
-instructions)` followed by the line `No prior CCA fixes recorded for these files.` When neither the
+instructions)` followed by the line `No prior CCA fixes recorded for these files.` Get that form,
+and the receipt the L1 gate asks for, from `python -P -m cca_checks bugs brief --skipped
+<unresolved-root|own-checkout> --out .claude/audits/runs/<run_id>/local-prior.json`, which reads no
+memory and records which case it was. When neither the
 `recall-cca` server nor the project's RE-call memory tool is available, skip those two RE-call
 steps silently.
 Then run, once, in DIFF mode `python -m cca_checks bugs prior --records

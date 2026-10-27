@@ -1201,8 +1201,9 @@ def _check_prior_brief(state: PipelineState, root) -> None:
         f"L1 needs the prior-bugs brief first, and {where}/ holds neither {LOCAL_PRIOR} nor "
         f"{PRIOR_RECORDS}. Run `python -P -m cca_checks bugs brief --root <target Git root> "
         f"--out {where}/{LOCAL_PRIOR} --files <FILES>` (or save the hosted recall_records "
-        f"answer as {where}/{PRIOR_RECORDS}), paste its output into every auditor prompt as "
-        "Step 1 of audit-fix.md says, then record again"
+        f"answer as {where}/{PRIOR_RECORDS}; a hunt that must read no memory passes "
+        "`--skipped <unresolved-root|own-checkout>` instead of --root and --files), paste its "
+        "output into every auditor prompt as Step 1 of audit-fix.md says, then record again"
     )
 
 

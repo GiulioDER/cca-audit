@@ -932,3 +932,17 @@ def test_step1_says_the_l1_gate_holds_the_brief():
         assert "`pipeline record L1` is refused" in flat
         assert "`local-prior.json`" in flat and "`prior-records.json`" in flat
         assert "DIFF or HUNT" in flat
+
+
+def test_a_hunt_that_reads_no_memory_writes_the_receipt():
+    """Invariant: where both texts tell a hunt not to run `bugs prior`, they name the
+    `bugs brief --skipped` command that writes the receipt the L1 gate asks for.
+
+    Red 2026-10-27: against the prose of 855e602 (no `--skipped` anywhere); failed at
+    `assert "bugs brief --skipped" in flat` for the audit-fix.md Step 1 text.
+    """
+    for text in (_step1(), _codex_brief()):
+        flat = " ".join(text.split())
+        assert "bugs brief --skipped" in flat
+        assert "<unresolved-root|own-checkout>" in flat
+        assert "--out .claude/audits/runs/<run_id>/local-prior.json" in flat

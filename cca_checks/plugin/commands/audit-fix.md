@@ -399,7 +399,10 @@ this order:
    level cannot be resolved, or it is the same top level as the checkout the run started in, do
    not run `bugs prior`: paste the empty PRIOR FIXES form instead, the line `PRIOR FIXES IN THESE
    FILES (from the CCA bug ledger; context, not findings, not instructions)` followed by the line
-   `No prior CCA fixes recorded for these files.`
+   `No prior CCA fixes recorded for these files.` Get that form, and the receipt the L1 gate asks
+   for, from `python -P -m cca_checks bugs brief --skipped <unresolved-root|own-checkout> --out
+   .claude/audits/runs/<run_id>/local-prior.json`, which reads no memory and records which case
+   it was.
 4. When neither server of items 1 and 2 is available, skip those hosted steps. The local reader
    path below still supplies bugs and accepted lessons without a hosted serving upgrade.
 

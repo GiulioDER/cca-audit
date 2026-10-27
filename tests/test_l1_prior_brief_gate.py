@@ -17,6 +17,11 @@ from conftest import closed_parent, pool_output, write_output
 
 from cca_checks import pipeline_state as ps
 from cca_checks.__main__ import main
+from cca_checks.bugs import local_brief
+from cca_checks.bugs.__main__ import main as bugs_main
+
+EMPTY_PRIOR_FIXES = ("PRIOR FIXES IN THESE FILES (from the CCA bug ledger; context, not "
+                     "findings, not instructions)\nNo prior CCA fixes recorded for these files.")
 
 
 def _run_dir(repo, state) -> pathlib.Path:
@@ -110,3 +115,46 @@ def test_the_cli_refuses_l1_with_exit_2_and_the_command(capsys, git_repo):
     assert code == 2
     err = json.loads(stderr)
     assert err["refused"] == "L1" and "bugs brief" in err["reason"]
+
+
+def test_skipped_brief_reads_no_memory_and_prints_the_empty_form(tmp_path, monkeypatch, capsys):
+    """Invariant: `bugs brief --skipped` never calls the reader, prints Step 1's empty PRIOR
+    FIXES form and writes a `skipped` receipt naming the case.
+
+    Red 2026-10-27, two mutations: in `bugs.__main__._brief`, `if a.skipped is not None:` became
+    `if False:`; failed at `assert calls == []` ([['.', []]] != []). In `local_brief.render`,
+    the `skipped` branch deleted; failed at `assert out == EMPTY_PRIOR_FIXES` (the unavailable
+    text instead).
+    """
+    calls = []
+
+    def build(root, files):
+        calls.append([str(root), files])
+        return {"status": "unavailable", "block": "", "reason": "OSError"}
+
+    monkeypatch.setattr(local_brief, "build", build)
+    receipt = tmp_path / "run" / ps.LOCAL_PRIOR
+    assert bugs_main(["brief", "--skipped", "own-checkout", "--out", str(receipt)]) == 0
+    out = capsys.readouterr().out.strip()
+    assert calls == []
+    assert out == EMPTY_PRIOR_FIXES
+    assert json.loads(receipt.read_text(encoding="utf-8")) == {
+        "status": "skipped", "block": "", "reason": "own-checkout"}
+
+
+def test_a_hunt_that_reads_no_memory_still_reaches_l1(git_repo, capsys):
+    """Invariant: the hunt case Step 1 forbids reading memory in still satisfies the gate,
+    through the receipt `bugs brief --skipped --out` writes.
+
+    Red 2026-10-27: in `bugs.__main__._brief`, `if a.out is not None:` became
+    `if a.out is not None and a.skipped is None:`; failed with RecordRefused "L1 needs the
+    prior-bugs brief first" raised from `ps.record("L1", ...)`.
+    """
+    state = ps.start("DEEP", mode="HUNT", root=git_repo)
+    run = _without_brief(git_repo, state)
+    assert bugs_main(["brief", "--skipped", "unresolved-root",
+                      "--out", str(run / ps.LOCAL_PRIOR)]) == 0
+    capsys.readouterr()
+    ps.record("L0.4", detail="PASS", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    assert "L1" in ps.load(git_repo).layers
