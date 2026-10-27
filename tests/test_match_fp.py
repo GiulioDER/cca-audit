@@ -194,7 +194,7 @@ def test_the_matcher_judges_expiry_on_the_utc_date(east_of_utc_late_evening):
 
 
 def test_recalls_expired_flag_decides_the_match():
-    """NUM-001, 2026-10-27. Invariant: RE-call's computed `expired` (RE-call #1007) wins over
+    """NUM-001, 2026-10-27. Invariant: RE-call's computed `expired` (RE-call #1011 (draft)) wins over
     `valid_until` in both directions.
 
     Red 2026-10-27 against be13f2f (the flag unread):

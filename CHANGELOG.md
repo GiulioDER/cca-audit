@@ -74,7 +74,7 @@ there), built against saved `recall_records` answers until the live server is de
 * **Expiry as RE-call reads it.** A date-only `valid_until` now holds through the end of that day
   in UTC, as RE-call's `validity_bounds` and the brief rendered through RE-call hold it; CCA had
   dropped the record on the day itself, by the host's local date. The brief, the lessons block and
-  PRIOR_FP read RE-call's computed `expired` flag (RE-call #1007) when an answer carries one, and
+  PRIOR_FP read RE-call's computed `expired` flag (RE-call #1011 (draft)) when an answer carries one, and
   fall back to that rule on `valid_until` when it does not.
 
 **The ledger as records RE-call can serve.** Sessions 2 and 3 of the same plan, the layer the

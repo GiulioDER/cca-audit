@@ -5,7 +5,7 @@ carries `id`, `kind`, `recall_record` exactly as authored, `name`, `description`
 `chunk_id`, `chunk_ids`, `valid_from`, `supersedes`, `superseded_by`, `valid_until`, `caused`,
 `anchor_matches` (`[{"anchor", "match"}]`) and `anchor_match`, the best of them. A code tenant
 returns one `kind: "code"` record per distinct anchor, its `recall_record` the `code_anchor`.
-RE-call #1007 adds `expired`, a boolean it computes; answers saved before that carry none.
+RE-call #1011 (draft) adds `expired`, a boolean it computes; answers saved before that carry none.
 
 A saved answer is untrusted JSON: an MCP client may wrap it as `{"result": "<json>"}`, and any
 record whose fields have the wrong type is dropped here rather than read by a caller.
@@ -53,7 +53,7 @@ def expired(valid_until: object, today: str) -> bool:
 
 def record_expired(record: dict, today: str) -> bool:
     """Whether a `recall_records` entry has lapsed by `today`: RE-call's own `expired` when the
-    entry carries one (RE-call #1007 computes it at its `now` by the rule above), otherwise
+    entry carries one (RE-call #1011 (draft) computes it at its `now` by the rule above), otherwise
     `expired` on the entry's `valid_until`.
     """
     flag = record.get("expired")

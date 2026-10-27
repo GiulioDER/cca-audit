@@ -3,7 +3,7 @@ brief, the LESSONS block and the PRIOR_FP matcher (finding NUM-001, RE-call PR #
 2026-10-27).
 
 RE-call (`recall.frontmatter.validity_bounds`) holds a date-only `valid_until` through
-23:59:59.999999 UTC of that day; RE-call #1007 adds the `expired` flag it computes that way.
+23:59:59.999999 UTC of that day; RE-call #1011 (draft) adds the `expired` flag it computes that way.
 Red proof (user rule, 2026-09-08) is in each test's docstring; every mutation was restored.
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ def test_none_never_lapses_and_a_malformed_value_fails_closed():
 
 
 def test_recalls_flag_wins_over_valid_until_both_ways():
-    """Invariant: an entry's boolean `expired` (RE-call #1007) decides, whichever way it points;
+    """Invariant: an entry's boolean `expired` (RE-call #1011 (draft)) decides, whichever way it points;
     without one, the rule above reads `valid_until`.
 
     Red 2026-10-27: mutation deleting `if isinstance(flag, bool): return flag` in
@@ -77,7 +77,7 @@ def test_recalls_flag_wins_over_valid_until_both_ways():
 def test_a_flag_that_is_not_a_boolean_drops_the_record():
     """Invariant: a saved answer is untrusted, and a record with a wrong-typed field is dropped
     rather than read; an `expired` that is not a boolean is such a field. A missing or null one
-    is not (saved answers from before RE-call #1007 carry none).
+    is not (saved answers from before RE-call #1011 (draft) carry none).
 
     Red 2026-10-27 against the pre-fix `envelope._record` (be13f2f):
     `tests/test_record_expiry.py::test_a_flag_that_is_not_a_boolean_drops_the_record` failed at
