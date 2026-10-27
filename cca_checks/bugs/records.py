@@ -22,10 +22,11 @@ from typing import ClassVar, TypeVar, cast
 from .anchors import Anchor
 from .model import ABSENT, CONDITIONS, NOT_REQUIRED, BugRow, _slug, memo_filename
 
-#: The RE-call commit the contract files were copied from. Re-pin, and re-copy, when RE-call
+#: The RE-call commit the schema and record goldens were copied from. Re-pin when RE-call
 #: changes them; `tests/test_bug_records_roundtrip.py` fails on a copy that drifted. This is
 #: the squash merge of RE-call PR #973; its files are byte-identical to the PR head c526ced82
-#: the copies were first taken from.
+#: the copies were first taken from. Anchor regression vectors have a separate digest pin
+#: in the contract-copy test, so extending them does not re-version the record schema.
 RECALL_CONTRACT_COMMIT = "20baf3a8b330d38887b7f8b3b75fd4ac5cd477c1"
 VERSION = 1
 FP_REASON = "not_real"

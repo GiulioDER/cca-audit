@@ -148,3 +148,19 @@ def test_anchors_for_findings_skips_unresolvable(tmp_path):
     got = anchors_for_findings(tmp_path, findings)
     assert [(a.file, a.symbol) for a in got] == [("pool.py", "Pool.lease"),
                                                  ("pool.py", "Pool.release")]
+
+
+def test_later_branches_do_not_rename_prior_handlers():
+    """Later branches cannot rename or rehash an unchanged exception-handler definition.
+
+    Production target: anchors._statement_bodies. The pre-fix 7113cf8 ordering visits
+    handlers after else/finally. This node must fail its handler-identity assertion there;
+    test_vectors_reproduce[try_except_else_finally] must fail its ordered-span assertion.
+    Exact red and restored-green receipts are recorded for the coordinated parity repair.
+    """
+    source = next(v["source"] for v in VECTORS if v["name"] == "try_except_else_finally")
+    earlier = "\n".join(source.splitlines()[:6]) + "\n"
+
+    assert enclosing_symbol(earlier, 5) == "f#2"
+    assert enclosing_symbol(source, 5) == "f#2", "later branches renamed the prior handler"
+    assert symbol_sha(earlier, "f#2") == symbol_sha(source, "f#2")
