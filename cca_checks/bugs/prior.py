@@ -223,11 +223,9 @@ def select_records(records: list[dict], repo: str, before: str | None = None,
     positive above all: auditors are never shown one. Order: exact, then symbol_changed,
     then file_only; within each, proved before historical, then newest.
     """
-    from datetime import date
+    from .envelope import record_expired, utc_today
 
-    from .envelope import expired
-
-    today = today or date.today().isoformat()
+    today = today or utc_today()
     target = repo.lower()
     found = []
     for record in records:
@@ -238,7 +236,7 @@ def select_records(records: list[dict], repo: str, before: str | None = None,
             continue
         if record.get("anchor_match") not in MATCH_ORDER:
             continue
-        if record.get("superseded_by") is not None or expired(record.get("valid_until"), today):
+        if record.get("superseded_by") is not None or record_expired(record, today):
             continue
         if before is not None and str(rec.get("date", "")) >= before:
             continue
@@ -319,12 +317,10 @@ def select_lessons(records: list[dict], repo: str, before: str | None = None,
     lesson at a changed symbol as `symbol_changed`: those come before `file_only`; then the
     lesson with more member bugs, then the newest.
     """
-    from datetime import date
-
     from .distill import withholding
-    from .envelope import expired
+    from .envelope import record_expired, utc_today
 
-    today = today or date.today().isoformat()
+    today = today or utc_today()
     target = repo.lower()
     found = []
     for record in records:
@@ -336,7 +332,7 @@ def select_lessons(records: list[dict], repo: str, before: str | None = None,
             continue
         if record.get("anchor_match") not in MATCH_ORDER:
             continue
-        if record.get("superseded_by") is not None or expired(record.get("valid_until"), today):
+        if record.get("superseded_by") is not None or record_expired(record, today):
             continue
         if before is not None and str(rec.get("date", "")) >= before:
             continue

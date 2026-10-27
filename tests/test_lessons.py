@@ -603,7 +603,7 @@ def test_at_most_three_lessons_symbol_matches_first():
     Red 2026-10-22: mutation `return found[:limit]` -> `return found` in `prior.select_lessons`;
     failed at `assert len(ids) == 3`.
     Red 2026-10-22: mutation `(0 if r["anchor_match"] != "file_only" else 1,` -> `(0,` in the
-    sort key of `prior.select_lessons`; failed at `assert ids == [...]`.
+    sort key of `prior.select_lessons`; failed at `assert sorted(ids) == [...]`.
     """
     records = [_lesson_record(1, members=9, match="file_only"),
                _lesson_record(2, members=3), _lesson_record(3, members=5),
@@ -612,6 +612,27 @@ def test_at_most_three_lessons_symbol_matches_first():
     assert len(ids) == 3
     assert ids == ["RE-call:lesson:000000000003", "RE-call:lesson:000000000004",
                    "RE-call:lesson:000000000002"]
+
+
+def test_a_lesson_lapses_by_recalls_rule():
+    """NUM-001, 2026-10-27. Invariant: the LESSONS block reads expiry as the brief and the
+    PRIOR_FP matcher do: current on the `valid_until` day, and RE-call's `expired` flag first.
+
+    Red 2026-10-27 against the pre-fix `envelope.expired` (`<=`, be13f2f):
+    `tests/test_lessons.py::test_a_lesson_lapses_by_recalls_rule` failed at `assert sorted(ids) == [...]`
+    (lesson 1, valid until the day itself, was dropped, and lesson 3's flag was unread).
+    """
+    one = _lesson_record(1)
+    one["valid_until"] = "2026-10-22"
+    two = _lesson_record(2)
+    two["valid_until"] = "2026-10-21"
+    three = _lesson_record(3)
+    three.update(expired=True)
+    four = _lesson_record(4)
+    four.update(expired=False, valid_until="2026-10-01")
+    ids = [r["id"] for r in prior.select_lessons([one, two, three, four], REPO,
+                                                 today="2026-10-22")]
+    assert sorted(ids) == ["RE-call:lesson:000000000001", "RE-call:lesson:000000000004"]
 
 
 def test_a_retracted_or_foreign_lesson_is_not_shown():

@@ -3,8 +3,9 @@
 A finding is suppressed (verdict PRIOR_FP, no fp-check) only when it sits at the place of a
 `false_positive` record and ALL of these hold:
 
-* the record is current: RE-call returns it with no `superseded_by` and no `valid_until` that
-  has passed, and the local ledger holds no retraction dated today or earlier. Currency comes
+* the record is current: RE-call returns it with no `superseded_by` and not expired (its
+  `expired` flag when the answer carries one, else a `valid_until` whose day has ended in UTC),
+  and the local ledger holds no retraction dated today or earlier. Currency comes
   from those returned fields, never from `supersedes` links in the answer: RE-call honours the
   successor's validity window (RE-call #970), so a retraction dated in the future does not yet
   hide its target;
@@ -111,10 +112,10 @@ def _key(anchor: object) -> tuple | None:
     return anchor.get("file"), anchor.get("symbol"), anchor.get("code_sha")
 
 
-def _expired(valid_until: object, today: str) -> bool:
-    from .envelope import expired
+def _expired(record: dict, today: str) -> bool:
+    from .envelope import record_expired
 
-    return expired(valid_until, today)
+    return record_expired(record, today)
 
 
 def _statuses(record: dict, rec: dict,
@@ -166,9 +167,9 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
     hashes an anchor's symbol in the checkout. `known` and `blocked` are `ledger_facts`' records
     and reason. At most one record suppresses a finding.
     """
-    from .envelope import records
+    from .envelope import records, utc_today
 
-    today = today or date.today().isoformat()
+    today = today or utc_today()
     on = enabled() if on is None else on
     held, envelope, _ = records(response)
     fps = [(r, rec) for r in held if (rec := _fp(r, repo)) is not None]
@@ -189,8 +190,9 @@ def match(findings: list[dict], response: dict, *, repo: str | None = None,
                 reasons.append(f"superseded by {record['superseded_by']}")
             if rec["id"] in retracted:
                 reasons.append("retracted")
-            if _expired(record.get("valid_until"), today):
-                reasons.append(f"expired {record.get('valid_until')}")
+            if _expired(record, today):
+                until = record.get("valid_until")
+                reasons.append(f"expired {until}" if until is not None else "expired")
             for where, status in _statuses(record, rec, local):
                 if status != "exact":
                     reasons.append(f"anchor {where.get('file')} {where.get('symbol')} "
