@@ -9,25 +9,7 @@ model: inherit
 
 Find documentation gaps.
 
-Output to `.claude/audits/AUDIT_DOCS.md` (optional trail). **Return value is authoritative** — see
-Return value below.
-
-## Status Block (Required)
-
-Every output MUST start with:
-```yaml
----
-agent: doc-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-functions_undocumented: [count]
-todos_found: [count]
-errors: []
-skipped_checks: []
----
-```
+Your reply is the only output: see Return value below.
 
 ## Scope (NON-OVERLAPPING)
 
@@ -43,6 +25,23 @@ skipped_checks: []
 - ~~TODO/FIXME accumulation~~ → code-auditor (code hygiene)
 - ~~Debug statements~~ → code-auditor
 - ~~Security documentation~~ → security-auditor
+
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+In DIFF mode, a missing docstring is a finding only for a public function the diff adds, or whose
+signature or behaviour it changes, and a stale comment only when the diff made it stale. Missing
+documentation elsewhere is HUNT-only.
 
 ## Checks
 
@@ -70,30 +69,36 @@ Construct patterns based on the project's detected language.
 - Magic numbers/strings without explanation (cross-reference with code-auditor)
 - Stale comments that no longer match the code they describe
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### DOC-NNN: Title` with Severity, File:line, Issue, Recommendation.
+fp-check will try to refute each finding against the code. Do that work first:
 
-## Return value (authoritative)
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the concrete harm: what a reader, an operator or the
+   next change gets wrong because of it, and in which situation.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
 
-Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
-command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
-the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
 
-Each object: `id` (`DOC-NNN`), `auditor` (`doc-auditor`), `severity`, `priority`, `category`,
-`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`.
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
 
-## Execution Logging
+## Return value
 
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | doc-auditor | [status] | [duration] | [findings] | [errors] |
-```
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
 
-## Output Verification
-
-Before completing:
-1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
-2. Optional trail: if you wrote `.claude/audits/AUDIT_DOCS.md`, verify it has content beyond headers.
-3. If no issues found, return `[]` and write "No documentation issues detected" (not empty file)
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`DOC-NNN`, or the prefix the invocation gave you), `auditor`
+   (`doc-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`.
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.

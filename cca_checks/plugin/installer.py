@@ -387,7 +387,7 @@ def _short_guard_timeouts(root: pathlib.Path) -> list[str]:
 
 
 def hook_snippet(target: str | pathlib.Path = ".") -> str:
-    """The settings.json fragment that arms the commit guard and the stop guard."""
+    """The settings.json fragment arming the commit guard, its L1 launch check, the stop guard."""
     hooks_dir = pathlib.Path(target).resolve() / ".claude" / "hooks"
     guard = hooks_dir / _GUARD_NAME
     stop = hooks_dir / _STOP_GUARD_NAME
@@ -405,7 +405,19 @@ def hook_snippet(target: str | pathlib.Path = ".") -> str:
                                 "statusMessage": "Checking the CCA pipeline gate",
                             }
                         ],
-                    }
+                    },
+                    {
+                        # The same guard refuses an L1 auditor launched without the brief.
+                        "matcher": "Agent",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f'python "{guard.as_posix()}"',
+                                "timeout": _HOOK_TIMEOUT_S,
+                                "statusMessage": "Checking the CCA L1 brief",
+                            }
+                        ],
+                    },
                 ],
                 "Stop": [
                     {

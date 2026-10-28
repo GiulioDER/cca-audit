@@ -9,30 +9,12 @@ model: inherit
 
 Find runtime bugs and error handling issues. **NOT for security vulnerabilities** (use security-auditor for that).
 
-Output to `.claude/audits/AUDIT_BUGS.md` (optional trail). **Return value is authoritative** — see
-Return value below.
+Your reply is the only output: see Return value below.
 
 > **Dispatched under multiple prefixes.** `/audit-fix` runs this agent more than once concurrently —
 > as the generic bug pass (`BUG-`), the high-stakes/safety pass (`STAKES-`), and the data-integrity
-> pass (`DAT-`) — each with its own scope, and each may name its own trail file. **The finding prefix
-> and trail filename given in the invocation win over the defaults in this file.** Use the prefix you
-> were dispatched with for every finding ID, and keep the trails separate so the passes don't collide.
-
-## Status Block (Required)
-
-Every output MUST start with:
-```yaml
----
-agent: bug-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-files_scanned: [count]
-errors: []
-skipped_checks: []
----
-```
+> pass (`DAT-`) — each with its own scope. **The finding prefix given in the invocation wins over the default in
+> this file.** Use the prefix you were dispatched with for every finding ID.
 
 ## Scope (NON-OVERLAPPING)
 
@@ -51,7 +33,42 @@ skipped_checks: []
 - ~~Debug statements, TODO accumulation~~ → code-auditor
 - ~~Performance optimization~~ → perf-auditor
 
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+In DIFF mode, start from each changed function and its callers. When dispatched as STAKES or DAT,
+the same scope applies to the invocation's checklist.
+
 ## Checks
+
+**Logic and contracts. Start here: the language patterns after this list are starting points,
+not the job.** For each function the change adds or alters:
+
+- **Callers.** Grep its callers. What do they expect back: type, shape, `None`, an exception?
+  Does the changed function still give them that?
+- **Fail open or fail closed.** On an error, a miss, a timeout or empty input, does the code
+  refuse, retry, or carry on as if it had succeeded? A lookup miss or a parse failure read as
+  "nothing to do" is the usual shape.
+- **Shape of outside input.** Data from a file, a request, a subprocess, the environment or
+  another service: is its type checked? A string iterated as if it were a list, a number that
+  arrives as a string, an empty collection reaching `min()`, `max()` or an index.
+- **Identity and keys.** Do two places compare or join the same thing the same way: letter case,
+  path form (relative or absolute, separators), encoding, column or field names, the unit of a
+  timestamp?
+- **Reachability.** Is a state, branch or status the code depends on reachable, given the order in
+  which things are set?
+- **Cleanup on every exit.** Are locks, temporary files, child processes and partial writes
+  released on error, timeout and kill, not only on success?
 
 Construct grep patterns based on the project's detected language.
 
@@ -85,34 +102,38 @@ Construct grep patterns based on the project's detected language.
 - Go: goroutine leaks, unbuffered channel deadlocks
 - Rust: `.await` missing, `tokio::spawn` without join
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### BUG-NNN: Title` with Severity, File:line, Issue, Impact, Fix.
+fp-check will try to refute each finding against the code. Do that work first:
 
-## Return value (authoritative)
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the input, state or call path that makes the defect
+   happen: who calls this, with what value, in what order.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
 
-Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
-command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
-the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
 
-Each object: `id` (`BUG-NNN`, or the prefix the invocation gave you), `auditor` (`bug-auditor`),
-`severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`, `suggested_fix`,
-`confidence`, `high_stakes`.
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
 
-## Execution Logging
+## Return value
 
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | bug-auditor | [status] | [duration] | [findings] | [errors] |
-```
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
 
-## Output Verification
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`BUG-NNN`, or the prefix the invocation gave you), `auditor`
+   (`bug-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`.
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.
 
-Before completing:
-1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
-2. Optional trail: if you wrote `.claude/audits/AUDIT_BUGS.md` (or the trail file the invocation
-   named), verify it has content beyond headers.
-3. If no issues found, return `[]` and write "No runtime bugs detected" (not an empty file).
-
-Focus on runtime bugs. **Do NOT duplicate security checks** — those belong in security-auditor.
+Focus on runtime bugs. **Do NOT duplicate security checks**: those belong in security-auditor.

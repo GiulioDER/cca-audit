@@ -13,24 +13,7 @@ recurring "the math looks right but the units/sign are wrong" class. Used by the
 
 **NOT for general runtime bugs** (use bug-auditor) or performance (use perf-auditor).
 
-Output to `.claude/audits/AUDIT_NUMERIC.md` (optional trail). **Return value is authoritative** — see
-Return value below.
-
-## Status Block (Required)
-
-Every output MUST start with:
-```yaml
----
-agent: numeric-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-files_scanned: [count]
-errors: []
-skipped_checks: []
----
-```
+Your reply is the only output: see Return value below.
 
 ## Scope (NON-OVERLAPPING)
 
@@ -52,6 +35,22 @@ skipped_checks: []
 - ~~Hot-path cost, allocation~~ → perf-auditor
 - ~~Naming, dead code, complexity~~ → code-auditor
 
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+In DIFF mode, check the arithmetic, comparisons and conversions the diff adds or changes, and the
+places that consume a value whose unit or scale the change altered.
+
 ## Checks
 
 Look at every arithmetic expression, comparison, and conversion in the changed code:
@@ -67,13 +66,28 @@ Look at every arithmetic expression, comparison, and conversion in the changed c
 > minor units, fixed-point token decimals, time in a specific unit), add them as explicit
 > assertions here so the auditor checks them as hard rules.
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### NUM-NNN: Title` with Severity, File:line, the dimensional/sign mismatch,
-the concrete consequence, and the Fix.
+fp-check will try to refute each finding against the code. Do that work first:
 
-Every finding MUST also carry a `properties:` block naming the metamorphic properties that
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the input, state or call path that makes the defect
+   happen: who calls this, with what value, in what order.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
+
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
+
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
+
+## Properties (every finding)
+
+Every finding MUST carry a `properties:` block naming the metamorphic properties that
 would expose the defect, and the input domain over which they hold. This is what lets L2.5
 settle the finding by execution instead of by re-reading the arithmetic — a sign error reads
 fluently, so a second reading is not evidence.
@@ -169,35 +183,24 @@ passes on buggy code and proves nothing.
 Declare `domains` from the values the function actually receives in production. A counterexample
 found outside that range is an artifact, not a defect.
 
-## Return value (authoritative)
+## Return value
 
-Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
-command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
-the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
 
-Each object: `id` (`NUM-NNN`), `auditor` (`numeric-auditor`), `severity`, `priority`, `category`,
-`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes` (always `true` on
-this auditor's paths).
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`NUM-NNN`, or the prefix the invocation gave you), `auditor`
+   (`numeric-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`. `high_stakes` is always `true` on this auditor's paths.
+   Each finding's `properties` block (see Properties above) travels in the reply, either as a
+   `properties` key on the finding object or in the prose right after the array, keyed by
+   finding ID. A finding whose properties never reach the orchestrator cannot be settled by
+   execution at L2.5.
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.
 
-Because the trail is not read back, each finding's `properties:` block must travel in the **reply**
-too — either as a `properties` key on the finding object or in the prose immediately following the
-array, keyed by finding ID. A finding whose properties never reach the orchestrator cannot be
-settled by execution at L2.5.
-
-## Execution Logging
-
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | numeric-auditor | [status] | [duration] | [findings] | [errors] |
-```
-
-## Output Verification
-
-Before completing:
-1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean), and
-   that every finding's `properties:` block is present in the reply.
-2. Optional trail: if you wrote `.claude/audits/AUDIT_NUMERIC.md`, verify it has content beyond headers.
-3. If no issues found, return `[]` and write "No numerical/units issues detected" (not an empty file).
-
-Focus on units, scaling, and sign. **Do NOT duplicate generic runtime-bug checks** — those
+Focus on units, scaling, and sign. **Do NOT duplicate generic runtime-bug checks**: those
 belong in bug-auditor.

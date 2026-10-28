@@ -115,6 +115,10 @@ def render(result: dict[str, str]) -> str:
                 f"\n\n{result['block']}")
     if status == "empty":
         return f"{HEADING}\n{MARKER}\nNo matching local bug or accepted lesson records."
+    if status == "skipped":
+        # Step 1's empty PRIOR FIXES form, the exact text a hunt pastes when it reads nothing.
+        from .prior import HEADING as PRIOR_FIXES
+        return f"{PRIOR_FIXES}\nNo prior CCA fixes recorded for these files."
     return (f"{HEADING}\nLocal memory unavailable ({result.get('reason', 'reader refused')}); "
             "this does not establish that memory is empty. "
             "Continue the audit from current evidence.")

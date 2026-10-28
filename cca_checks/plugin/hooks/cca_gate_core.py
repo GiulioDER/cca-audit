@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -574,3 +575,79 @@ def commit_reasons(state: dict, tree: str | None) -> list[str]:
     if state.get("no_fix"):
         reasons.append(_NO_FIX_REASON)
     return reasons + outstanding(state, tree)
+
+
+# --- L1 dispatch --------------------------------------------------------------
+
+#: The subagent types audit-fix.md dispatches as L1 auditors (its auditor tables).
+L1_AUDITOR_TYPES = frozenset({
+    "code-auditor", "bug-auditor", "security-auditor", "perf-auditor", "doc-auditor",
+    "env-validator", "numeric-auditor", "dep-auditor", "deploy-auditor",
+})
+#: The two files Step 1 leaves in the run directory: the receipt of `bugs brief --out`
+#: and the saved hosted `recall_records` answer.
+BRIEF_FILES = ("local-prior.json", "prior-records.json")
+#: Text only a prompt holding a Step 1 brief carries, whichever path built it: the reader's
+#: marker, the local render's heading, the ledger form's heading, the hosted block's heading.
+BRIEF_MARKS = (
+    "<!-- recall:auditor-brief -->",
+    "LOCAL AUDITOR MEMORY",
+    "PRIOR FIXES IN THESE FILES",
+    "PRIOR BUGS AT THE CHANGED CODE",
+)
+_BRIEF_LINE_ID = re.compile(r"^(?:BUG|LESSON) (\S+) \[", re.MULTILINE)
+
+
+def brief_ids(block: str) -> list[str]:
+    """The record ids a reader block lists, one per BUG or LESSON line, in order."""
+    return _BRIEF_LINE_ID.findall(block)
+
+
+def dispatch_reasons(root, state: dict, agent_type: str, prompt: str) -> list[str]:
+    """Why this L1 auditor may not be launched yet against the run open at `root`.
+
+    `pipeline record L1` already refuses a run whose directory holds no brief, but it runs
+    after the auditors return, so a brief built and never pasted passed it. Measured
+    2026-10-28: run 20261028T090755Z wrote an `ok` receipt at 09:07:58Z and dispatched three
+    auditors without it 41 s later. This is the check at the launch itself: once the receipt
+    exists, the prompt must carry the brief, and every record id the receipt lists.
+    """
+    if is_legacy(state) or str(state.get("mode", "DIFF")).upper() not in ("DIFF", "HUNT"):
+        return []
+    if agent_type.rsplit(":", 1)[-1] not in L1_AUDITOR_TYPES:
+        return []
+    layers = state.get("layers")
+    if isinstance(layers, dict) and "L1" in layers:
+        return []
+    run_id = state.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return ["run state has no run_id, so the Step 1 brief cannot be found"]
+    run = pathlib.Path(root) / EXCLUDED / "runs" / run_id
+    where = f"{EXCLUDED}/runs/{run_id}"
+    if not any((run / name).is_file() for name in BRIEF_FILES):
+        return [
+            f"Step 1 has not built the prior-bugs brief: {where}/ holds neither "
+            f"{BRIEF_FILES[0]} nor {BRIEF_FILES[1]}. Run `python -P -m cca_checks bugs brief "
+            f"--root <target Git root> --out {where}/{BRIEF_FILES[0]} --files <FILES>` and paste "
+            "its output into this prompt"
+        ]
+    if not any(mark in prompt for mark in BRIEF_MARKS):
+        return [
+            "this auditor prompt does not carry the Step 1 brief; paste the complete output of "
+            "`bugs brief` (or the hosted PRIOR BUGS block) into it, as Step 1 says"
+        ]
+    try:
+        receipt = json.loads((run / BRIEF_FILES[0]).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []  # the hosted path: its block is checked by its heading above
+    except (OSError, ValueError):
+        return [f"{where}/{BRIEF_FILES[0]} is unreadable; build the brief again"]
+    block = receipt.get("block") if isinstance(receipt, dict) else None
+    missing = [i for i in brief_ids(block if isinstance(block, str) else "") if i not in prompt]
+    if missing:
+        return [
+            f"this auditor prompt leaves out {len(missing)} record(s) the Step 1 brief lists "
+            f"({', '.join(missing[:3])}{', ...' if len(missing) > 3 else ''}); paste the "
+            "complete brief, not a summary of it"
+        ]
+    return []

@@ -108,6 +108,47 @@ sections above read.
   passed over. The run in the session's own checkout always holds it, whatever owner it names,
   because that name comes from the agent. A run opened before owners were recorded falls back to
   the worktree's session claim.
+* **An L1 auditor is launched only with the Step 1 brief, and the run records that brief.** The
+  `pipeline record L1` gate runs after the auditors return, so a brief built and never pasted
+  passed it: on 2026-10-28 one run wrote its receipt and launched three auditors without it 41 s
+  later. The commit guard, wired to the `Agent` matcher too, now refuses an L1 auditor launched in
+  an open DIFF or HUNT run before the receipt exists, or with a prompt that leaves out the brief or
+  any record id the receipt lists. `summary.json` counted the block only from the hosted answer,
+  so every run on the local path reported `prior_block: null`; it now counts the local receipt's
+  BUG and LESSON lines, and a new `prior_brief` field records the source, status and listed ids.
+  Codex has no launch hook, so on Codex the record-time gate is still the only check.
+* **Git anchor recovery reads a definition named as a bare word.** The local brief matches by code
+  anchor only, and 556 of 886 bug records had none, so they never reached an auditor. Legacy
+  summaries name the repaired definition bare ("paper_trader _check_stop_loss math.isfinite()
+  guards"), which `recover_git_anchors` ignored: it counted only backticked names and calls. A
+  distinctive bare word (six or more characters, with an inner underscore or a camelCase step, not
+  part of a path) now locates a changed definition under the same rules: the exact finding bullet,
+  one parent, exactly one changed definition, a file the row lists. Each reference records
+  `form: bare` or `quoted`. Measured on the 2026-10-28 ledger: 81 more records anchored, each
+  reviewed by hand.
+
+**The L1 auditors get one output contract, a scope tied to the run's mode, and an evidence bar.**
+Over 316 verdicts in 47 runs (2026-10-25 to 2026-10-28) L1 precision was 0.81, and 26 of the 57
+false positives were `out_of_scope`. The nine L1 agent files are rewritten:
+
+* **One output.** Each file opened its reply with a YAML status block while asking for the JSON
+  array first, and wrote a trail file and `EXECUTION_LOG.md` from parallel agents. Now the reply
+  opens with the array, a short summary follows it (files read, checks skipped and why), and no
+  file is written.
+* **Scope by mode.** In a DIFF run an auditor reports only what the change introduces or whose
+  effect it changes, callers of a changed function included. File and repository measures (file
+  length, TODO counts, `.env` completeness, outdated packages, repository-wide security scans)
+  run in hunts only. A serious defect outside the diff gets one prose line, not a finding.
+* **Evidence.** Every finding quotes its line, names the trigger (or the concrete harm for a
+  non-runtime finding) and says where the auditor looked for a mitigation. Without a trigger it
+  is still reported, below 0.5 confidence. Security and env quote a line with its value redacted.
+* **bug-auditor starts from logic and contracts:** callers, fail open or closed, the shape of
+  outside input, identity and key mismatches, reachability, cleanup on every exit. **perf-auditor
+  names why a path is hot**, and its speculative items are gone.
+
+The expected effect is pre-registered in `docs/preregistrations/2026-10-28-l1-auditor-instructions.md`
+and measured by `benchmarks/harness/l1_precision.py`; it is not measured yet. Missed bugs are not
+measured by it at all.
 
 ### Upgrading from 0.13.0
 

@@ -180,7 +180,12 @@ def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
     # L3's file is an object of two id lists, not an array: record checks its shape.
     plan = git_repo / ".claude" / "audits" / "plan-output.json"
     plan.write_text('{"to_fix": [], "deferred": []}', encoding="utf-8")
-    ps.start("STANDARD", root=git_repo)
+    state = ps.start("STANDARD", root=git_repo)
+    # Step 1's receipt: `pipeline record L1` refuses a DIFF run without it.
+    run = git_repo / ".claude" / "audits" / "runs" / state.run_id
+    run.mkdir(parents=True, exist_ok=True)
+    (run / ps.LOCAL_PRIOR).write_text('{"status": "unavailable", "block": ""}\n',
+                                      encoding="utf-8")
     for layer, counts in (("L1", None), ("L2", {"unique": 0})):
         ps.record(layer, counts=counts, output=out, root=git_repo)
     ps.record("L2.5", counts={"confirmed": 0, "fp": 0, "uncertain": 0, "duplicate": 0},
