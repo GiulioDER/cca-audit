@@ -33,6 +33,19 @@ _FILE = re.compile(
 _IDENTIFIER = r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"
 _QUOTED = re.compile(rf"`({_IDENTIFIER})(?:\([^`]*\))?`")
 _CALL = re.compile(rf"(?<![\w.])({_IDENTIFIER})\(")
+#: A bare word outside backticks, a path or a call. Legacy summaries name the repaired definition
+#: this way ("paper_trader _check_stop_loss math.isfinite() guards"): measured 2026-10-28, 502 of
+#: 556 unanchored rows named no quoted identifier or file, while 86 named exactly one changed
+#: definition bare. Only distinctive words count (`_distinctive`), so "audit" or "predict" never do.
+_BARE = re.compile(r"(?<![\w`/\\])([A-Za-z_]\w*)(?![\w`(/\\.])")
+
+
+def _distinctive(token: str) -> bool:
+    """A word that reads as an identifier, not as prose: six or more characters with an inner
+    underscore (`should_trade`, `_force_recycle_session`) or a lower-to-upper case step
+    (`AlpacaBroker`, `syncStatus`)."""
+    camel = re.search(r"[a-z][A-Z]", token) is not None
+    return len(token) >= 6 and ("_" in token.strip("_") or camel)
 
 
 def _proof_path(file: str) -> bool:
@@ -136,8 +149,14 @@ def _catalog(repo: Path, sha: str) -> tuple[str, tuple[dict, ...]]:
 
 
 def symbol_references(row: BugRow, repo: Path) -> tuple[str, list[dict]]:
-    """Quoted identifiers and explicit calls locate only one changed definition each."""
-    tokens = {m.group(1) for pattern in (_QUOTED, _CALL) for m in pattern.finditer(row.summary)}
+    """Quoted identifiers, explicit calls and distinctive bare words locate only one changed
+    definition each. A reference records which form named it, so the bare ones can be told apart."""
+    forms = {m.group(1): "quoted" for pattern in (_QUOTED, _CALL)
+             for m in pattern.finditer(row.summary)}
+    for m in _BARE.finditer(row.summary):
+        if _distinctive(m.group(1)):
+            forms.setdefault(m.group(1), "bare")
+    tokens = set(forms)
     if not tokens:
         return "", []
     parent, catalog = _catalog(repo, row.fix_commit)
@@ -150,7 +169,7 @@ def symbol_references(row: BugRow, repo: Path) -> tuple[str, list[dict]]:
         found = matches[0]
         if found["file"] not in row.files or _proof_path(found["file"]):
             continue
-        refs.setdefault(found["file"], {**found, "token": token})
+        refs.setdefault(found["file"], {**found, "token": token, "form": forms[token]})
     return parent, list(refs.values())
 
 

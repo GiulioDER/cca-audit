@@ -264,6 +264,20 @@ def test_hook_snippet_arms_both_hooks(tmp_path):
     assert "matcher" not in snippet["Stop"][0]
 
 
+def test_hook_snippet_arms_the_l1_launch_check(tmp_path):
+    """Invariant: the snippet routes `Agent` launches through the guard too, with the same
+    fail-closed timeout, so an L1 auditor launched without the brief is refused.
+
+    Red 2026-10-28: mutation deleting the `"matcher": "Agent"` entry from
+    `installer.hook_snippet`; failed at `assert agent` ([] is falsy).
+    """
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    agent = [e for e in snippet["PreToolUse"] if e.get("matcher") == "Agent"]
+    assert agent
+    assert "cca_pipeline_guard.py" in agent[0]["hooks"][0]["command"]
+    assert agent[0]["hooks"][0]["timeout"] > 30
+
+
 def test_hook_snippet_timeouts_exceed_the_fingerprint_bound(tmp_path):
     """Review Focus 5. A hook that times out fails open. Baseline d2317de: 15 s. Red there.
 

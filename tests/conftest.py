@@ -44,6 +44,31 @@ def _private_bugs_dir(monkeypatch, tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _prior_brief_built(monkeypatch):
+    """Every run a test starts gets the Step 1 receipt, so recording L1 tests what it means to.
+
+    The L1 gate refuses a DIFF or HUNT run without one (`_check_prior_brief`), and most tests
+    are about a later layer; a test of the gate itself deletes the receipt. The receipt is the
+    shape `bugs brief --out` writes when the reader is unavailable, so it claims nothing about
+    memory.
+    """
+    from cca_checks import deferred, pipeline_state
+
+    real = pipeline_state.start
+
+    def start(*args, root=".", **kwargs):
+        state = real(*args, root=root, **kwargs)
+        run = deferred.runs_dir(root) / state.run_id
+        run.mkdir(parents=True, exist_ok=True)
+        receipt = {"status": "unavailable", "block": "", "reason": "OSError"}
+        (run / pipeline_state.LOCAL_PRIOR).write_text(json.dumps(receipt) + "\n",
+                                                      encoding="utf-8")
+        return state
+
+    monkeypatch.setattr(pipeline_state, "start", start)
+
+
+@pytest.fixture(autouse=True)
 def _private_user_claude_dir(monkeypatch, tmp_path_factory):
     """`pipeline start` compares the user level `.claude/` with the package; never the real one.
 

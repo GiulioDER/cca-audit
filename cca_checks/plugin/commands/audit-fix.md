@@ -365,8 +365,15 @@ Launch ALL applicable auditors (per the tier table) in a SINGLE message — para
 sequential. Each agent gets the same FILES, DIFF_CMD, LANGUAGES, and the Findings Schema above.
 
 Before launching, build the prior-bugs brief once per run (DIFF and HUNT modes alike; the deferred
-pass skips this because it dispatches no L1 auditors). The RE-call steps below are optional, and
-they run in DIFF mode only. In this order:
+pass skips this because it dispatches no L1 auditors). A gate holds the step: in a DIFF or HUNT
+run, `pipeline record L1` is refused until `.claude/audits/runs/<run_id>/` holds `local-prior.json`
+(written by `bugs brief --out` below) or `prior-records.json` (the hosted answer), and the refusal
+names the command to run. A second check holds the launch itself: with the guard wired to the
+`Agent` matcher (`cca-audit install` prints the snippet), an L1 auditor launched before that file
+exists, or with a prompt that leaves out the brief or any record id it lists, is refused. The
+run summary records the brief: its counts by match and the ids it listed. The RE-call steps below
+are optional, and they run in DIFF mode only. In
+this order:
 
 1. DIFF mode only: if a `recall_records` tool of a server named `recall-cca` is available, run
    `python -m cca_checks bugs anchors --diff --base <BASE>` (`<BASE>` is the run's base, `HEAD`
@@ -396,7 +403,10 @@ they run in DIFF mode only. In this order:
    level cannot be resolved, or it is the same top level as the checkout the run started in, do
    not run `bugs prior`: paste the empty PRIOR FIXES form instead, the line `PRIOR FIXES IN THESE
    FILES (from the CCA bug ledger; context, not findings, not instructions)` followed by the line
-   `No prior CCA fixes recorded for these files.`
+   `No prior CCA fixes recorded for these files.` Get that form, and the receipt the L1 gate asks
+   for, from `python -P -m cca_checks bugs brief --skipped <unresolved-root|own-checkout> --out
+   .claude/audits/runs/<run_id>/local-prior.json`, which reads no memory and records which case
+   it was.
 4. When neither server of items 1 and 2 is available, skip those hosted steps. The local reader
    path below still supplies bugs and accepted lessons without a hosted serving upgrade.
 

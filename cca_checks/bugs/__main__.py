@@ -143,7 +143,12 @@ def _prior(a: argparse.Namespace) -> int:
 def _brief(a: argparse.Namespace) -> int:
     from . import local_brief
 
-    result = local_brief.build(a.root, a.files)
+    if a.skipped is not None:
+        # A hunt whose target root is unresolved or is the user's own checkout: read no
+        # memory, but leave the receipt the L1 gate asks for.
+        result = {"status": "skipped", "block": "", "reason": a.skipped}
+    else:
+        result = local_brief.build(a.root, a.files)
     if a.out is not None:
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(result, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -416,6 +421,9 @@ def main(argv: list[str] | None = None) -> int:
     brief.add_argument("--json", action="store_true")
     brief.add_argument("--out", type=Path,
                        help="save the local status and block for this auditor dispatch")
+    brief.add_argument("--skipped", choices=["unresolved-root", "own-checkout"],
+                       help="HUNT mode only: read no memory, print the empty PRIOR FIXES form "
+                            "and record why in --out")
     d = sub.add_parser("distill", help="group related bugs and draft lesson proposals")
     d.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's bugs")
     d.add_argument("--draft", action="store_true",

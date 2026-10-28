@@ -1096,6 +1096,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
         if layer in OUTPUT_LAYERS:
             data = _read_output(layer, output, root)
             _check_shape(layer, state, counts, data, root)
+            if layer == "L1":
+                _check_prior_brief(state, root)
         elif layer == "L6":
             # Optional: only an APPROVED verdict over false positives requires the file.
             data = _read_output(layer, output, root) if output is not None else None
@@ -1176,6 +1178,33 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 
 #: The saved `recall_records` answer Step 1 renders the prior-bugs block from.
 PRIOR_RECORDS = "prior-records.json"
+#: The receipt `bugs brief --out` writes: Step 1's local reader path.
+LOCAL_PRIOR = "local-prior.json"
+
+
+def _check_prior_brief(state: PipelineState, root) -> None:
+    """Refuse a DIFF or HUNT run's L1 unless Step 1 left a prior-bugs brief in its run directory.
+
+    Step 1 was prose with no gate, and measured 2026-10-27 over the previous 48 hours, 13
+    Claude Code runs dispatched their auditors without building the brief while every Codex
+    run built it. Either file shows the step ran: the hosted answer or the local receipt,
+    which `bugs brief` writes even when the reader is unavailable. A deferred pass dispatches
+    no L1 auditors, so it is not asked for one.
+    """
+    if state.mode not in ("DIFF", "HUNT"):
+        return
+    run = deferred.runs_dir(root) / state.run_id
+    if (run / LOCAL_PRIOR).is_file() or (run / PRIOR_RECORDS).is_file():
+        return
+    where = f".claude/audits/runs/{state.run_id}"
+    raise RecordRefused(
+        f"L1 needs the prior-bugs brief first, and {where}/ holds neither {LOCAL_PRIOR} nor "
+        f"{PRIOR_RECORDS}. Run `python -P -m cca_checks bugs brief --root <target Git root> "
+        f"--out {where}/{LOCAL_PRIOR} --files <FILES>` (or save the hosted recall_records "
+        f"answer as {where}/{PRIOR_RECORDS}; a hunt that must read no memory passes "
+        "`--skipped <unresolved-root|own-checkout>` instead of --root and --files), paste its "
+        "output into every auditor prompt as Step 1 of audit-fix.md says, then record again"
+    )
 
 
 def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | None] | None:
@@ -1200,18 +1229,48 @@ def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | N
     return records, repo
 
 
+_BRIEF_LINE = re.compile(r"^(BUG|LESSON) (\S+) \[(\w+)\]", re.MULTILINE)
+
+
+def _local_brief(state: PipelineState, root) -> tuple[str, list[tuple[str, str, str]]] | None:
+    """(status, [(kind, id, match)]) from this run's `bugs brief` receipt, or None without one.
+
+    The lines are the reader block's own BUG and LESSON lines, so they are the records the
+    auditors were given. A receipt that cannot be read lists nothing, under status
+    `unreadable`, which is what the counts must then say.
+    """
+    path = deferred.runs_dir(root) / state.run_id / LOCAL_PRIOR
+    if not path.is_file():
+        return None
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "unreadable", []
+    if not isinstance(receipt, dict):
+        return "unreadable", []
+    block = receipt.get("block")
+    lines = _BRIEF_LINE.findall(block) if isinstance(block, str) else []
+    return str(receipt.get("status") or "unreadable"), lines
+
+
 def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
     """The anchored prior-bugs block's record count by anchor match, or None without one.
 
     Counted with the block's own selection from the answer this run saved, so the counts are
     the block the auditors were given. They are what the measurement trigger reads: twelve
     DIFF runs whose block held an exact or symbol_changed record, across two repositories.
+    Without a hosted answer they are counted from the local receipt's BUG lines: until
+    2026-10-28 they were not, so every run on the local path reported no block at all.
     """
     from .bugs import prior
 
     saved = _saved_brief_answer(state, root)
     if saved is None:
-        return None
+        local = _local_brief(state, root) if state.mode == "DIFF" else None
+        if local is None:
+            return None
+        return {m: sum(1 for k, _, got in local[1] if k == "BUG" and got == m)
+                for m in prior.MATCH_ORDER}
     records, repo = saved
     return prior.block_counts(prior.select_records(records, repo) if repo else [])
 
@@ -1226,9 +1285,26 @@ def lessons_block_count(state: PipelineState, root) -> int | None:
 
     saved = _saved_brief_answer(state, root)
     if saved is None:
-        return None
+        local = _local_brief(state, root) if state.mode == "DIFF" else None
+        return None if local is None else sum(1 for k, _, _ in local[1] if k == "LESSON")
     records, repo = saved
     return len(prior.select_lessons(records, repo)) if repo else 0
+
+
+def prior_brief(state: PipelineState, root) -> dict | None:
+    """Which Step 1 brief this run built, its status and the record ids it listed.
+
+    Recorded for every mode, so the ledger can later say which prior bugs and lessons each
+    run's auditors were shown, and a recurrence replay can join a new finding to them.
+    """
+    run = deferred.runs_dir(root) / state.run_id
+    if (run / PRIOR_RECORDS).is_file():
+        return {"source": "hosted"}
+    local = _local_brief(state, root)
+    if local is None:
+        return None
+    status, lines = local
+    return {"source": "local", "status": status, "ids": [i for _, i, _ in lines]}
 
 
 def _write_summary(state: PipelineState, root) -> None:
@@ -1253,6 +1329,7 @@ def _write_summary(state: PipelineState, root) -> None:
         "disputed_fp": disputed_fps(state, root),
         "prior_block": prior_block_counts(state, root),
         "lessons_block": lessons_block_count(state, root),
+        "prior_brief": prior_brief(state, root),
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"
     try:

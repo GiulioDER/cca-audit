@@ -24,6 +24,11 @@ BEHAVIOUR
   gates unsatisfied        -> exit 2, with the missing layers named on stderr
   gates satisfied          -> exit 0
 
+AGENT LAUNCHES. Wired to the `Agent` matcher too, it refuses an L1 auditor launched
+before Step 1 built the brief, or with a prompt that does not carry it
+(`cca_gate_core.dispatch_reasons`). Every other launch, and every launch outside an
+open DIFF or HUNT run, is allowed.
+
 Exit 2 is the Claude Code convention for "block this tool call and show stderr to
 the model", so the refusal arrives as a correction rather than as a crash.
 
@@ -346,6 +351,10 @@ def main(argv: list[str] | None = None) -> int:
         # guard only ever constrains a commit it can actually see.
         return 0
 
+    agent = read_agent(raw)
+    if agent is not None:
+        return _judge_dispatch(pathlib.Path(read_cwd(raw) or os.getcwd()), *agent)
+
     command = read_command(raw)
     if not command or not _COMMIT_RE.search(command):
         return 0
@@ -368,6 +377,52 @@ def main(argv: list[str] | None = None) -> int:
         if refused:
             return refused
     return 0
+
+
+def read_agent(raw: str) -> tuple[str, str] | None:
+    """(subagent_type, prompt) when the payload is an Agent launch, else None."""
+    text = raw.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or payload.get("tool_name") != "Agent":
+        return None
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return None
+    prompt = tool_input.get("prompt")
+    return str(tool_input.get("subagent_type") or ""), prompt if isinstance(prompt, str) else ""
+
+
+def _judge_dispatch(base: pathlib.Path, agent_type: str, prompt: str) -> int:
+    """Exit code for an Agent launch: 2 when it is an L1 auditor launched without the brief.
+
+    An unreadable state or a core that will not load allows the launch: the commit gate
+    refuses both at the end of the run, and an auditor is cheaper to repeat than a session
+    that cannot launch any agent at all.
+    """
+    try:
+        root = find_root(base.resolve())
+        if root is None:
+            return 0
+        core = _load_core()
+        state = core.read_state(root)
+        if state is None:
+            return 0
+        reasons = core.dispatch_reasons(root, state, agent_type, prompt)
+    except Exception:  # noqa: BLE001 (fail open, see the docstring)
+        return 0
+    if not reasons:
+        return 0
+    print(f"CCA pipeline gate: this {agent_type} launch is blocked.\n", file=sys.stderr)
+    for reason in reasons:
+        print(f"  - {reason}", file=sys.stderr)
+    print("\nStep 1 of audit-fix.md: every L1 auditor prompt carries the prior-bugs brief.",
+          file=sys.stderr)
+    return 2
 
 
 def _judge(root: pathlib.Path, command: str) -> int:
