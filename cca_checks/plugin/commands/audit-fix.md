@@ -368,7 +368,11 @@ Before launching, build the prior-bugs brief once per run (DIFF and HUNT modes a
 pass skips this because it dispatches no L1 auditors). A gate holds the step: in a DIFF or HUNT
 run, `pipeline record L1` is refused until `.claude/audits/runs/<run_id>/` holds `local-prior.json`
 (written by `bugs brief --out` below) or `prior-records.json` (the hosted answer), and the refusal
-names the command to run. The RE-call steps below are optional, and they run in DIFF mode only. In
+names the command to run. A second check holds the launch itself: with the guard wired to the
+`Agent` matcher (`cca-audit install` prints the snippet), an L1 auditor launched before that file
+exists, or with a prompt that leaves out the brief or any record id it lists, is refused. The
+run summary records the brief: its counts by match and the ids it listed. The RE-call steps below
+are optional, and they run in DIFF mode only. In
 this order:
 
 1. DIFF mode only: if a `recall_records` tool of a server named `recall-cca` is available, run

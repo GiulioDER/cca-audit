@@ -108,6 +108,15 @@ sections above read.
   passed over. The run in the session's own checkout always holds it, whatever owner it names,
   because that name comes from the agent. A run opened before owners were recorded falls back to
   the worktree's session claim.
+* **An L1 auditor is launched only with the Step 1 brief, and the run records that brief.** The
+  `pipeline record L1` gate runs after the auditors return, so a brief built and never pasted
+  passed it: on 2026-10-28 one run wrote its receipt and launched three auditors without it 41 s
+  later. The commit guard, wired to the `Agent` matcher too, now refuses an L1 auditor launched in
+  an open DIFF or HUNT run before the receipt exists, or with a prompt that leaves out the brief or
+  any record id the receipt lists. `summary.json` counted the block only from the hosted answer,
+  so every run on the local path reported `prior_block: null`; it now counts the local receipt's
+  BUG and LESSON lines, and a new `prior_brief` field records the source, status and listed ids.
+  Codex has no launch hook, so on Codex the record-time gate is still the only check.
 
 ### Upgrading from 0.13.0
 
