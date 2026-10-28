@@ -118,6 +118,8 @@ class PipelineState:
     #: The Claude Code session that opened the run (`CLAUDE_CODE_SESSION_ID` at `start`), so
     #: the stop guard holds that session only. None when started outside Claude Code.
     owner_session: str | None = None
+    client: str | None = None
+    auditors: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return {
@@ -128,6 +130,7 @@ class PipelineState:
             "stop_logged": self.stop_logged, "paused": self.paused, "layers": self.layers,
             "base_commit": self.base_commit, "parent": self.parent,
             "owner_session": self.owner_session,
+            "client": self.client, "auditors": self.auditors,
         }
 
     @classmethod
@@ -158,6 +161,7 @@ class PipelineState:
             owner_session=(
                 raw.get("owner_session") if isinstance(raw.get("owner_session"), str) else None
             ),
+            client=raw.get("client"), auditors=raw.get("auditors", []),
         )
 
     @property
@@ -326,7 +330,8 @@ def _registry(action: str, *args) -> None:
 
 
 def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = "",
-          base: str = "HEAD", parent: str = "",
+          base: str = "HEAD", parent: str = "", client: str | None = None,
+          auditors: list[str] | None = None,
           root: str | pathlib.Path = ".") -> PipelineState:
     """Open a run: at Step 0.6, or at Step 0.4 for a hunt.
 
@@ -351,6 +356,11 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
     mode = mode.upper()
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r} (expected one of {', '.join(MODES)})")
+    from . import dispatch_receipts
+    try:
+        auditors = dispatch_receipts.scope(client, mode, auditors or [], tier)
+    except ValueError as exc:
+        raise RecordRefused(str(exc)) from exc
     if parent and mode != "DEFERRED":
         raise RecordRefused(
             f"--from names the run a DEFERRED run follows up; it is refused with --mode {mode}"
@@ -402,6 +412,7 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
         schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
         parent=stored_parent,
         owner_session=os.environ.get("CLAUDE_CODE_SESSION_ID") or None,
+        client=client, auditors=auditors,
     )
     _write(state, root)
     _registry("register", root, state.run_id)
@@ -1098,6 +1109,11 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             _check_shape(layer, state, counts, data, root)
             if layer == "L1":
                 _check_prior_brief(state, root)
+                from . import dispatch_receipts
+                try:
+                    dispatch_receipts.require(state, root, tree)
+                except ValueError as exc:
+                    raise RecordRefused(str(exc)) from exc
         elif layer == "L6":
             # Optional: only an APPROVED verdict over false positives requires the file.
             data = _read_output(layer, output, root) if output is not None else None
@@ -1330,6 +1346,7 @@ def _write_summary(state: PipelineState, root) -> None:
         "prior_block": prior_block_counts(state, root),
         "lessons_block": lessons_block_count(state, root),
         "prior_brief": prior_brief(state, root),
+        "client": state.client, "auditors": state.auditors,
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"
     try:

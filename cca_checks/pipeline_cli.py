@@ -35,6 +35,14 @@ def add_parser(sub) -> None:
     pl_start.add_argument("--no-fix", action="store_true")
     pl_start.add_argument("--run-id", default="")
     pl_start.add_argument("--root", default=".")
+    pl_start.add_argument("--client", choices=["claude", "codex"], default=None)
+    pl_start.add_argument("--auditor", action="append", default=[],
+                          help="Codex DIFF/HUNT: each L1 dispatch role, once per scope")
+
+    pl_dispatch = plsub.add_parser("check-dispatch", help="check a Codex L1 prompt before dispatch")
+    pl_dispatch.add_argument("--role", required=True)
+    pl_dispatch.add_argument("--prompt-file", required=True)
+    pl_dispatch.add_argument("--root", default=".")
 
     pl_record = plsub.add_parser(
         "record", help="record that a layer was reached and judged"
@@ -133,7 +141,7 @@ def run(a) -> int:
             try:
                 state = pipeline_state.start(
                     a.tier, a.mode, no_fix=a.no_fix, run_id=a.run_id, base=a.base,
-                    parent=a.parent, root=a.root,
+                    parent=a.parent, root=a.root, client=a.client, auditors=a.auditor,
                 )
             except pipeline_state.RecordRefused as exc:
                 print(json.dumps({"refused": "start", "reason": str(exc)}), file=sys.stderr)
@@ -142,6 +150,17 @@ def run(a) -> int:
             for warning in warnings:
                 print(f"warning: {warning}", file=sys.stderr)
             print(json.dumps({"started": state.to_json(), "warnings": warnings}))
+            return 0
+
+        if a.pipeline_cmd == "check-dispatch":
+            from . import dispatch_receipts
+            try:
+                receipt = dispatch_receipts.check(a.role, a.prompt_file, a.root)
+            except ValueError as exc:
+                print(json.dumps({"refused": "check-dispatch", "reason": str(exc)}),
+                      file=sys.stderr)
+                return 2
+            print(json.dumps({"checked_dispatch": receipt}))
             return 0
 
         if a.pipeline_cmd == "record":
