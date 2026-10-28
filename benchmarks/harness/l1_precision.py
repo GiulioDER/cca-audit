@@ -4,7 +4,8 @@ Pre-registered use: docs/preregistrations/2026-10-28-l1-auditor-instructions.md.
 CONFIRMED / (CONFIRMED + FALSE_POSITIVE) over L2.5 verdict rows, an fp-check judgement rather than
 ground truth. Rows are deduplicated by (run_id, finding_id), because worktrees copy a ledger.
 
-    python benchmarks/harness/l1_precision.py --root ~/Documents [--since 20261029T000000Z] [--until ...]
+    python benchmarks/harness/l1_precision.py --root ~/Documents \
+        [--since 20261029T000000Z] [--until ...]
 """
 from __future__ import annotations
 
