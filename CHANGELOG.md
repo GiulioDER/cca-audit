@@ -8,6 +8,17 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**`bugs record-unlinked` records the fixes no merge can be found for.** `resolve` writes a run's
+rows only once GitHub names the merged pull request holding the run's commit, and that link is
+lost when a session amends or rebases before pushing or carries the fix to master on another
+branch. On 2026-10-28, 84 runs holding 461 fixes (P1 29, P2 228, P3 200) sat in pending/ for up to
+two weeks with everything but that link on disk. This writes their rows keyed by the run's own
+commit, with `fixed` claimed rather than evidenced (so `historical`, never `proved`) and an
+`unlinked:` source, and moves each record to unlinked/ so resolve cannot write it again. Runs
+newer than `--older-than-hours` (24) are left for resolve; a record naming no repository needs
+`--assume-repo`; a finding the ledger already holds for the same run is skipped. A later row that
+finds the merge can supersede an unlinked one.
+
 **`bugs stats` counts what CCA fixed.** Read-only counts over the ledger: fixes by severity and
 project, by auditor domain (the finding id's prefix, since the `auditor` field is often absent),
 by category, by month and by evidence tier; the most-fixed files by anchor rather than by the fix
