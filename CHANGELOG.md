@@ -8,6 +8,15 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**`bugs stats` counts what CCA fixed.** Read-only counts over the ledger: fixes by severity and
+project, by auditor domain (the finding id's prefix, since the `auditor` field is often absent),
+by category, by month and by evidence tier; the most-fixed files by anchor rather than by the fix
+commit's file list; and regressions, fixes that rewrote an earlier CCA fix's lines. False
+positives and lessons are reported beside the fixes, never counted as fixes, and a superseded bug
+row counts once. `--repo`, `--top` and `--json` narrow or export it. On the 2026-10-28 ledger:
+897 fixes, P1 208, P2 554, P3 88, 47 with no severity; 438 carry no domain and 637 no category,
+which the output states rather than hides.
+
 **Audits remember what earlier audits settled, through RE-call.** 0.13.0 gave auditors the earlier
 fixes in the files they audit. This release turns the bug ledger into records RE-call serves by
 code anchor (file, symbol and a hash of the code), and uses them three ways: the bugs CCA fixed at
