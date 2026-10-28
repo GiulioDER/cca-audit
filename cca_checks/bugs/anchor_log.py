@@ -57,7 +57,8 @@ def valid(value: object) -> bool:
 def _git_provenance(note: dict, provenance: object) -> bool:
     if not isinstance(provenance, dict):
         return False
-    if (provenance.get("method") not in ("git-finding-file", "git-finding-symbol-file")
+    if (provenance.get("method") not in ("git-finding-file", "git-finding-symbol-file",
+                                          "git-single-production-file")
             or provenance.get("commit") != note["fix_commit"]
             or not isinstance(provenance.get("finding_id"), str)
             or not provenance["finding_id"]
@@ -67,6 +68,14 @@ def _git_provenance(note: dict, provenance: object) -> bool:
             or any(a["symbol"] is not None for a in note["anchors"])):
         return False
     refs = provenance.get("references")
+    if provenance["method"] == "git-single-production-file":
+        version = provenance.get("exclusions_version")
+        return (isinstance(provenance.get("parent"), str)
+                and bool(SHA40.fullmatch(provenance["parent"]))
+                and isinstance(provenance.get("changed_sha256"), str)
+                and bool(_SHA.fullmatch(provenance["changed_sha256"]))
+                and type(version) is int and version >= 1
+                and refs == [{"file": a["file"]} for a in note["anchors"]])
     if provenance["method"] == "git-finding-symbol-file":
         if (not isinstance(provenance.get("parent"), str)
                 or not SHA40.fullmatch(provenance["parent"])

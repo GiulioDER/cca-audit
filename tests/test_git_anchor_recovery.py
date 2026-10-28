@@ -278,3 +278,58 @@ def test_a_prose_word_or_path_part_supplies_no_context(tmp_path, summary):
     r, repo = _bare_history(tmp_path, summary)
     with pytest.raises(Unavailable):
         recover(r, repo)
+
+
+def single_file_note(r):
+    return {"v": 2, "bug_id": r.id, "repo": r.repo, "run_id": r.run_id,
+            "fix_commit": r.fix_commit,
+            "anchors": [{"file": "pool.py", "symbol": None, "code_sha": "1" * 64}],
+            "provenance": {"method": "git-single-production-file", "commit": r.fix_commit,
+                           "message_sha256": "2" * 64, "changed_sha256": "3" * 64,
+                           "summary_sha256": hashlib.sha256(r.summary.encode()).hexdigest(),
+                           "finding_id": r.finding_id, "ordinal": r.ordinal,
+                           "parent": "a" * 40, "exclusions_version": 1,
+                           "references": [{"file": "pool.py"}]}}
+
+
+def test_single_file_note_is_valid():
+    """Red proof: with the method missing from the accepted tuple in
+    anchor_log._git_provenance, this fails on `assert anchor_log.valid(note)`."""
+    r = replace(row(), run_id=None, summary="pool.py: repair the lease")
+    assert anchor_log.valid(single_file_note(r))
+
+
+@pytest.mark.parametrize("damage", ["symbol", "missing_parent", "missing_summary_sha",
+                                    "references", "zero_exclusions_version"])
+def test_single_file_note_rejects_damage(damage):
+    """Each case is red when its own check is deleted from _git_provenance:
+    symbol (the `a["symbol"] is not None` clause), missing_parent (the parent SHA40 check
+    in the new branch), missing_summary_sha (summary_sha256 in the shared tuple),
+    references (the `refs == [...]` comparison), zero_exclusions_version (`version >= 1`).
+    The failing assertion in every mutation is `assert not anchor_log.valid(note)`."""
+    r = replace(row(), run_id=None, summary="pool.py: repair the lease")
+    note = single_file_note(r)
+    prov = note["provenance"]
+    if damage == "symbol":
+        note["anchors"][0]["symbol"] = "guessed"
+    elif damage == "missing_parent":
+        del prov["parent"]
+    elif damage == "missing_summary_sha":
+        del prov["summary_sha256"]
+    elif damage == "references":
+        prov["references"] = [{"file": "other.py"}]
+    else:
+        prov["exclusions_version"] = 0
+    assert not anchor_log.valid(note)
+
+
+def test_single_file_note_is_effective_for_its_row():
+    """Red proof: with the method unaccepted in _git_provenance, valid() fails inside
+    effective() and the first assert (`== note["anchors"]`) fails with an empty list.
+    The second assert is held by the existing summary_sha256 binding in effective()."""
+    r = replace(row(), run_id=None, summary="pool.py: repair the lease")
+    note = single_file_note(r)
+    assert anchor_log.effective(r.to_json(), {r.id: note}) == note["anchors"]
+    other = r.to_json()
+    other["summary"] = "pool.py: a different claim"
+    assert not anchor_log.effective(other, {r.id: note})
