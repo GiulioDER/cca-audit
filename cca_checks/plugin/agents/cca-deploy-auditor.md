@@ -10,23 +10,11 @@ model: inherit
 Find changes that will **fail or drift at deploy time**, which the plain code diff does not reveal.
 Scope is ONLY the deploy mechanics — not runtime correctness (that is the bug / high-stakes auditors).
 
-Output to `.claude/audits/AUDIT_DEPLOY.md` (optional trail). **Return value is authoritative** — see
-CCA Integration below.
+Your reply is the only output: see Return value below.
 
-## Status Block (Required)
-
-```yaml
----
-agent: deploy-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-files_scanned: [count]
-errors: []
-skipped_checks: []
----
-```
+**Suppress settled decisions.** Before flagging a deploy or config choice, confirm it is not an
+already-recorded project decision (decision log, ADRs, searchable memory). If it is settled,
+suppress it and note `settled: <ref>`.
 
 ## Scope (NON-OVERLAPPING)
 
@@ -57,6 +45,22 @@ skipped_checks: []
 - ~~Schema / column-type / query correctness~~ → data-integrity (DAT-)
 - ~~Dependency CVEs~~ → security-auditor · ~~maintenance/licenses~~ → dep-auditor
 
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+Deploy hazards come from the change by nature. In HUNT mode, read the deploy files the hunted
+paths ship through.
+
 ## Checks
 
 Detect what the diff touches, then apply the relevant checks:
@@ -80,29 +84,40 @@ Detect what the diff touches, then apply the relevant checks:
 When tooling can confirm the target's actual state (the file/unit really exists, the role really lacks
 the grant), prefer that ground truth over assuming drift — empty local state ≠ missing on target.
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### DEPLOY-NNN: Title` with Severity, File:line, Hazard, Deploy impact, Concrete fix
-(e.g. "ship via the privileged path, not the normal deploy" / "add the GRANT to the migration" /
-"pin the dependency to the target-supported range").
+fp-check will try to refute each finding against the code. Do that work first:
 
-## Execution Logging
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the concrete harm: what a reader, an operator or the
+   next change gets wrong because of it, and in which situation.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
 
-Append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | deploy-auditor | [status] | [duration] | [findings] | [errors] |
-```
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
 
-## CCA Integration (when run by /audit-fix)
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
 
-- **Return value is authoritative.** Emit findings as a JSON array per the CCA Findings Schema
-  (defined in the `audit-fix.md` command) as the FIRST thing in your reply, then prose. The
-  orchestrator consumes your return value; the `.claude/audits/*.md` file is optional audit-trail
-  only and is NOT read back.
-- **Suppress settled decisions.** Before flagging a deploy/config choice, confirm it is not an
-  already-recorded project decision (decision log / ADRs / searchable memory). If settled, suppress
-  and note `settled: <ref>`.
+## Return value
 
-Focus on what breaks BETWEEN merge and a healthy running deploy. If no deploy hazards, return an empty
-findings array and write "No deployability hazards detected".
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
+
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`DEPLOY-NNN`, or the prefix the invocation gave you), `auditor`
+   (`deploy-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`. `suggested_fix` names the concrete fix: "ship via the privileged path, not the normal
+   deploy", "add the GRANT to the migration", "pin the dependency to the target-supported range".
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.
+
+Focus on what breaks BETWEEN merge and a healthy running deploy. If there are no deploy hazards,
+return `[]`.
