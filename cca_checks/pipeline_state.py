@@ -959,7 +959,8 @@ def _held_to_pool(state: PipelineState, findings: list, root) -> None:
 
 
 def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, root) -> None:
-    """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files.
+    """Refuse an L2, L2.5 or L3 file that disagrees with its counts or with the earlier files,
+    and an L4 file the ledger could not read back.
 
     Also the one place a deferral is held to its priority: a P1 is never passed on
     unverified (L2.5) or left unfixed (L3), and a P2 may only be DEFERRED on FAST, the tier
@@ -997,6 +998,10 @@ def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, ro
                 raise layer_outputs.ShapeError(
                     f"L3 defers {', '.join(barred)} (P1); a confirmed P1 is always fixed"
                 )
+        elif layer == "L4":
+            # The ledger reads this file back at resolve; a shape it cannot read lost every
+            # fix of 12 runs as "no ledger rows could be built" (2026-10-21 to 2026-10-27).
+            layer_outputs.l4_fixes(value)
     except layer_outputs.ShapeError as exc:
         raise RecordRefused(str(exc)) from exc
 

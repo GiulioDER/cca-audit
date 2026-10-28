@@ -468,13 +468,17 @@ def test_a_merged_record_with_no_rows_stays_pending_as_incomplete(_private_bugs_
 
     Red 2026-10-13: pre-fix code; failed at `assert folder.exists() and ...` (moved to
     recorded/).
+    Red again 2026-10-28, in CI on #105: `rows_and_skips` returned a skip reason for this
+    unreadable L4, which resolve read as done; failed at the same assert.
     """
     root = _private_bugs_dir
     folder = pending_record(root, tmp_path, "r1")
     (folder / "L4.json").write_text(json.dumps({"fix_id": "FIX-001", "finding": "BUG-001"}))
     rep = resolve(root, write=True, run=gh_merged)
     assert folder.exists() and rep.recorded == []
-    assert rep.incomplete == [f"{folder.name}: no ledger rows could be built"]
+    # Since 2026-10-28 an L4 in neither readable shape says why (layer_outputs.l4_fixes).
+    assert len(rep.incomplete) == 1
+    assert rep.incomplete[0].startswith(f"{folder.name}: ShapeError: ")
 
 
 def test_an_uppercase_commit_is_incomplete_not_unknown(_private_bugs_dir, tmp_path):

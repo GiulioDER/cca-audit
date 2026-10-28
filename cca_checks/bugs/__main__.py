@@ -3,6 +3,7 @@ python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
 python -m cca_checks.bugs brief [--root PATH] [--files F ...] [--out FILE] [--json]
 python -m cca_checks.bugs prior --records FILE [--code FILE] [--no-lessons] [--repo-name OWNER/NAME]
     [--root PATH] [--before YYYY-MM-DD] [--limit N] [--json]
+python -m cca_checks.bugs stats [--repo OWNER/NAME] [--top N] [--json]
 python -m cca_checks.bugs distill [--repo OWNER/NAME] [--draft] [--model ID] [--json]
 python -m cca_checks.bugs lesson accept PROPOSAL --by NAME
 python -m cca_checks.bugs lesson retract ID --reason TEXT --by NAME
@@ -424,6 +425,11 @@ def main(argv: list[str] | None = None) -> int:
     brief.add_argument("--skipped", choices=["unresolved-root", "own-checkout"],
                        help="HUNT mode only: read no memory, print the empty PRIOR FIXES form "
                             "and record why in --out")
+    st = sub.add_parser("stats", help="count the fixes in the ledger: severity, project, "
+                                      "domain, category, anchored files, regressions")
+    st.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's fixes")
+    st.add_argument("--top", type=_positive_int, default=15)
+    st.add_argument("--json", action="store_true")
     d = sub.add_parser("distill", help="group related bugs and draft lesson proposals")
     d.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's bugs")
     d.add_argument("--draft", action="store_true",
@@ -509,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "retract-fp":
         return _retract_fp(a)
+
+    if a.cmd == "stats":
+        from . import stats
+        return stats.run(repo=a.repo, top=a.top, as_json=a.json)
 
     if a.cmd == "distill":
         return _distill(a)
