@@ -15,6 +15,12 @@ assertion, not on import or collection):
   made never true; fails on the `out["excluded"] == {...}` comparison.
 - test_a_summary_that_cannot_be_read_is_counted: the non-dict summary branch of _classify returns
   "hunt"; fails on `...["unreadable"] == 2` (1 == 2).
+- test_unknown_brief_is_none_not_false: three mutations, each run alone: (a) the status check in
+  had_brief removed, fails on `had_brief(down, {}) is None`; (b) the isinstance(lessons, int)
+  guard removed (None summed as 0 via `lessons or 0`), fails on the null-counts hosted assertion;
+  (c) the `not isinstance(data, dict)` check made to return False, fails on `had_brief(bad, {})`.
+- test_unknown_brief_is_excluded_apart_from_no_receipt: the has_receipt test in _classify forced
+  to False; fails on `excluded["unknown_brief"] == 1`.
 - test_gap_is_brief_minus_none: report computes `mn - mb`; fails on `out["gap"] == 3.0` (-3.0).
 - test_runs_deduplicates_by_run_id_and_honours_the_window: `or run_id in seen` removed from runs;
   fails on `== ["r1"]` (["r1", "r1"]).
@@ -72,6 +78,31 @@ def test_hosted_brief_uses_the_block_counts(tmp_path):
     assert had_brief(d, {"prior_block": zeros, "lessons_block": 2}) is True
 
 
+def test_unknown_brief_is_none_not_false(tmp_path):
+    bad = make_run(tmp_path, "a")
+    (bad / "local-prior.json").write_text("{not json")
+    down = make_run(tmp_path, "b")
+    (down / "local-prior.json").write_text(json.dumps({"status": "unavailable", "block": ""}))
+    empty = make_run(tmp_path, "c")
+    (empty / "local-prior.json").write_text(json.dumps({"status": "empty", "block": HEADING}))
+    hosted = make_run(tmp_path, "d", hosted=True)
+    assert had_brief(bad, {}) is None
+    assert had_brief(down, {}) is None
+    assert had_brief(empty, {}) is False
+    assert had_brief(hosted, {"prior_block": None, "lessons_block": None}) is None
+    assert had_brief(hosted, {"prior_block": {"exact": 0}, "lessons_block": None}) is None
+    assert had_brief(hosted, {"prior_block": {"exact": 0}, "lessons_block": 0}) is False
+
+
+def test_unknown_brief_is_excluded_apart_from_no_receipt(tmp_path):
+    d = make_run(tmp_path, "a", verdicts=[("BUG-1", "CONFIRMED")])
+    (d / "local-prior.json").write_text(json.dumps({"status": "unavailable", "block": ""}))
+    make_run(tmp_path, "b", verdicts=[("BUG-1", "CONFIRMED")])
+    out = report(runs(tmp_path, "", "~"))
+    assert out["excluded"]["unknown_brief"] == 1 and out["excluded"]["no_receipt"] == 1
+    assert out["n_none"] == 0
+
+
 def test_only_confirmed_l1_findings_count(tmp_path):
     d = make_run(tmp_path, "a", verdicts=[("BUG-001", "CONFIRMED"), ("SEC-002", "FALSE_POSITIVE"),
                                           ("FIX-1", "CONFIRMED")])
@@ -96,7 +127,7 @@ def test_hunt_deferred_and_fast_are_excluded_and_counted(tmp_path):
     make_run(tmp_path, "e", verdicts=[])
     out = report(runs(tmp_path, "", "~"))
     assert out["excluded"] == {"hunt": 1, "deferred": 1, "fast": 1, "no_receipt": 1,
-                               "no_verdicts": 0, "unreadable": 0}
+                               "unknown_brief": 0, "no_verdicts": 0, "unreadable": 0}
     assert out["n_none"] == 1 and out["n_brief"] == 0 and out["mean_none"] == 1.0
 
 

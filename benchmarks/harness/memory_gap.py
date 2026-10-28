@@ -20,7 +20,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from l1_precision import PREFIX  # noqa: E402
 
 BRIEF_LINE = re.compile(r"^(BUG|LESSON) ", re.MULTILINE)
-REASONS = ("hunt", "deferred", "fast", "no_receipt", "no_verdicts", "unreadable")
+REASONS = ("hunt", "deferred", "fast", "no_receipt", "unknown_brief", "no_verdicts",
+           "unreadable")
 
 
 def _load(path: pathlib.Path):
@@ -31,18 +32,25 @@ def _load(path: pathlib.Path):
 
 
 def had_brief(run_dir: pathlib.Path, summary: dict) -> bool | None:
-    """True when the run's receipt shows an injected record, None when no receipt exists."""
+    """True or False when the receipt shows whether records were injected, else None.
+
+    None means unknown: no receipt, an unreadable one, a reader status other than ok or empty,
+    or hosted counts that are not all present. Unknown is never counted as "no brief".
+    """
     local = run_dir / "local-prior.json"
     if local.exists():
         data = _load(local)
-        block = data.get("block") if isinstance(data, dict) else None
-        return bool(BRIEF_LINE.search(block)) if isinstance(block, str) else False
+        if not isinstance(data, dict) or data.get("status") not in ("ok", "empty"):
+            return None
+        block = data.get("block")
+        return bool(BRIEF_LINE.search(block)) if isinstance(block, str) else None
     if (run_dir / "prior-records.json").exists():
-        prior = summary.get("prior_block")
-        values = prior.values() if isinstance(prior, dict) else []
-        counts = [v for v in values if isinstance(v, int)]
-        lessons = summary.get("lessons_block")
-        return sum(counts) + (lessons if isinstance(lessons, int) else 0) > 0
+        prior, lessons = summary.get("prior_block"), summary.get("lessons_block")
+        if not isinstance(prior, dict) or not all(isinstance(v, int) for v in prior.values()):
+            return None
+        if not isinstance(lessons, int):
+            return None
+        return sum(prior.values()) + lessons > 0
     return None
 
 
@@ -78,7 +86,9 @@ def _classify(run_id: str, run_dir: pathlib.Path) -> dict:
         return _row(run_id, None, None, "fast")
     brief = had_brief(run_dir, summary)
     if brief is None:
-        return _row(run_id, None, None, "no_receipt")
+        has_receipt = (run_dir / "local-prior.json").exists() or (
+            run_dir / "prior-records.json").exists()
+        return _row(run_id, None, None, "unknown_brief" if has_receipt else "no_receipt")
     confirmed = confirmed_l1(run_dir)
     if confirmed is None:
         if (run_dir / "L1.json").exists() and _load(run_dir / "L1.json") == []:
