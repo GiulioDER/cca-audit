@@ -224,3 +224,57 @@ def test_malformed_git_finding_has_a_domain_refusal(tmp_path):
     except (TypeError, AttributeError) as exc:
         other = exc
     assert domain and other is None, "malformed finding escaped the structured refusal"
+
+
+def _bare_history(tmp_path, summary):
+    """A fix whose bullet names the changed definition `check_lease` as a bare word."""
+    repo = make_repo(tmp_path / "repo")
+    commit(repo, "pool.py", "def check_lease():\n    return -1\n\ndef lease():\n    return 0\n",
+           "input")
+    head = commit(repo, "pool.py",
+                  "def check_lease():\n    return 1\n\ndef lease():\n    return 2\n",
+                  "fix: audit fixes from CCA\n\nP2:\n- BUG-1: " + summary + "\n")
+    return replace(row(), fix_commit=head, run_id=None, summary=summary, files=["pool.py"]), repo
+
+
+def test_a_distinctive_bare_definition_name_supplies_file_context(tmp_path):
+    """Invariant: a legacy summary that names exactly one changed definition as a bare,
+    distinctive word ("check_lease rejects ...") recovers file context, marked `form: bare`.
+
+    Measured 2026-10-28: 502 of 556 unanchored rows failed with "no unambiguous source file
+    reference" because only backticked names and calls counted; this form recovered 81.
+    Red 2026-10-28: mutation in `recover_git_anchors.symbol_references`,
+    `if _distinctive(m.group(1)):` became `if False:`; failed at `assert note is not None`.
+    """
+    from cca_checks.bugs.recover_anchors import Unavailable
+    from cca_checks.bugs.recover_git_anchors import recover
+
+    r, repo = _bare_history(tmp_path, "pool check_lease rejects negative leases")
+    note = None
+    try:
+        note = recover(r, repo)
+    except Unavailable:
+        pass
+    assert note is not None, "the bare changed definition was not located"
+    ref = note["provenance"]["references"][0]
+    assert (ref["symbol"], ref["form"], ref["file"]) == ("check_lease", "bare", "pool.py")
+    assert note["anchors"][0]["symbol"] is None and anchor_log.valid(note)
+
+
+@pytest.mark.parametrize("summary", ["pool lease rejects negatives",
+                                     "see pool_notes.md for check_lease_v2 context"])
+def test_a_prose_word_or_path_part_supplies_no_context(tmp_path, summary):
+    """Invariant: a bare word counts only when it reads as an identifier, and never as part
+    of a path: "lease" names the changed `lease` definition but is prose, and the second
+    summary names no changed definition at all.
+
+    Red 2026-10-28: mutation in `recover_git_anchors._distinctive`, the body became
+    `return True`; failed at `pytest.raises(Unavailable)` for the first case (DID NOT RAISE),
+    because "lease" then matched the changed `lease`.
+    """
+    from cca_checks.bugs.recover_anchors import Unavailable
+    from cca_checks.bugs.recover_git_anchors import recover
+
+    r, repo = _bare_history(tmp_path, summary)
+    with pytest.raises(Unavailable):
+        recover(r, repo)
