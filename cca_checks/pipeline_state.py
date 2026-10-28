@@ -1229,18 +1229,48 @@ def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | N
     return records, repo
 
 
+_BRIEF_LINE = re.compile(r"^(BUG|LESSON) (\S+) \[(\w+)\]", re.MULTILINE)
+
+
+def _local_brief(state: PipelineState, root) -> tuple[str, list[tuple[str, str, str]]] | None:
+    """(status, [(kind, id, match)]) from this run's `bugs brief` receipt, or None without one.
+
+    The lines are the reader block's own BUG and LESSON lines, so they are the records the
+    auditors were given. A receipt that cannot be read lists nothing, under status
+    `unreadable`, which is what the counts must then say.
+    """
+    path = deferred.runs_dir(root) / state.run_id / LOCAL_PRIOR
+    if not path.is_file():
+        return None
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "unreadable", []
+    if not isinstance(receipt, dict):
+        return "unreadable", []
+    block = receipt.get("block")
+    lines = _BRIEF_LINE.findall(block) if isinstance(block, str) else []
+    return str(receipt.get("status") or "unreadable"), lines
+
+
 def prior_block_counts(state: PipelineState, root) -> dict[str, int] | None:
     """The anchored prior-bugs block's record count by anchor match, or None without one.
 
     Counted with the block's own selection from the answer this run saved, so the counts are
     the block the auditors were given. They are what the measurement trigger reads: twelve
     DIFF runs whose block held an exact or symbol_changed record, across two repositories.
+    Without a hosted answer they are counted from the local receipt's BUG lines: until
+    2026-10-28 they were not, so every run on the local path reported no block at all.
     """
     from .bugs import prior
 
     saved = _saved_brief_answer(state, root)
     if saved is None:
-        return None
+        local = _local_brief(state, root) if state.mode == "DIFF" else None
+        if local is None:
+            return None
+        return {m: sum(1 for k, _, got in local[1] if k == "BUG" and got == m)
+                for m in prior.MATCH_ORDER}
     records, repo = saved
     return prior.block_counts(prior.select_records(records, repo) if repo else [])
 
@@ -1255,9 +1285,26 @@ def lessons_block_count(state: PipelineState, root) -> int | None:
 
     saved = _saved_brief_answer(state, root)
     if saved is None:
-        return None
+        local = _local_brief(state, root) if state.mode == "DIFF" else None
+        return None if local is None else sum(1 for k, _, _ in local[1] if k == "LESSON")
     records, repo = saved
     return len(prior.select_lessons(records, repo)) if repo else 0
+
+
+def prior_brief(state: PipelineState, root) -> dict | None:
+    """Which Step 1 brief this run built, its status and the record ids it listed.
+
+    Recorded for every mode, so the ledger can later say which prior bugs and lessons each
+    run's auditors were shown, and a recurrence replay can join a new finding to them.
+    """
+    run = deferred.runs_dir(root) / state.run_id
+    if (run / PRIOR_RECORDS).is_file():
+        return {"source": "hosted"}
+    local = _local_brief(state, root)
+    if local is None:
+        return None
+    status, lines = local
+    return {"source": "local", "status": status, "ids": [i for _, i, _ in lines]}
 
 
 def _write_summary(state: PipelineState, root) -> None:
@@ -1282,6 +1329,7 @@ def _write_summary(state: PipelineState, root) -> None:
         "disputed_fp": disputed_fps(state, root),
         "prior_block": prior_block_counts(state, root),
         "lessons_block": lessons_block_count(state, root),
+        "prior_brief": prior_brief(state, root),
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"
     try:
