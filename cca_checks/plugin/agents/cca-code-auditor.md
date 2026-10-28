@@ -9,24 +9,7 @@ model: inherit
 
 Find code quality issues. **NOT for security (use security-auditor) or runtime bugs (use bug-auditor).**
 
-Output to `.claude/audits/AUDIT_CODE.md` (optional trail). **Return value is authoritative** — see
-Return value below.
-
-## Status Block (Required)
-
-Every output MUST start with:
-```yaml
----
-agent: code-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-files_scanned: [count]
-errors: []
-skipped_checks: []
----
-```
+Your reply is the only output: see Return value below.
 
 ## Scope (NON-OVERLAPPING)
 
@@ -45,6 +28,24 @@ skipped_checks: []
 - ~~Empty catch/except, resource leaks, race conditions~~ → bug-auditor
 - ~~Query performance, memory, latency~~ → perf-auditor
 - ~~Dependency CVEs, outdated packages~~ → dep-auditor
+
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+Whole-file measures (file length over 500 lines, TODO and FIXME counts, module-wide naming or import
+consistency) are HUNT-only. In DIFF mode, judge complexity, naming, duplication, types and dead
+code only in code the diff adds or rewrites: a function the diff changes one line of is judged on
+that line, not reviewed whole.
 
 ## Checks
 
@@ -83,34 +84,38 @@ Construct grep patterns based on the project's detected language. Below are the 
 - Unused variables
 - Debug flags left enabled
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### CODE-NNN: Title` with Severity, File:line, Issue (1-2 sentences), Fix (concrete steps or code).
+fp-check will try to refute each finding against the code. Do that work first:
 
-Include a summary table and metrics table at the top.
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the concrete harm: what a reader, an operator or the
+   next change gets wrong because of it, and in which situation.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
 
-## Return value (authoritative)
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
 
-Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
-command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
-the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
 
-Each object: `id` (`CODE-NNN`), `auditor` (`code-auditor`), `severity`, `priority`, `category`,
-`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`.
+## Return value
 
-## Execution Logging
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
 
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | code-auditor | [status] | [duration] | [findings] | [errors] |
-```
-
-## Output Verification
-
-Before completing:
-1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
-2. Optional trail: if you wrote `.claude/audits/AUDIT_CODE.md`, verify it has content beyond headers.
-3. If no issues found, return `[]` and write "No code quality issues detected" (not empty file)
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`CODE-NNN`, or the prefix the invocation gave you), `auditor`
+   (`code-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`.
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.
 
 Focus on maintainability and consistency. **Do NOT duplicate security or bug checks.**

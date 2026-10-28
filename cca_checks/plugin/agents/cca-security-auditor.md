@@ -9,26 +9,7 @@ model: inherit
 
 **Single source of truth for ALL security checks.**
 
-Output to `.claude/audits/AUDIT_SECURITY.md` (optional trail). **Return value is authoritative** — see
-Return value below.
-
-## Status Block (Required)
-
-Every output MUST start with:
-```yaml
----
-agent: security-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-critical_count: [count]
-high_count: [count]
-language_detected: [python | typescript | go | rust | multi | unknown]
-errors: []
-skipped_checks: []
----
-```
+Your reply is the only output: see Return value below.
 
 ## Scope (SINGLE AUTHORITY)
 
@@ -48,6 +29,24 @@ skipped_checks: []
 - code-auditor: Code quality only (complexity, DRY, naming -- not secrets or vulnerabilities)
 - dep-auditor: Maintenance health, licenses, unused deps -- NOT CVEs (security-auditor owns CVEs)
 - env-validator: Config format/completeness only -- NOT secrets detection
+
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+In DIFF mode, an injection, auth or exposure finding needs a path from an untrusted source into the
+changed code, or from the changed code into a sink. Repository-wide scans (the secret grep, header
+and CORS review, the dependency audit) are HUNT-only unless the diff touches that file, endpoint
+or manifest.
 
 ## Checks
 
@@ -128,45 +127,40 @@ Run the appropriate audit command for the detected package manager:
 
 Report CVEs with severity, affected package, and fix version.
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### SEC-NNN: Title` with CVSS estimate, File:line, Attack Vector, Impact, Remediation.
+fp-check will try to refute each finding against the code. Do that work first:
 
-Include a risk summary table:
-```
-| Category | Critical | High | Medium | Low |
-|----------|----------|------|--------|-----|
-| Injection | X | X | X | X |
-| Auth | X | X | X | X |
-| Secrets | X | X | X | X |
-| Headers | X | X | X | X |
-| Data | X | X | X | X |
-| Deps | X | X | X | X |
-```
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the input, state or call path that makes the defect
+   happen: who calls this, with what value, in what order.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
 
-## Return value (authoritative)
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
 
-Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
-command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
-the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
 
-Each object: `id` (`SEC-NNN`), `auditor` (`security-auditor`), `severity`, `priority`, `category`,
-`file`, `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`. **Never put a
-secret value in `claim` or `evidence`** — reference the name and location only.
+## Return value
 
-## Execution Logging
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
 
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | security-auditor | [status] | [duration] | [findings] | [errors] |
-```
-
-## Output Verification
-
-Before completing:
-1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
-2. Optional trail: if you wrote `.claude/audits/AUDIT_SECURITY.md`, verify it has content beyond headers.
-3. If no issues found, return `[]` and write "No security issues detected" (not empty file)
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`SEC-NNN`, or the prefix the invocation gave you), `auditor`
+   (`security-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`.
+   **Never put a secret value in `claim` or `evidence`**: reference the name and location only.
+   When the line you quote holds a secret, quote it with the value replaced by `<redacted>`.
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.
 
 **This agent is the SINGLE SOURCE for security findings. Other agents must NOT duplicate these checks.**

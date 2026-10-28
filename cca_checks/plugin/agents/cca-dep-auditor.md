@@ -9,23 +9,7 @@ model: inherit
 
 Analyze project dependencies for maintenance health, license compliance, and bloat.
 
-Output to `.claude/audits/AUDIT_DEPS.md` (optional trail). **Return value is authoritative** — see
-Return value below.
-
-## Status Block (Required)
-
-Every output MUST start with:
-```yaml
----
-agent: dep-auditor
-status: COMPLETE | PARTIAL | SKIPPED | ERROR
-timestamp: [ISO timestamp]
-duration: [seconds]
-findings: [count]
-errors: []
-skipped_checks: []
----
-```
+Your reply is the only output: see Return value below.
 
 ## Scope (NON-OVERLAPPING)
 
@@ -40,6 +24,22 @@ skipped_checks: []
 **Does NOT check (use other agents):**
 - ~~Security vulnerabilities / CVEs~~ → security-auditor (single authority)
 - ~~Code quality of dependencies~~ → out of scope
+
+## In scope
+
+The invocation says whether this is a DIFF run or a HUNT run. The scope differs, and a finding
+outside it is a false positive even when the defect is real.
+
+- **DIFF mode.** Report a defect only when the change introduces it or changes its effect: a
+  changed line, or unchanged code whose behaviour the change alters (a caller of a function whose
+  signature, return value, raised errors or side effects changed; a reader of a value the change
+  now writes differently). A pre-existing defect in code the change neither touches nor alters is
+  out of scope, even when it is real. If one is serious, name it in a single prose line after the
+  JSON, headed "Outside this diff", and never as a finding.
+- **HUNT mode.** Every line of the named files is in scope, pre-existing code included.
+
+In DIFF mode, check only the dependencies the diff adds, removes or re-pins. Surveys of outdated
+or unmaintained packages across the whole manifest are HUNT-only.
 
 ## Checks
 
@@ -75,32 +75,38 @@ Detect the package manager first, then run appropriate commands.
 - Flag large dependencies with lighter alternatives
 - Identify dev dependencies incorrectly in production
 
-## Output Format
+## Evidence (every finding)
 
-Report findings grouped by severity: Critical > High > Medium > Low.
-Each finding: `### DEP-NNN: Title` with Severity, Package, Current/Latest versions, Issue, Fix command.
+fp-check will try to refute each finding against the code. Do that work first:
 
-## Return value (authoritative)
+1. **Quote the line.** `evidence` opens with the code at `file:line`, quoted exactly.
+2. **Name the trigger.** State the concrete harm: what a reader, an operator or the
+   next change gets wrong because of it, and in which situation.
+3. **Look for the mitigation.** Read the callers and the guards around the line: grep the
+   function's name, read the validation before it and the configuration that bounds it. Say where
+   you looked and why none of it prevents the trigger. A defect a caller, a guard or a config value
+   already handles is not a finding.
 
-Emit findings as a JSON array per the **CCA Findings Schema** (defined in the `audit-fix.md`
-command) as the FIRST thing in your reply, then prose. The orchestrator consumes your return value;
-the `.claude/audits/*.md` file is optional audit-trail only and is NOT read back.
+Write `evidence` as: `<file:line>: <quoted code>. Trigger: <...>. Checked: <where you looked for a
+mitigation, and why it does not apply>.`
 
-Each object: `id` (`DEP-NNN`), `auditor` (`dep-auditor`), `severity`, `priority`, `category`,
-`file` (the manifest), `line`, `claim`, `evidence`, `suggested_fix`, `confidence`, `high_stakes`.
+If you are confident the defect is real but cannot name a trigger, report it anyway, with
+`confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
+trigger lowers a finding's weight, and an invented one is a false claim.
 
-## Execution Logging
+## Return value
 
-After completing, append to `.claude/audits/EXECUTION_LOG.md`:
-```
-| [timestamp] | dep-auditor | [status] | [duration] | [findings] | [errors] |
-```
+Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
+log. Auditors run in parallel and the orchestrator reads only their replies.
 
-## Output Verification
-
-Before completing:
-1. **Primary:** verify your reply opens with the JSON findings array (empty array `[]` if clean).
-2. Optional trail: if you wrote `.claude/audits/AUDIT_DEPS.md`, verify it has content beyond headers.
-3. If no issues found, return `[]` and write "No dependency issues detected" (not empty file)
+1. Open the reply with the JSON array of findings per the **CCA Findings Schema** (defined in the
+   `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
+   heading.
+2. Each object: `id` (`DEP-NNN`, or the prefix the invocation gave you), `auditor`
+   (`dep-auditor`), `severity`, `priority`, `category`, `file` (the manifest), `line`, `claim`, `evidence`,
+   `suggested_fix`, `confidence`, `high_stakes`.
+3. After the array, a short prose summary: the files you read, every check you skipped and why
+   (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
+   there is one. A skipped check is reported, never silent.
 
 Focus on actionable findings. Include specific commands to fix issues.

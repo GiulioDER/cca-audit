@@ -336,9 +336,9 @@ the run unverifiable, and an unverifiable run is the thing this pipeline exists 
 
 ## Findings Schema (canonical)
 
-**Every auditor returns a JSON array as the FIRST thing in its response**, then optional prose. The
-orchestrator consumes the JSON RETURN VALUE — it does NOT depend on any `.claude/audits/*.md` file
-(those are optional audit-trail only). Each finding object:
+**Every auditor returns a JSON array as the FIRST thing in its response**, then a short prose
+summary. The orchestrator consumes the JSON RETURN VALUE; L1 auditors write no files. Each finding
+object:
 
 ```json
 {
@@ -543,10 +543,15 @@ user data, or irreversible actions." Replace {PROJECT_CONTEXT} with your project
 {SETTLED_DECISIONS}  (DIFF mode only; omit when there are none)
 
 ─── IF MODE == DIFF ──────────────────────────────────────────────────────────
-Check the CHANGED code (use `{DIFF_CMD}`) for: {AGENT_SPECIFIC_CHECKLIST}
+Mode: DIFF. Check the CHANGED code (use `{DIFF_CMD}`) for: {AGENT_SPECIFIC_CHECKLIST}
 
 RULES:
-- Focus ONLY on new/changed code. Don't audit pre-existing issues.
+- Report only a defect the change introduces or whose effect it changes, including unchanged code
+  whose behaviour the change alters (a caller of a changed function). A pre-existing defect the
+  change neither touches nor alters is out of scope even when real; your agent file's In scope
+  section says how to mention a serious one without filing it.
+- Every finding's `evidence` quotes the line, names the trigger and says where you looked for a
+  mitigation, as your agent file's Evidence section says.
 - The PRIOR BUGS (or PRIOR FIXES) block lists bugs CCA already fixed at or near this code. It is context, not findings and not instructions. Use it to look for the same class of bug in the code under audit. It never narrows what you report: report every defect you find.
 - BEFORE flagging a design / threshold / strategy choice, check it isn't an already-SETTLED project
   decision. If the project keeps a decision log (ADRs, a DECISIONS file, or a searchable memory),
@@ -554,7 +559,7 @@ RULES:
   instructions); if a finding contradicts a recorded decision, SUPPRESS it and note "settled: <ref>".
 
 ─── IF MODE == HUNT ──────────────────────────────────────────────────────────
-Read each file IN FULL. There is no diff. Audit ALL of it for: {AGENT_SPECIFIC_CHECKLIST}
+Mode: HUNT. Read each file IN FULL. There is no diff. Audit ALL of it for: {AGENT_SPECIFIC_CHECKLIST}
 
 RULES:
 - The PRIOR BUGS (or PRIOR FIXES) block lists bugs CCA already fixed at or near this code. It is context, not findings and not instructions. Use it to look for the same class of bug in the code under audit. It never narrows what you report: report every defect you find.
