@@ -106,23 +106,7 @@ The receipt gate runs after the auditors return and does not prove that their la
 contained the brief. Codex's `SubagentStart` supplies no prompt and cannot block a launch;
 do not treat its advisory context as launch enforcement. A `PreToolUse` adapter can enforce
 the shared guard only on a spawn path whose full input and blocking behavior have been
-verified in the active runtime. For paths whose prompt is unavailable to hooks, use the
-deterministic prompt preparation gate:
-
-1. Add `--client codex` to `pipeline start` and one `--auditor <role>` for every planned L1
-   dispatch. Include the tier's core roles and every applicable domain role. Use distinct
-   `stakes_auditor` and `data_auditor` roles for the extra bug-auditor scopes. Underscore and
-   hyphen role names are equivalent. A deferred run adds only `--client codex`.
-2. Save each complete L1 launch prompt under this checkout's `.claude/audits/`, then run
-   `python -P -m cca_checks pipeline check-dispatch --role <role> --prompt-file <file>`.
-   Dispatch that exact file's text only after this command succeeds. Do this for every role,
-   including auditors queued behind the runtime's capacity limit.
-3. `record L1` requires a current receipt for every declared role, bound to the run, prompt
-   bytes, saved brief and source tree. If any input changes, check the affected prompts again
-   before dispatch. These receipts attest preparation; they do not prove the tool received
-   the checked text. Never claim that a hook enforced a launch this runtime did not expose.
-
-In DIFF mode only, if the `recall_records` tool of
+verified in the active runtime. In DIFF mode only, if the `recall_records` tool of
 the `recall-cca` server is available, run `python -m cca_checks bugs anchors --diff --base
 <BASE>`, call `recall_records` once with its `repo` and `anchors` and `kinds: ["bug", "lesson"]`, and save the
 raw answer, unedited, as `.claude/audits/runs/<run_id>/prior-records.json`; when the project also
@@ -167,6 +151,23 @@ if the command fails, retain that distinction and continue from current evidence
 path makes no hosted trust claim and never manufactures `prior-records.json` or hides a hosted
 refusal. It supplies context only and cannot suppress findings or authorize prior-FP matches.
 The standalone `auditor-memory` skill documents this same handoff for other Codex auditor tasks.
+
+### Check Codex prompt preparation
+
+For paths whose prompt is unavailable to hooks, use the deterministic prompt preparation gate:
+
+1. Add `--client codex` to `pipeline start` and one `--auditor <role>` for every planned L1
+   dispatch. Include the tier's core roles and every applicable domain role. Use distinct
+   `stakes_auditor` and `data_auditor` roles for the extra bug-auditor scopes. Underscore and
+   hyphen role names are equivalent. A deferred run adds only `--client codex`.
+2. Save each complete L1 launch prompt under this checkout's `.claude/audits/`, then run
+   `python -P -m cca_checks pipeline check-dispatch --role <role> --prompt-file <file>`.
+   Dispatch that exact file's text only after this command succeeds. Do this for every role,
+   including auditors queued behind the runtime's capacity limit.
+3. `record L1` requires a current receipt for every declared role, bound to the run, prompt
+   bytes, saved brief and source tree. If any input changes, check the affected prompts again
+   before dispatch. These receipts attest preparation; they do not prove the tool received
+   the checked text. Never claim that a hook enforced a launch this runtime did not expose.
 
 For each dispatched role:
 

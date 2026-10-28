@@ -145,6 +145,11 @@ or prior false-positive suppression was used. A no-fix FAST run owes no fix, dif
 or architect layers and offers no deferred pass.
 
 The full suite is required in CI. A local focused run is not a substitute for that gate.
+The first CI run failed only the existing
+`test_codex_builds_the_brief_once_before_the_role_list` contract: inserting the checklist
+inside the policy split its paragraph before the hosted instructions. The checklist was
+moved after the brief policy, leaving the existing test unchanged. Python 3.12 reported
+1,726 passed, five skipped and that single failure before the correction.
 
 An independent bug review found no introduced correctness defect. It noted the existing
 hosted-only guard checks a heading rather than every hosted record id. This change reuses
