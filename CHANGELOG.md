@@ -117,6 +117,15 @@ sections above read.
   so every run on the local path reported `prior_block: null`; it now counts the local receipt's
   BUG and LESSON lines, and a new `prior_brief` field records the source, status and listed ids.
   Codex has no launch hook, so on Codex the record-time gate is still the only check.
+* **Git anchor recovery reads a definition named as a bare word.** The local brief matches by code
+  anchor only, and 556 of 886 bug records had none, so they never reached an auditor. Legacy
+  summaries name the repaired definition bare ("paper_trader _check_stop_loss math.isfinite()
+  guards"), which `recover_git_anchors` ignored: it counted only backticked names and calls. A
+  distinctive bare word (six or more characters, with an inner underscore or a camelCase step, not
+  part of a path) now locates a changed definition under the same rules: the exact finding bullet,
+  one parent, exactly one changed definition, a file the row lists. Each reference records
+  `form: bare` or `quoted`. Measured on the 2026-10-28 ledger: 81 more records anchored, each
+  reviewed by hand.
 
 **The L1 auditors get one output contract, a scope tied to the run's mode, and an evidence bar.**
 Over 316 verdicts in 47 runs (2026-10-25 to 2026-10-28) L1 precision was 0.81, and 26 of the 57
