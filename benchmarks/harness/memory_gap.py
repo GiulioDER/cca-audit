@@ -6,7 +6,7 @@ brief when its receipt shows at least one injected record: `local-prior.json` (a
 `prior_block` and `lessons_block` counts). Only DIFF runs at STANDARD or DEEP tier are compared.
 Confirmed means an L2.5 CONFIRMED verdict on an L1 finding id (l1_precision.PREFIX).
 
-    python benchmarks/harness/memory_gap.py --root ~/Documents \n        --since 20261029T000000Z [--until ...]
+    python benchmarks/harness/memory_gap.py --root ~/Documents --since 20261029T000000Z
 """
 from __future__ import annotations
 
