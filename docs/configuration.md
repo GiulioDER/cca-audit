@@ -99,20 +99,12 @@ one that found nothing.
 ### Output directory
 
 Auditors return their findings as structured JSON, which the pipeline consumes as the **authoritative**
-source. They may **optionally** also write a human-readable trail to `.claude/audits/` (the pipeline
-does not depend on these files). Files that may be created:
+source. The Layer 1 auditors write no files: they run in parallel, and their replies are the whole
+output. The agents of later layers may **optionally** write a human-readable trail to
+`.claude/audits/` (the pipeline does not depend on these files). Files that may be created:
 
 | File | Content |
 |------|---------|
-| `AUDIT_CODE.md` | Code quality findings |
-| `AUDIT_BUGS.md` | Runtime bug findings |
-| `AUDIT_SECURITY.md` | Security findings |
-| `AUDIT_PERF.md` | Performance findings |
-| `AUDIT_DOCS.md` | Documentation findings |
-| `AUDIT_ENV.md` | Environment config findings |
-| `AUDIT_DEPLOY.md` | Deployability findings |
-| `AUDIT_DEPS.md` | Dependency findings |
-| `AUDIT_NUMERIC.md` | Numerical / units / sign findings |
 | `AUDIT_FPCHECK.md` | Findings-verification verdicts (Step 2.5) |
 | `AUDIT_DIFFREVIEW.md` | Differential review of the fix diff (Step 5.5) |
 | `FIXES.md` | Consolidated fix plan |
