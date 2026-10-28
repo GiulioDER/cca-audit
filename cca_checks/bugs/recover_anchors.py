@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from ..layer_outputs import ShapeError, l4_fixes
 from ..toolpath import resolve_tool
 from . import anchor_log, archive_io, records
 from .anchors import code_sha, enclosing_symbol, resolve_symbols, symbol_sha, well_formed_file
@@ -110,6 +111,10 @@ def _snapshot(archive: Path, meta_pair: tuple[object, str] | None = None) -> _Ar
     summary, sh = _json(archive / "summary.json")
     l2, lh = _json(archive / "L2.json")
     l4, fh = _json(archive / "L4.json")
+    try:
+        l4 = l4_fixes(l4)
+    except ShapeError:
+        l4 = []
     return _Archive(meta, summary, _index(l2, ("id",)),
                     _index(l4, ("finding", "finding_id", "fix_id")), (mh, sh, lh, fh))
 
