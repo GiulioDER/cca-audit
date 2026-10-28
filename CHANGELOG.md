@@ -126,6 +126,13 @@ sections above read.
   one parent, exactly one changed definition, a file the row lists. Each reference records
   `form: bare` or `quoted`. Measured on the 2026-10-28 ledger: 81 more records anchored, each
   reviewed by hand.
+* **An object-shaped L4 file no longer loses its fixes.** From 2026-10-21 to 2026-10-27, 12 runs
+  from both clients stored L4 as `{"fixes": [...]}`, with entries either canonical or
+  `{"id": "FIX-1", "findings": [...]}`. The ledger reader iterated the object as a list and found
+  nothing, so resolve reported "no ledger rows could be built" and their fixes never reached the
+  ledger; run facts (anchors, blamed commits) were computed from an empty list too. A new
+  `layer_outputs.l4_fixes` reads both shapes, one entry per finding, for the ledger, the capture,
+  run facts and anchor recovery, and `pipeline record L4` now refuses a file in neither shape.
 
 **The L1 auditors get one output contract, a scope tied to the run's mode, and an evidence bar.**
 Over 316 verdicts in 47 runs (2026-10-25 to 2026-10-28) L1 precision was 0.81, and 26 of the 57
