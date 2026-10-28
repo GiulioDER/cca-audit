@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..layer_outputs import ShapeError, l4_fixes
 from .anchors import Anchor, well_formed_file, well_formed_symbol
 from .caused_by import bugs_for_commits
 from .ledgers import fix_number
@@ -180,7 +181,10 @@ def rows_and_skips(record: Path, merge: Merge, ledger: list[BugRow] | None = Non
     proofs = [p for p in raw_proofs if isinstance(p, dict)] if isinstance(raw_proofs, list) else []
     malformed = not isinstance(raw_proofs, list) or len(proofs) != len(raw_proofs)
     card = _scorecard(record)
-    entries = [e for e in _load(record, "L4.json", []) if isinstance(e, dict)]
+    try:
+        entries = l4_fixes(_load(record, "L4.json", []))
+    except ShapeError as exc:
+        return [], [f"L4.json unreadable: {exc}"]
     claims = [(str(e.get("finding") or e.get("finding_id") or ""), str(e.get("fix_id") or ""))
               for e in entries]
     orphaned = malformed or any(not any(_attributed(p, f, x) for f, x in claims) for p in proofs)
