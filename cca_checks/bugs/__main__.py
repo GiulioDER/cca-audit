@@ -527,7 +527,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "record-unlinked":
         from . import unlinked
-        from .store import bugs_dir
         return unlinked.run(bugs_dir(), write=a.write, older_than_hours=a.older_than_hours,
                             assume_repo=a.assume_repo, as_json=a.json)
 
