@@ -160,6 +160,13 @@ sections above read.
 
 ### Fixed
 
+* **The Stop guard passes over a Codex run below the session.** A Codex run records no
+  `owner_session` (Codex has no `CLAUDE_CODE_SESSION_ID`) and usually no worktree claim, so the
+  owner test could not tell it was another client's, and a Claude session in the main checkout
+  was held three times on 2026-10-29 by Codex's run in a worktree below it. This hook runs only in
+  Claude Code, so a run found below `cwd` that records `client: codex` is now allowed before the
+  refusal counter. A Codex run in the session's own checkout still holds it: `client`, like the
+  owner, is set by the agent at start.
 * **The Stop guard holds only the session that opened the run.** It judged every open run in or
   below the session's directory, and every worktree lies below the main checkout, so one session's
   run held others and spent its own three refusals on them. `pipeline start` and `resume` now

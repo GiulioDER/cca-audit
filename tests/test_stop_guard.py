@@ -339,3 +339,41 @@ def test_an_unowned_run_below_falls_back_to_the_worktree_claim(monkeypatch, caps
     )
     assert _stop(monkeypatch, capsys, session, session_id="session-B") is None
     assert ps.load(child).stop_refusals == 0
+
+
+# A Codex DIFF run names its core auditors at start (dispatch receipts, #107); one that has only
+# started already owes L1, which is all these tests need.
+CODEX_FAST = ["security-auditor", "bug-auditor", "code-auditor"]
+
+
+def test_a_codex_run_below_never_blocks_nor_spends(monkeypatch, capsys, tmp_path):
+    """A Codex run below the session's directory is another client's, owner or not.
+
+    Invariant: a run started with `client="codex"` in a worktree below `cwd`, with no
+    `owner_session` and no worktree claim, allows the stop and spends none of its refusals.
+    The live case, 2026-10-29: Codex's run in cca-pr729-720 (client codex, no owner) held a
+    main-checkout Claude session three times.
+    Red 2026-10-29: mutation deleting the `if below and state.get("client") == "codex":`
+    early return in `_judge`; failed at `assert _stop(..., session_id="session-B") is None`.
+    """
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    session, child = _session_with_a_worktree_below(tmp_path)
+    ps.start("FAST", root=child, client="codex", auditors=CODEX_FAST)
+    assert ps.load(child).owner_session is None
+    for _ in range(4):
+        assert _stop(monkeypatch, capsys, session, session_id="session-B") is None
+    assert ps.load(child).stop_refusals == 0
+
+
+def test_a_codex_run_in_the_sessions_own_checkout_still_holds_it(monkeypatch, capsys, git_repo):
+    """The Codex exemption covers only runs below `cwd`: `client` is set by the agent at
+    `start`, like the owner, so trusting it in the session's own checkout would let an agent
+    switch off its own guard.
+
+    Red 2026-10-29: mutation `if below and state.get("client") == "codex":` changed to
+    `if state.get("client") == "codex":`; failed at `assert out is not None`.
+    """
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    ps.start("FAST", root=git_repo, client="codex", auditors=CODEX_FAST)
+    out = _stop(monkeypatch, capsys, git_repo, session_id="session-A")
+    assert out is not None and out["decision"] == "block" and "L1" in out["reason"]
