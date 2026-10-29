@@ -47,7 +47,8 @@ any refusal is counted, but only when it was found through the registry below `c
 the run in the session's own checkout always holds it, because the recorded owner
 comes from an environment variable the agent could set to dodge its own guard. A run
 with no recorded owner (older runs, a start outside Claude Code) or a payload with no
-`session_id` is judged as before.
+`session_id` is judged as before, except a run recorded with `client: codex`: this hook
+runs only in Claude Code, so a Codex run found below `cwd` is allowed the same way.
 """
 
 from __future__ import annotations
@@ -184,6 +185,17 @@ def _judge(core, root: pathlib.Path, payload: dict, *, below: bool = False) -> s
         owner = claimed_session(root)
     session = payload.get("session_id")
     theirs = isinstance(owner, str) and isinstance(session, str) and owner and session
+    mine = isinstance(owner, str) and owner and owner == session
+    if below and state.get("client") == "codex" and not state.get("owner_session") and not mine:
+        # This Stop hook runs only in Claude Code. A Codex run records no owner_session (Codex
+        # has no CLAUDE_CODE_SESSION_ID) and usually no worktree claim, so the owner test below
+        # cannot see it is another client's; found below cwd it is never this session's
+        # (2026-10-29: Codex's run in cca-pr729-720 held a main-checkout session three times).
+        # Only that shape: `client` is whatever the agent passed at start, so a Claude session
+        # that starts its own run with `--client codex` still records its owner_session (or
+        # claims the worktree) and stays held. Not for the run in the session's own checkout,
+        # for the reason given below.
+        return None
     if below and theirs and owner != session:
         # Another session's run below this one: allowed before the refusal counter, so
         # its owner keeps every refusal it is due. Never for the run in the session's own
