@@ -49,7 +49,7 @@ A row is eligible when all hold:
   contain exactly one production file after the exclusions below, and that file is in the row's
   `files`;
 - that file is a regular UTF-8 blob at the fix commit;
-- the finding's prefix is not `ENV`, `DEP` or `DEPLOY` (their defect often lives in configuration or
+- the finding's prefix is not `ENV`, `DEP` or `DEPLOY` (DOC added 2026-10-29 after the final review) (their defect often lives in configuration or
   a manifest, which the exclusions remove, so the one production file may not be where it was);
 - the summary names no other file (the existing `references()` finds none outside that file).
 

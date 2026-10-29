@@ -301,13 +301,18 @@ def test_single_file_note_is_valid():
 
 
 @pytest.mark.parametrize("damage", ["symbol", "missing_parent", "missing_summary_sha",
-                                    "references", "zero_exclusions_version"])
+                                    "references", "zero_exclusions_version",
+                                    "bad_changed_sha", "missing_message_sha", "malformed_parent"])
 def test_single_file_note_rejects_damage(damage):
     """Each case is red when its own check is deleted from _git_provenance:
     symbol (the `a["symbol"] is not None` clause), missing_parent (the parent SHA40 check
     in the new branch), missing_summary_sha (summary_sha256 in the shared tuple),
-    references (the `refs == [...]` comparison), zero_exclusions_version (`version >= 1`).
-    The failing assertion in every mutation is `assert not anchor_log.valid(note)`."""
+    references (the `refs == [...]` comparison), zero_exclusions_version (`version >= 1`),
+    bad_changed_sha (the `_SHA.fullmatch(provenance["changed_sha256"])` clause),
+    missing_message_sha ("message_sha256" in the shared tuple), malformed_parent (the
+    `SHA40.fullmatch(provenance["parent"])` clause in the new branch; the value is present but
+    not 40 hex). Red recorded 2026-10-29 for the last three, each on `assert not
+    anchor_log.valid(note)`. The failing assertion in every mutation is `assert not anchor_log.valid(note)`."""
     r = replace(row(), run_id=None, summary="pool.py: repair the lease")
     note = single_file_note(r)
     prov = note["provenance"]
@@ -319,6 +324,12 @@ def test_single_file_note_rejects_damage(damage):
         del prov["summary_sha256"]
     elif damage == "references":
         prov["references"] = [{"file": "other.py"}]
+    elif damage == "bad_changed_sha":
+        prov["changed_sha256"] = "bad"
+    elif damage == "missing_message_sha":
+        del prov["message_sha256"]
+    elif damage == "malformed_parent":
+        prov["parent"] = "abc123"
     else:
         prov["exclusions_version"] = 0
     assert not anchor_log.valid(note)
@@ -409,10 +420,12 @@ def test_two_production_files_are_refused(tmp_path):
     assert _refusal(r, repo) == "fix changed more than one production file"
 
 
-@pytest.mark.parametrize("finding", ["ENV-1", "DEP-2", "DEPLOY-3"])
+@pytest.mark.parametrize("finding", ["ENV-1", "DEP-2", "DEPLOY-3", "DOC-4"])
 def test_env_prefix_is_refused(tmp_path, finding):
     """Red 2026-10-29: mutation disabling the `_EXCLUDED_PREFIXES` check (its `if` became
-    `if False:`); failed at `pytest.raises(Unavailable)` (DID NOT RAISE) for all three."""
+    `if False:`); failed at `pytest.raises(Unavailable)` (DID NOT RAISE) for all three. Red
+    2026-10-29 (final review): `"DOC"` removed from `_EXCLUDED_PREFIXES`; the DOC-4 case failed at
+    `pytest.raises(Unavailable)` (DID NOT RAISE)."""
     r, repo = _single_history(tmp_path, finding=finding)
     assert _refusal(r, repo) == "finding prefix is excluded"
 
@@ -546,13 +559,17 @@ def test_without_the_flag_nothing_changes(tmp_path, monkeypatch, capsys):
 
     Red 2026-10-29: mutation in `plan`, `if single_file:` became `if True:`; failed at
     `assert not report.annotations`.
+    Red 2026-10-29 (final review): in `plan`, `if single_file:` became `if False:`; failed at
+    `assert flagged.annotations` ("the fixture cannot tell the flag from its absence").
     """
     from cca_checks.bugs.recover_git_anchors import main, plan
 
     _, ledger, repo = _ledger_with_single_file_row(tmp_path)
     report = plan(ledger, [repo])
     assert not report.annotations
-    assert report == plan(ledger, [repo], single_file=False)
+    flagged = plan(ledger, [repo], single_file=True)
+    assert flagged.annotations, "the fixture cannot tell the flag from its absence"
+    assert report != flagged
     assert list(report.unresolved.values()) == ["exact finding bullet is absent or ambiguous"]
     monkeypatch.setenv("CCA_BUGS_DIR", str(ledger))
     assert main(["--repo", str(repo)]) == 0

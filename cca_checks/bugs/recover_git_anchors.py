@@ -246,7 +246,7 @@ _EXCLUDED_DIRECTORIES = frozenset({"tests", "test", "fixtures", "docs", ".github
 _EXCLUDED_SUFFIXES = frozenset({".md", ".txt", ".json", ".jsonl", ".yaml", ".yml", ".toml",
                                 ".cfg", ".ini", ".lock"})
 #: Prefixes whose defect often lives in configuration or a manifest, which the exclusions remove.
-_EXCLUDED_PREFIXES = frozenset({"ENV", "DEP", "DEPLOY"})
+_EXCLUDED_PREFIXES = frozenset({"ENV", "DEP", "DEPLOY", "DOC"})
 
 
 def excluded(path: str) -> bool:

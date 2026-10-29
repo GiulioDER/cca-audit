@@ -161,10 +161,13 @@ Test, documentation and configuration paths do not count as production: `tests/`
 `fixtures/`, `docs/` and `.github/` count only as the first path component (a nested
 `src/pkg/fixtures/x.py` is a production file), while `test_*`, `*_test.*` and `CHANGELOG*` names
 and the extensions `.md .txt .json .jsonl .yaml .yml .toml .cfg .ini .lock` count at any depth.
-Findings with the prefixes `ENV`, `DEP` and `DEPLOY` are refused, as are fixes with more than
+Findings with the prefixes `ENV`, `DEP`, `DEPLOY` and `DOC` are refused, as are fixes with more than
 one parent, more than one production file, or a production file the row does not list. The
-provenance records the exclusion list version (currently 1). `--write` is refused unless the
-installed brief ranking reader understands this method. The plan was sized on 213 rows on
+provenance records the exclusion list version (currently 1). The flag applies only to rows the
+bullet rules refuse; a row they anchor keeps that anchor. The dry run's JSON carries
+`write_allowed` and, when it is false, `write_refusal`. `--write` is refused unless the
+installed brief ranking reader understands this method; a refused `--write` writes nothing and
+exits 1. The plan was sized on 213 rows on
 2026-10-28, which fell to about 92 the same evening after other recoveries; the real count is
 unmeasured until the dry run.
 
