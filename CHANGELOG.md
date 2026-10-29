@@ -8,6 +8,17 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**The hosted PRIOR BUGS block ranks a file-level record as the local brief does.** RE-call's
+matcher reports a record anchor with no symbol as `symbol_changed` against a file-level query
+whenever the file's hash differs, so a file-level record (1,042 of the ledger's rows are anchored,
+many at file level) ranked above records anchored at a real symbol. RE-call's local brief stopped
+doing that in RE-call #1063 and #1067. `prior.select_records`, `block_counts`, the block's
+`[match: ...]` label and `select_lessons` now do the same: the best per-anchor match decides, a
+symbol-less anchor counts as `file_only` at best, and within a level a record decided by a symbol
+anchor comes first. The run summary's `prior_block` counts therefore agree between the hosted
+and the local path; a module-level record that used to count as `symbol_changed` on the hosted
+path now counts as `file_only`. RE-call's matcher, and so the PRIOR_FP suppression, is unchanged.
+
 **The bug ledger and the records envelope read dates as RE-call does.** `match_fp.ledger_facts`
 now dates a local retraction by the UTC day, as the matcher already did, so a host past midnight
 locally no longer puts a retraction dated the next UTC day in effect early. `envelope.expired`

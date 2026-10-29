@@ -47,11 +47,13 @@ def test_exact_and_symbol_changed_come_before_file_only():
     `prior.select_records`; failed at `assert matches == sorted(matches, key=...)`.
     """
     records = {r["id"]: r for r in _records()}
-    matches = [records[i]["anchor_match"] for i in _order()]
+    matches = [prior.brief_match(records[i]) for i in _order()]
     assert matches == sorted(matches, key=prior.MATCH_ORDER.index)
-    assert matches[-1] == "symbol_changed" and "file_only" not in matches
+    # Changed 2026-10-29: the fixture's only `symbol_changed` record is module level (SEC-003, no
+    # symbol), which the block now shows as `file_only`, as RE-call's local brief does.
+    assert matches[-1] == "file_only" and "symbol_changed" not in matches
     text = _block()
-    assert "[match: exact]" in text and "[match: symbol_changed]" in text
+    assert "[match: exact]" in text and "[match: file_only]" in text
 
 
 def test_a_file_only_record_is_listed_after_the_symbol_ones():
@@ -64,8 +66,12 @@ def test_a_file_only_record_is_listed_after_the_symbol_ones():
     for r in records:
         if r["id"] == "RE-call:222222222222:PERF-001~2":  # the newest record
             r["anchor_match"] = "file_only"
+            for m in r["anchor_matches"]:  # the block reads the per-anchor matches since 2026-10-29
+                m["match"] = "file_only"
     ids = [r["id"] for r in prior.select_records(records, REPO)]
-    assert ids[-1] == "RE-call:222222222222:PERF-001~2"
+    # Changed 2026-10-29: within file_only a record at a symbol (PERF-001~2) comes before the
+    # module-level SEC-003, so the two file_only records close the list in that order.
+    assert ids[-2:] == ["RE-call:222222222222:PERF-001~2", "RE-call:111111111111:SEC-003"]
 
 
 def test_only_current_bugs_of_this_repository_are_shown():
@@ -172,6 +178,10 @@ def test_block_counts_by_match_land_in_the_run_summary(git_repo):
 
     Red 2026-10-22: mutation `"prior_block": prior_block_counts(state, root),` -> `"prior_block":
     None,` in `pipeline_state._write_summary`; failed at `assert summary["prior_block"] == ...`.
+
+    Changed 2026-10-29: the fixture's module-level SEC-003 (no symbol, reported `symbol_changed`)
+    is shown and counted as `file_only`, as RE-call's local brief does since #1063, so the
+    counts are 3 / 0 / 1 where they were 3 / 1 / 0.
     """
     subprocess.run(["git", "-C", str(git_repo), "remote", "add", "origin",
                     "https://github.com/GiulioDER/RE-call.git"], check=True)
@@ -188,7 +198,7 @@ def test_block_counts_by_match_land_in_the_run_summary(git_repo):
     ps.record("L6", detail="APPROVED", root=git_repo)
     ps.close(root=git_repo)
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-    assert summary["prior_block"] == {"exact": 3, "symbol_changed": 1, "file_only": 0}
+    assert summary["prior_block"] == {"exact": 3, "symbol_changed": 0, "file_only": 1}
 
 
 # Retraction
@@ -336,3 +346,97 @@ def test_the_brief_follows_recalls_expired_flag():
     """
     assert BUG_001 not in _ids("2026-10-22", expired=True, valid_until="2099-12-31")
     assert BUG_001 in _ids("2026-10-22", expired=False, valid_until="2026-10-01")
+
+
+# The hosted block ranks a symbol-less anchor as RE-call's local brief does (RE-call #1063, #1067).
+# RE-call's matcher reports a record anchor with no symbol as `symbol_changed` against a
+# file-level query whenever the file's hash differs, so a recovered file-level record outranked
+# records anchored at a real symbol. The local brief demotes it to `file_only` and, within a
+# level, lists symbol records first; this block and its counts must agree with it.
+
+
+def _bug(record_id, date, anchors, tier="historical"):
+    """A `recall_records` bug entry; `anchors` is [(symbol or None, match), ...] in order."""
+    matches = [{"anchor": {"file": "recall/pool.py", "symbol": s, "code_sha": "a" * 64},
+                "match": m} for s, m in anchors]
+    best = min((m for _, m in anchors), key=list(envelope.MATCHES).index)
+    return {"id": record_id, "kind": "bug", "anchor_match": best, "anchor_matches": matches,
+            "superseded_by": None, "valid_until": None, "caused": [],
+            "recall_record": {"kind": "bug", "id": record_id, "repo": REPO, "date": date,
+                              "tier": tier, "summary": f"summary of {record_id}",
+                              "anchors": [m["anchor"] for m in matches]}}
+
+
+def test_a_symbolless_match_is_listed_and_counted_as_file_only():
+    """Invariant: a record whose only anchor has no symbol is labelled, ordered and counted as
+    `file_only`, whatever RE-call's matcher reported, so it never outranks a record matched at a
+    symbol.
+
+    Red 2026-10-29: against the pre-change `prior.py` it failed at `assert ids == [...]` (the
+    symbol-less record, reported `symbol_changed` and newer, came first). After the change, the
+    mutation deleting the demotion line in `prior._brief_view` (`level = max(level, "file_only",
+    ...)` -> `pass`) failed at `assert prior.block_counts(selected) == ...` (0 / 2 / 0), and the
+    mutation counting by the raw `anchor_match` in `prior.block_counts` failed at the same line.
+    """
+    records = [_bug("B:fixed-at-symbol", "2026-10-01", [("Pool._lease", "symbol_changed")]),
+               _bug("B:file-level", "2026-10-20", [(None, "symbol_changed")])]
+    selected = prior.select_records(records, REPO)
+    ids = [r["id"] for r in selected]
+    assert ids == ["B:fixed-at-symbol", "B:file-level"]
+    assert prior.block_counts(selected) == {"exact": 0, "symbol_changed": 1, "file_only": 1}
+    text = prior.render_records(selected, None, None, REPO)
+    assert "B:file-level" in text and "[match: file_only]" in text
+
+
+def test_within_file_only_a_symbol_record_precedes_a_newer_symbolless_one():
+    """Invariant: within one level an entry decided by a symbol anchor comes first, so recovered
+    file-level records cannot push a precise record past the block's limit.
+
+    Red 2026-10-29: against the pre-change `prior.py`, and under the mutation dropping
+    `_brief_view(r)[1]` from the sort key in `prior.select_records`, it failed at
+    `assert ids[0] == "B:old-symbol"` (`B:new-file-7` came first).
+    """
+    records = [_bug("B:old-symbol", "2026-09-01", [("Pool._lease", "file_only")])]
+    records += [_bug(f"B:new-file-{i}", f"2026-10-{10 + i}", [(None, "symbol_changed")])
+                for i in range(8)]
+    ids = [r["id"] for r in prior.select_records(records, REPO)]
+    assert ids[0] == "B:old-symbol"
+    assert len(ids) == 8 and "B:old-symbol" in ids
+
+
+def test_a_mixed_record_is_decided_by_its_best_anchor():
+    """Invariant: a symbol-less `exact` anchor does not demote a record whose symbol anchor
+    matched `symbol_changed`, and on a tie the symbol anchor decides.
+
+    Red 2026-10-29: mutation `min(views)` -> `views[0]` in `prior._brief_view` (the first
+    anchor decides) failed at `assert prior.brief_match(first) == "symbol_changed"` (got
+    `file_only`). The pre-change code has no `brief_match`, which is not red proof.
+    """
+    first = _bug("B:mixed", "2026-10-01", [(None, "exact"), ("Pool._lease", "symbol_changed")])
+    tie = _bug("B:tie", "2026-10-01", [(None, "symbol_changed"), ("Pool._lease", "symbol_changed")])
+    assert prior.brief_match(first) == "symbol_changed"
+    assert prior.brief_match(tie) == "symbol_changed"
+    only = _bug("B:only", "2026-10-01", [(None, "exact")])
+    assert prior.brief_match(only) == "file_only"
+
+
+def test_a_module_level_lesson_ranks_as_in_a_changed_file():
+    """Invariant: a lesson anchored at module level (no symbol), which RE-call reports
+    `symbol_changed`, is ranked and worded as `in a changed file`, after a lesson at a symbol.
+
+    Red 2026-10-29: against the pre-change `prior.py`, and under the mutation
+    `brief_match(r)` -> `r["anchor_match"]` in the sort of `prior.select_lessons`, it failed at
+    `assert ids == ["L:symbol", "L:module"]`.
+    """
+    def lesson(lesson_id, symbol, members):
+        entry = _bug(lesson_id, "2026-10-01", [(symbol, "symbol_changed")])
+        entry["kind"] = "lesson"
+        entry["recall_record"].update({"kind": "lesson", "rule": "check the guard",
+                                       "pattern": "look at the guard", "members": members})
+        return entry
+    records = [lesson("L:module", None, ["a", "b", "c", "d"]),
+               lesson("L:symbol", "Pool._lease", ["a", "b", "c"])]
+    selected = prior.select_lessons(records, REPO)
+    ids = [r["id"] for r in selected]
+    assert ids == ["L:symbol", "L:module"]
+    assert "in a changed file" in prior.render_lessons(selected)

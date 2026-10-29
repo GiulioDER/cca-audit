@@ -702,6 +702,9 @@ def test_the_lessons_count_lands_in_the_run_summary(git_repo):
     Red 2026-10-22: mutation `"lessons_block": lessons_block_count(state, root),` ->
     `"lessons_block": None,` in `pipeline_state._write_summary`; failed at
     `assert summary["lessons_block"] == 1`.
+
+    Changed 2026-10-29: the fixture's module-level SEC-003 is now counted `file_only` (see
+    `test_block_counts_by_match_land_in_the_run_summary`), so prior_block reads 3 / 0 / 1.
     """
     subprocess.run(["git", "-C", str(git_repo), "remote", "add", "origin",
                     "https://github.com/GiulioDER/RE-call.git"], check=True)
@@ -719,4 +722,4 @@ def test_the_lessons_count_lands_in_the_run_summary(git_repo):
     ps.close(root=git_repo)
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["lessons_block"] == 1
-    assert summary["prior_block"] == {"exact": 3, "symbol_changed": 1, "file_only": 0}
+    assert summary["prior_block"] == {"exact": 3, "symbol_changed": 0, "file_only": 1}
