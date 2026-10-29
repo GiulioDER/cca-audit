@@ -8,6 +8,16 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**`recover_git_anchors --single-file` anchors fixes that changed one production file.** Rows
+whose fix commit changed exactly one file outside tests, documentation and configuration get a
+file-level anchor labelled `git-single-production-file`, with the exclusion list version recorded.
+Directory exclusions (`tests/`, `test/`, `fixtures/`, `docs/`, `.github/`) match only at the
+first path component. `ENV`, `DEP` and `DEPLOY` findings are refused. Writing is refused unless
+the brief ranking reader understands the new method; that reader change is RE-call PR #1063,
+not merged at the time of writing. The plan was sized on 213 unanchored rows on 2026-10-28,
+which fell to about 92 the same evening after other recoveries; the real count is unmeasured
+until the dry run.
+
 **`bugs record-unlinked` records the fixes no merge can be found for.** `resolve` writes a run's
 rows only once GitHub names the merged pull request holding the run's commit, and that link is
 lost when a session amends or rebases before pushing or carries the fix to master on another

@@ -239,6 +239,9 @@ def _recover(row: BugRow, repo: Path, identity: str | None) -> dict:
 #: Paths the single-file rule never counts as the production file. Raise the version whenever
 #: the lists change, so annotations made under an older list can be told apart.
 EXCLUSIONS_VERSION = 1
+#: Reading of "paths under tests/": these directories count only as the FIRST path component
+#: (root level). A nested `src/pkg/fixtures/x.py` is a production path, so a fix touching it and
+#: another production file stays a two-file fix. Basename and extension rules apply at any depth.
 _EXCLUDED_DIRECTORIES = frozenset({"tests", "test", "fixtures", "docs", ".github"})
 _EXCLUDED_SUFFIXES = frozenset({".md", ".txt", ".json", ".jsonl", ".yaml", ".yml", ".toml",
                                 ".cfg", ".ini", ".lock"})
@@ -251,7 +254,7 @@ def excluded(path: str) -> bool:
     parts = path.replace("\\", "/").split("/")
     name = parts[-1]
     suffix = name[name.rfind("."):].lower() if "." in name else ""
-    return (any(p in _EXCLUDED_DIRECTORIES for p in parts[:-1])
+    return ((len(parts) > 1 and parts[0] in _EXCLUDED_DIRECTORIES)
             or name.startswith("test_") or fnmatch.fnmatchcase(name, "*_test.*")
             or suffix in _EXCLUDED_SUFFIXES or name.startswith("CHANGELOG"))
 

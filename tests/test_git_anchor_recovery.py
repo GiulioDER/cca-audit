@@ -558,3 +558,42 @@ def test_without_the_flag_nothing_changes(tmp_path, monkeypatch, capsys):
     assert main(["--repo", str(repo)]) == 0
     data = json.loads(capsys.readouterr().out)
     assert set(data) == {"annotations", "unresolved", "already_anchored", "written", "reasons"}
+
+
+_EXCLUDED_CASES = [
+    ("tests/x.py", True), ("test/x.py", True), ("fixtures/x.py", True), ("docs/x.py", True),
+    (".github/x.py", True), ("tests/sub/x.py", True),
+    ("src/pkg/tests/x.py", False), ("src/pkg/test/x.py", False),
+    ("src/pkg/fixtures/x.py", False), ("src/docs/x.py", False), ("src/.github/x.py", False),
+    ("pkg/test_a.py", True), ("src/pkg/test_a.py", True),
+    ("pkg/a_test.py", True), ("src/pkg/a_test.go", True),
+    ("README.md", True), ("pkg/notes.txt", True), ("pkg/data.json", True),
+    ("pkg/data.jsonl", True), ("pkg/c.yaml", True), ("pkg/c.yml", True), ("pkg/c.toml", True),
+    ("pkg/c.cfg", True), ("pkg/c.ini", True), ("pkg/poetry.lock", True), ("pkg/X.JSON", True),
+    ("CHANGELOG", True), ("pkg/CHANGELOG.rst", True),
+    ("pkg/a.py", False), ("cca_checks/bugs/store.py", False), ("a.py", False),
+    ("src/pkg/contest.py", False), ("pkg/latest.py", False),
+]
+
+
+@pytest.mark.parametrize(("path", "expected"), _EXCLUDED_CASES)
+def test_excluded_table(path, expected):
+    """Invariant: `excluded` drops exactly the listed test, documentation and configuration
+    paths, directories only at the first path component, so a nested `fixtures/` directory
+    cannot turn a two production file fix into a one file fix.
+
+    Red 2026-10-29, each mutation failing at `assert excluded(path) is expected`:
+    - depth fix reverted (`any(p in _EXCLUDED_DIRECTORIES for p in parts[:-1])`): the rows
+      `src/pkg/tests/x.py`, `src/pkg/test/x.py`, `src/pkg/fixtures/x.py`, `src/docs/x.py`
+      and `src/.github/x.py` failed (expected False, got True).
+    - "fixtures" dropped from `_EXCLUDED_DIRECTORIES`: `fixtures/x.py` failed.
+    - ".github" dropped from `_EXCLUDED_DIRECTORIES`: `.github/x.py` failed.
+    - ".yml" dropped from `_EXCLUDED_SUFFIXES`: `pkg/c.yml` failed.
+    - ".lock" dropped from `_EXCLUDED_SUFFIXES`: `pkg/poetry.lock` failed.
+    - `name.startswith("CHANGELOG")` removed: `CHANGELOG` and `pkg/CHANGELOG.rst` failed.
+    - `fnmatch.fnmatchcase(name, "*_test.*")` removed: `pkg/a_test.py` and
+      `src/pkg/a_test.go` failed.
+    """
+    from cca_checks.bugs.recover_git_anchors import excluded
+
+    assert excluded(path) is expected
