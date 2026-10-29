@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import replace
 
 import pytest
@@ -333,3 +334,227 @@ def test_single_file_note_is_effective_for_its_row():
     other = r.to_json()
     other["summary"] = "pool.py: a different claim"
     assert not anchor_log.effective(other, {r.id: note})
+
+
+# Single production file recovery (`--single-file`). Every red proof below was run on
+# 2026-10-29 against a deliberate mutation of `cca_checks/bugs/recover_git_anchors.py`.
+
+def _single_history(tmp_path, *, summary="guard the lease", finding="BUG-1",
+                    files=("pkg/a.py", "tests/test_a.py"), second=None, delete=False):
+    """A fix changing `pkg/a.py` and `tests/test_a.py` (and `second` when given), whose
+    message carries no bullet, so the bullet rules refuse it."""
+    repo = make_repo(tmp_path / "repo")
+    commit(repo, "pkg/a.py", "def lease():\n    return -1\n", "input")
+    commit(repo, "pkg/b.py", "value = 0\n", "other input")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_a.py").write_text("def test_lease():\n    pass\n")
+    run_git(repo, "add", "tests/test_a.py")
+    if second:
+        (repo / second).write_text("value = 2\n")
+        run_git(repo, "add", second)
+    if delete:
+        run_git(repo, "rm", "-q", "pkg/a.py")
+        run_git(repo, "commit", "-q", "-m", "fix: drop the lease")
+        head = run_git(repo, "rev-parse", "HEAD").strip()
+    else:
+        head = commit(repo, "pkg/a.py", "def lease():\n    return 1\n", "fix: lease")
+    r = replace(row(), finding_id=finding, fix_commit=head, run_id=None, summary=summary,
+                files=list(files))
+    return r, repo
+
+
+def _refusal(r, repo):
+    from cca_checks.bugs.recover_anchors import Unavailable
+    from cca_checks.bugs.recover_git_anchors import _recover_single_file
+
+    with pytest.raises(Unavailable) as caught:
+        _recover_single_file(r, repo, r.repo)
+    return str(caught.value)
+
+
+def test_single_file_fix_is_anchored(tmp_path):
+    """Invariant: a fix changing one production file plus tests anchors that file, no symbol.
+
+    Red 2026-10-29: mutation in `_recover_single_file`,
+    `production = [p for p in changed if not excluded(p)]` became `production = list(changed)`
+    (count excluded files); failed at `assert note is not None`, because the test file made
+    it "more than one production file".
+    """
+    from cca_checks.bugs.anchors import code_sha
+    from cca_checks.bugs.recover_anchors import Unavailable
+    from cca_checks.bugs.recover_git_anchors import _recover_single_file
+
+    r, repo = _single_history(tmp_path)
+    note = None
+    try:
+        note = _recover_single_file(r, repo, r.repo)
+    except Unavailable:
+        pass
+    assert note is not None, "the single production file was not anchored"
+    assert note["anchors"] == [{"file": "pkg/a.py", "symbol": None,
+                                "code_sha": code_sha("def lease():\n    return 1\n")}]
+    prov = note["provenance"]
+    assert prov["method"] == "git-single-production-file"
+    assert prov["parent"] == run_git(repo, "rev-parse", r.fix_commit + "^").strip()
+    assert prov["changed_sha256"] == hashlib.sha256(b"pkg/a.py\ntests/test_a.py").hexdigest()
+    assert prov["exclusions_version"] == 1 and prov["references"] == [{"file": "pkg/a.py"}]
+    assert anchor_log.valid(note)
+
+
+def test_two_production_files_are_refused(tmp_path):
+    """Red 2026-10-29: mutation `if len(production) > 1:` became `if len(production) > 2:`;
+    failed at `pytest.raises(Unavailable)` (DID NOT RAISE)."""
+    r, repo = _single_history(tmp_path, second="pkg/b.py",
+                              files=("pkg/a.py", "pkg/b.py", "tests/test_a.py"))
+    assert _refusal(r, repo) == "fix changed more than one production file"
+
+
+@pytest.mark.parametrize("finding", ["ENV-1", "DEP-2", "DEPLOY-3"])
+def test_env_prefix_is_refused(tmp_path, finding):
+    """Red 2026-10-29: mutation disabling the `_EXCLUDED_PREFIXES` check (its `if` became
+    `if False:`); failed at `pytest.raises(Unavailable)` (DID NOT RAISE) for all three."""
+    r, repo = _single_history(tmp_path, finding=finding)
+    assert _refusal(r, repo) == "finding prefix is excluded"
+
+
+def test_summary_naming_another_file_is_refused(tmp_path):
+    """Red 2026-10-29: mutation disabling the references() check (`if any(...)` became
+    `if False:`); failed at `pytest.raises(Unavailable)` (DID NOT RAISE)."""
+    r, repo = _single_history(tmp_path, summary="pkg/b.py: guard the lease",
+                              files=("pkg/a.py", "pkg/b.py"))
+    assert _refusal(r, repo) == "summary names another file"
+
+
+def test_file_missing_from_row_is_refused(tmp_path):
+    """Red 2026-10-29: mutation disabling `if file not in row.files:` (became `if False:`);
+    failed at `pytest.raises(Unavailable)` (DID NOT RAISE)."""
+    r, repo = _single_history(tmp_path, files=("pkg/b.py",))
+    assert _refusal(r, repo) == "production file is not in the row's files"
+
+
+@pytest.mark.parametrize("shape", ["merge", "root"])
+def test_merge_or_root_fix_is_refused(tmp_path, shape):
+    """Invariant: a fix without exactly one parent has no unambiguous diff and is refused.
+
+    Red 2026-10-29, merge: mutation `if len(parents) != 1 or ...` became
+    `if len(parents) == 0 or ...`; failed at `pytest.raises(Unavailable)` (DID NOT RAISE),
+    because the merge anchored from its first parent's diff. Red 2026-10-29, root: mutation
+    treating a root commit as diffed against the empty tree (the check became
+    `if len(parents) > 1:` and `parent = parents[0] if parents else <empty tree sha>`);
+    failed at `pytest.raises(Unavailable)` (DID NOT RAISE).
+    """
+    repo = make_repo(tmp_path / "repo")
+    commit(repo, "pkg/a.py", "def lease():\n    return -1\n", "input")
+    if shape == "merge":
+        run_git(repo, "checkout", "-q", "-b", "feature")
+        commit(repo, "pkg/a.py", "def lease():\n    return 1\n", "repair")
+        run_git(repo, "checkout", "-q", "master")
+        commit(repo, "NOTES.md", "note\n", "notes")
+        run_git(repo, "merge", "-q", "--no-ff", "-m", "fix: merge", "feature")
+        head = run_git(repo, "rev-parse", "HEAD").strip()
+    else:
+        head = run_git(repo, "commit-tree", "HEAD^{tree}", "-m", "fix: root").strip()
+    r = replace(row(), fix_commit=head, run_id=None, summary="guard the lease",
+                files=["pkg/a.py"])
+    assert _refusal(r, repo) == "fix does not have one unambiguous parent"
+
+
+def test_deleted_production_file_is_refused(tmp_path):
+    """Red 2026-10-29: mutation disabling the ls-tree blob check (its `if` became
+    `if False:`); failed at the reason assertion, because `_blob` then refused with a
+    different reason."""
+    r, repo = _single_history(tmp_path, delete=True)
+    assert _refusal(r, repo) == "production file is not a regular Git blob at the fix"
+
+
+def test_bullet_rules_keep_precedence(tmp_path):
+    """Red 2026-10-29: mutation in `plan`, trying `_recover_single_file` before `_recover`
+    when `single_file` is set; failed at the `["git-finding-file"]` assertion."""
+    from cca_checks.bugs.recover_git_anchors import plan
+
+    r, repo = git_history(tmp_path)
+    ledger = tmp_path / "ledger"
+    store.write([r], ledger, "stamp")
+    report = plan(ledger, [repo], single_file=True)
+    assert [n["provenance"]["method"] for n in report.annotations] == ["git-finding-file"]
+
+
+def _ledger_with_single_file_row(tmp_path):
+    r, repo = _single_history(tmp_path)
+    ledger = tmp_path / "ledger"
+    store.write([r], ledger, "stamp")
+    return r, ledger, repo
+
+
+def _reader(tmp_path, name, source):
+    root = tmp_path / name
+    if source is None:
+        root.mkdir()
+        return root
+    (root / "recall_hooks").mkdir(parents=True)
+    (root / "recall_hooks" / "__init__.py").write_text("")
+    (root / "recall_hooks" / "auditor_brief.py").write_text(source)
+    return root
+
+
+@pytest.mark.parametrize("case,source,reason", [
+    ("lacks_constant", "VALUE = 1\n", "lacks FILE_LEVEL_RANKS_AS_FILE_ONLY"),
+    ("truthy_constant", "FILE_LEVEL_RANKS_AS_FILE_ONLY = 1\n", "lacks FILE_LEVEL_RANKS"),
+    ("missing_file", None, "operator reader is not installed"),
+    ("raises", "raise RuntimeError('boom')\n", "reader import failed (RuntimeError)"),
+])
+def test_write_refused_without_the_ranking_reader(tmp_path, monkeypatch, capsys,
+                                                  case, source, reason):
+    """Invariant: `--single-file --write` writes nothing unless the installed reader ranks
+    file-level records as file_only, and prints why.
+
+    Red 2026-10-29: mutation in `main`, `allowed, refusal = reader_ranks_file_level(...)`
+    became `allowed, refusal = True, ""` (skip the probe); failed at `assert code == 1` in
+    every case.
+    """
+    from cca_checks.bugs.recover_git_anchors import main
+
+    _, ledger, repo = _ledger_with_single_file_row(tmp_path)
+    monkeypatch.setenv("CCA_BUGS_DIR", str(ledger))
+    monkeypatch.setenv("CCA_RECALL_ROOT", str(_reader(tmp_path, case, source)))
+    code = main(["--repo", str(repo), "--single-file", "--write"])
+    data = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert not (ledger / anchor_log.NAME).exists()
+    assert data["write_allowed"] is False and reason in data["write_refusal"]
+    assert data["written"] == 0 and len(data["annotations"]) == 1
+
+
+def test_write_allowed_with_the_ranking_reader(tmp_path, monkeypatch, capsys):
+    """Red 2026-10-29: mutation in `_PROBE`, `... is True` became `... is False`; failed at
+    `assert code == 0`."""
+    from cca_checks.bugs.recover_git_anchors import main
+
+    r, ledger, repo = _ledger_with_single_file_row(tmp_path)
+    monkeypatch.setenv("CCA_BUGS_DIR", str(ledger))
+    monkeypatch.setenv("CCA_RECALL_ROOT", str(_reader(
+        tmp_path, "reader", "FILE_LEVEL_RANKS_AS_FILE_ONLY = True\n")))
+    code = main(["--repo", str(repo), "--single-file", "--write"])
+    data = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert data["write_allowed"] is True and data["written"] == 1
+    assert records.read_ledger(ledger)[0][r.id].anchors[0].file == "pkg/a.py"
+
+
+def test_without_the_flag_nothing_changes(tmp_path, monkeypatch, capsys):
+    """Invariant: without `--single-file`, plan and CLI output are as before this mode.
+
+    Red 2026-10-29: mutation in `plan`, `if single_file:` became `if True:`; failed at
+    `assert not report.annotations`.
+    """
+    from cca_checks.bugs.recover_git_anchors import main, plan
+
+    _, ledger, repo = _ledger_with_single_file_row(tmp_path)
+    report = plan(ledger, [repo])
+    assert not report.annotations
+    assert report == plan(ledger, [repo], single_file=False)
+    assert list(report.unresolved.values()) == ["exact finding bullet is absent or ambiguous"]
+    monkeypatch.setenv("CCA_BUGS_DIR", str(ledger))
+    assert main(["--repo", str(repo)]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert set(data) == {"annotations", "unresolved", "already_anchored", "written", "reasons"}
