@@ -155,6 +155,22 @@ or non-null run ID, finding, ordinal and summary to the commit message hash and 
 references. Definition-based references also retain the parent and both definition hashes.
 The historical evidence tier is preserved; this does not establish a verified false positive.
 
+Add `--single-file` to also anchor a fix that changed exactly one production file. Such a row
+gets a file-level anchor with no symbol and the provenance method `git-single-production-file`.
+Test, documentation and configuration paths do not count as production: `tests/`, `test/`,
+`fixtures/`, `docs/` and `.github/` count only as the first path component (a nested
+`src/pkg/fixtures/x.py` is a production file), while `test_*`, `*_test.*` and `CHANGELOG*` names
+and the extensions `.md .txt .json .jsonl .yaml .yml .toml .cfg .ini .lock` count at any depth.
+Findings with the prefixes `ENV`, `DEP`, `DEPLOY` and `DOC` are refused, as are fixes with more than
+one parent, more than one production file, or a production file the row does not list. The
+provenance records the exclusion list version (currently 1). The flag applies only to rows the
+bullet rules refuse; a row they anchor keeps that anchor. The dry run's JSON carries
+`write_allowed` and, when it is false, `write_refusal`. `--write` is refused unless the
+installed brief ranking reader understands this method; a refused `--write` writes nothing and
+exits 1. The plan was sized on 213 rows on
+2026-10-28, which fell to about 92 the same evening after other recoveries; the real count is
+unmeasured until the dry run.
+
 After reviewing the JSON plan, add `--write` to append supported annotations, then run
 `python -m cca_checks bugs rerender --all`. Existing annotations and authored anchors retain
 precedence. No ledger row, missing run ID, severity or proof flag is rewritten.
