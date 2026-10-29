@@ -185,12 +185,16 @@ def _judge(core, root: pathlib.Path, payload: dict, *, below: bool = False) -> s
         owner = claimed_session(root)
     session = payload.get("session_id")
     theirs = isinstance(owner, str) and isinstance(session, str) and owner and session
-    if below and state.get("client") == "codex":
+    mine = isinstance(owner, str) and owner and owner == session
+    if below and state.get("client") == "codex" and not state.get("owner_session") and not mine:
         # This Stop hook runs only in Claude Code. A Codex run records no owner_session (Codex
         # has no CLAUDE_CODE_SESSION_ID) and usually no worktree claim, so the owner test below
         # cannot see it is another client's; found below cwd it is never this session's
         # (2026-10-29: Codex's run in cca-pr729-720 held a main-checkout session three times).
-        # Not for the run in the session's own checkout, for the reason given below.
+        # Only that shape: `client` is whatever the agent passed at start, so a Claude session
+        # that starts its own run with `--client codex` still records its owner_session (or
+        # claims the worktree) and stays held. Not for the run in the session's own checkout,
+        # for the reason given below.
         return None
     if below and theirs and owner != session:
         # Another session's run below this one: allowed before the refusal counter, so

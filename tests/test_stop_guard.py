@@ -6,6 +6,7 @@ import io
 import json
 import os
 
+import pytest
 from conftest import (
     findings_output,
     load_hook,
@@ -377,3 +378,26 @@ def test_a_codex_run_in_the_sessions_own_checkout_still_holds_it(monkeypatch, ca
     ps.start("FAST", root=git_repo, client="codex", auditors=CODEX_FAST)
     out = _stop(monkeypatch, capsys, git_repo, session_id="session-A")
     assert out is not None and out["decision"] == "block" and "L1" in out["reason"]
+
+
+@pytest.mark.parametrize("how", ["owner_session", "worktree_claim"])
+def test_a_claude_session_cannot_free_its_own_run_by_calling_it_codex(monkeypatch, capsys,
+                                                                     tmp_path, how):
+    """`client` is agent-controlled: a run below `cwd` recorded as `client: codex` but owned by
+    this session (its `owner_session`, or the worktree claim) still blocks.
+
+    Red 2026-10-29, security review of #114: mutation dropping `and not
+    state.get("owner_session") and not mine` from the Codex early return in `_judge`; failed
+    at `assert out is not None` for both parametrizations.
+    """
+    if how == "owner_session":
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-A")
+    else:
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    session, child = _session_with_a_worktree_below(tmp_path)
+    ps.start("FAST", root=child, client="codex", auditors=CODEX_FAST)
+    if how == "worktree_claim":
+        (child / ".git" / "claude-session-claim").write_text(
+            "session=session-A\npid=1\n", encoding="utf-8")
+    out = _stop(monkeypatch, capsys, session, session_id="session-A")
+    assert out is not None and out["decision"] == "block", out
