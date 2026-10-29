@@ -41,12 +41,18 @@ def expired(valid_until: object, today: str) -> bool:
     through 23:59:59.999999 UTC of that day, so the record is current on the day itself and
     lapsed from the next. None never lapses. Fail closed: a value that does not read as a date
     is not proof the record is current. The brief and the PRIOR_FP matcher share this one rule.
+
+    The value is read exactly as RE-call reads it (`recall.frontmatter._parse_date`, the format
+    `%Y-%m-%d` and nothing else), so a time, an offset or trailing text is malformed there and
+    lapsed here too. Reading only its first ten characters kept such a record current on the
+    day RE-call already reported it unreadable.
     """
     if valid_until is None:
         return False
     try:
         # Parsed, not compared as text: a malformed value would sort after every real date.
-        return date.fromisoformat(str(valid_until)[:10]) < date.fromisoformat(today[:10])
+        until = datetime.strptime(str(valid_until), "%Y-%m-%d").date()
+        return until < date.fromisoformat(today[:10])
     except ValueError:
         return True
 
