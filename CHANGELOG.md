@@ -8,6 +8,17 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**The backfill reads four more commit-message formats.** On 2026-10-29, 36 CCA fix commits on
+the default branches read as unparsed and none had a ledger row. The parser now reads: a
+`P3 fixes:` section when the subject says "second pass" or "deferred" (the deferred pass
+verified those P3s; elsewhere P3 stays skipped); a `FIXED:` section at the one level the subject
+names; inline `P1: a (ID); b (ID/ID)` lines, one fix per part; and underlined `P1 — title`
+sections, whose title is the fix when no bullet follows. `FIN` (sentiment-agent's financial
+auditor) is a known prefix. 23 of the 36 now yield 107 rows; the 13 left are prose with no
+per-fix structure, or changelog-only commits, and stay unparsed by design. Four commits the old
+parser read change: three gain fixes or a P3 level, and one renames a stand-in to `FIN-001`, so
+a backfill that writes rows on commits the ledger already holds should review them first.
+
 **`recover_git_anchors --single-file` anchors fixes that changed one production file.** Rows
 whose fix commit changed exactly one file outside tests, documentation and configuration get a
 file-level anchor labelled `git-single-production-file`, with the exclusion list version recorded.
@@ -32,7 +43,9 @@ finds the merge can supersede an unlinked one.
 **`bugs stats` counts what CCA fixed.** Read-only counts over the ledger: fixes by severity and
 project, by auditor domain (the finding id's prefix, since the `auditor` field is often absent),
 by category, by month and by evidence tier; the most-fixed files by anchor rather than by the fix
-commit's file list; and regressions, fixes that rewrote an earlier CCA fix's lines. False
+commit's file list; and fixes in code an earlier CCA-fixed commit last wrote, with how many such
+commits they blame. That last count is an audit-escape signal, not a regression count: `caused_by`
+links at commit grain, usually to a squash merge that also carries the feature. False
 positives and lessons are reported beside the fixes, never counted as fixes, and a superseded bug
 row counts once. `--repo`, `--top` and `--json` narrow or export it. On the 2026-10-28 ledger:
 897 fixes, P1 208, P2 554, P3 88, 47 with no severity; 438 carry no domain and 637 no category,
