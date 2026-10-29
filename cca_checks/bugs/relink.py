@@ -70,7 +70,9 @@ def squash_sections(clone: Path, ref: str, since: str) -> dict[str, list[Section
             continue
         sha, when, body = record.split("\x1f", 2)
         lines = body.splitlines()
-        meta = Section(sha, datetime.fromisoformat(when), lines[0].strip() if lines else "")
+        # Python 3.10's fromisoformat refuses a trailing Z, which git prints for UTC.
+        when_dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+        meta = Section(sha, when_dt, lines[0].strip() if lines else "")
         out[normalize(body)].append(meta)
         current: list[str] | None = None
         for line in lines[1:]:
