@@ -8,6 +8,15 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**`bugs relink` links stuck runs to the squash merge that carries them.** A squash merge keeps
+each original commit as a `* <subject>` section followed by that commit's message. A run whose
+own commit's whole message, trailers aside, equals exactly one such section of one commit on
+the default branch gets rows keyed by that merge, `fixed` evidenced and the PR read from the
+merge subject; for an unlinked run each row supersedes the run-commit row, so readers count it
+once. A subject alone never links, since generic subjects repeat, and a message in two merges
+is reported ambiguous. On the 2026-10-29 ledger: 253 rows for 37 runs, 195 of them superseding
+unlinked rows. Run the archive anchor pass afterwards: recovered anchors are keyed by row id.
+
 **The backfill reads four more commit-message formats.** On 2026-10-29, 36 CCA fix commits on
 the default branches read as unparsed and none had a ledger row. The parser now reads: a
 `P3 fixes:` section when the subject says "second pass" or "deferred" (the deferred pass

@@ -5,6 +5,8 @@ python -m cca_checks.bugs prior --records FILE [--code FILE] [--no-lessons] [--r
     [--root PATH] [--before YYYY-MM-DD] [--limit N] [--json]
 python -m cca_checks.bugs record-unlinked [--older-than-hours N] [--assume-repo OWNER/NAME]
     [--write] [--json]
+python -m cca_checks.bugs relink --repo CLONE [--repo CLONE ...] [--assume-repo OWNER/NAME]
+    [--write] [--json]
 python -m cca_checks.bugs stats [--repo OWNER/NAME] [--top N] [--json]
 python -m cca_checks.bugs distill [--repo OWNER/NAME] [--draft] [--model ID] [--json]
 python -m cca_checks.bugs lesson accept PROPOSAL --by NAME
@@ -434,6 +436,14 @@ def main(argv: list[str] | None = None) -> int:
                    help="the repository of a record whose meta.json names none")
     u.add_argument("--write", action="store_true")
     u.add_argument("--json", action="store_true")
+    rl = sub.add_parser("relink", help="link unlinked and pending runs to the squash merge "
+                                     "carrying their commit's whole message")
+    rl.add_argument("--repo", type=Path, action="append", required=True,
+                    help="a clone to read the default branch of")
+    rl.add_argument("--assume-repo", metavar="OWNER/NAME",
+                    help="the repository of a record whose meta.json names none")
+    rl.add_argument("--write", action="store_true")
+    rl.add_argument("--json", action="store_true")
     st = sub.add_parser("stats", help="count the fixes in the ledger: severity, project, "
                                       "domain, category, anchored files, regressions")
     st.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's fixes")
@@ -529,6 +539,11 @@ def main(argv: list[str] | None = None) -> int:
         from . import unlinked
         return unlinked.run(bugs_dir(), write=a.write, older_than_hours=a.older_than_hours,
                             assume_repo=a.assume_repo, as_json=a.json)
+
+    if a.cmd == "relink":
+        from . import relink
+        return relink.run(bugs_dir(), a.repo, write=a.write, assume_repo=a.assume_repo,
+                          as_json=a.json)
 
     if a.cmd == "stats":
         from . import stats
