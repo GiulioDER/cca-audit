@@ -8,6 +8,17 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**The backfill reads four more commit-message formats.** On 2026-10-29, 36 CCA fix commits on
+the default branches read as unparsed and none had a ledger row. The parser now reads: a
+`P3 fixes:` section when the subject says "second pass" or "deferred" (the deferred pass
+verified those P3s; elsewhere P3 stays skipped); a `FIXED:` section at the one level the subject
+names; inline `P1: a (ID); b (ID/ID)` lines, one fix per part; and underlined `P1 — title`
+sections, whose title is the fix when no bullet follows. `FIN` (sentiment-agent's financial
+auditor) is a known prefix. 23 of the 36 now yield 107 rows; the 13 left are prose with no
+per-fix structure, or changelog-only commits, and stay unparsed by design. Four commits the old
+parser read change: three gain fixes or a P3 level, and one renames a stand-in to `FIN-001`, so
+a backfill that writes rows on commits the ledger already holds should review them first.
+
 **`bugs record-unlinked` records the fixes no merge can be found for.** `resolve` writes a run's
 rows only once GitHub names the merged pull request holding the run's commit, and that link is
 lost when a session amends or rebases before pushing or carries the fix to master on another
