@@ -73,8 +73,10 @@ def ledger_facts(root: Path, today: str | None = None,
 
     The records are None when `root` holds no ledger; then the answer is trusted as it stands.
     A retraction dated after `today` does not count yet, as RE-call would not yet return its
-    target superseded.
+    target superseded. `today` defaults to the UTC date, as the matcher's does: on a host already
+    past midnight locally, the local date would put a retraction dated tomorrow in UTC in effect.
     """
+    from .envelope import utc_today
     from .records import FalsePositiveRow, RetractionRow, read_ledger, to_record
     from .store import LEDGER
 
@@ -86,7 +88,7 @@ def ledger_facts(root: Path, today: str | None = None,
         return set(), {}, f"the bug ledger cannot be read ({type(exc).__name__})"
     if skipped:
         return set(), {}, f"{len(skipped)} bug ledger line(s) cannot be read"
-    today = today or date.today().isoformat()
+    today = today or utc_today()
     retracted = {r.target_id for r in rows.values()
                  if isinstance(r, RetractionRow) and r.kind == "false_positive_retraction"
                  and _in_effect(r.date, today)}

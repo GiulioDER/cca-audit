@@ -485,3 +485,38 @@ def test_prior_fp_is_refused_outside_diff_mode(git_repo):
     (run_dir / "fp-records.json").write_text(json.dumps(answer), encoding="utf-8")
     with pytest.raises(ps.RecordRefused, match="did not suppress"):
         _l25(git_repo, [{"id": "F-1", "verdict": "PRIOR_FP", "record_id": rec["id"]}], 1, 0)
+
+
+def test_a_retraction_counts_from_its_utc_date(tmp_path, east_of_utc_late_evening):
+    """#98 follow-up, 2026-10-29. Invariant: with no `today` given, `ledger_facts` dates a
+    retraction by the UTC day, as the matcher does; a retraction dated the next UTC day is not
+    yet in effect while that day has not begun in UTC.
+
+    Red 2026-10-29 against master 0beaab0 (`date.today()`, this host's local date, after the
+    clock in the fixture): `tests/test_match_fp.py::test_a_retraction_counts_from_its_utc_date`
+    failed at "a retraction dated after the UTC day was already in effect".
+    """
+    fp = from_record(GOLDEN_FP)
+    write([fp], tmp_path, "2026-10-22T00:00:00Z")
+    tomorrow = RetractionRow(kind="false_positive_retraction", project=fp.project, repo=fp.repo,
+                             date="2026-10-23", target_id=fp.id, reason="r", retracted_by="o")
+    write([tomorrow], tmp_path, "2026-10-22T00:00:00Z")
+    retracted, _, blocked = match_fp.ledger_facts(tmp_path)
+    assert blocked is None
+    assert retracted == set(), "a retraction dated after the UTC day was already in effect"
+
+
+@pytest.mark.parametrize("value", ["2026-10-30T00:00:00+05:00", "2026-10-30 junk", "20261030"])
+def test_a_valid_until_recall_cannot_read_is_lapsed(value):
+    """#98 follow-up, 2026-10-29. Invariant: `envelope.expired` accepts a `valid_until` only in
+    RE-call's own form, `YYYY-MM-DD`; anything else is malformed there, so it is lapsed here,
+    while the plain date keeps holding through its day.
+
+    Red 2026-10-29 against master 0beaab0 (`date.fromisoformat(str(valid_until)[:10])`):
+    `tests/test_match_fp.py::test_a_valid_until_recall_cannot_read_is_lapsed` failed at
+    "a valid_until RE-call cannot read kept the record current" for all three values.
+    """
+    from cca_checks.bugs.envelope import expired
+
+    assert expired(value, "2026-10-29"), "a valid_until RE-call cannot read kept the record current"
+    assert not expired("2026-10-29", "2026-10-29") and expired("2026-10-28", "2026-10-29")

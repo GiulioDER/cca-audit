@@ -8,6 +8,13 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**The bug ledger and the records envelope read dates as RE-call does.** `match_fp.ledger_facts`
+now dates a local retraction by the UTC day, as the matcher already did, so a host past midnight
+locally no longer puts a retraction dated the next UTC day in effect early. `envelope.expired`
+reads `valid_until` only as `YYYY-MM-DD`, RE-call's format; a time, an offset or trailing text,
+which RE-call reports unreadable, now counts as lapsed instead of current. Both were left open by
+#98.
+
 **`bugs relink` links stuck runs to the squash merge that carries them.** A squash merge keeps
 each original commit as a `* <subject>` section followed by that commit's message. A run whose
 own commit's whole message, trailers aside, equals exactly one such section of one commit on
