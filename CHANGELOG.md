@@ -8,6 +8,18 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**`recover_git_anchors --leading-stem` anchors multi-file fixes whose summary names the file.**
+On 2026-10-29, 557 unanchored rows came from fixes that changed two or more production files, so
+no existing rule could place them. Many summaries open with the module they are about
+("crypto_payment TOCTOU race", "whale_loser Decimal.ln() crash"). The new opt-in rule anchors the
+one changed source file whose name stem is that leading word, at file level with no symbol, under
+the provenance method `git-leading-stem-file`, after the bullet and single-file rules have
+refused the row. Generic stems, words under four characters and non-source files are refused.
+On 128 already-anchored multi-file rows it picked the anchored file 121 times (0.945; the
+single-file rule scored 0.920 on the same kind of check); it is expected to place about 81 of the
+557. `--write` is gated on the ranking reader, as for `--single-file`. The checks the two
+file-level rules share now live in one place, with the single-file rule's behaviour unchanged.
+
 **The hosted PRIOR BUGS block ranks a file-level record as the local brief does.** RE-call's
 matcher reports a record anchor with no symbol as `symbol_changed` against a file-level query
 whenever the file's hash differs, so a file-level record (1,042 of the ledger's rows are anchored,
