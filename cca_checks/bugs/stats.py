@@ -89,8 +89,13 @@ def summarize(rows: dict, *, repo: str | None = None, top: int = 15) -> dict:
         "anchored": sum(1 for r in bugs if r.anchors),
         "top_files": [{"project": p, "file": f, "fixes": n}
                       for (p, f), n in files.most_common(top)],
-        # A fix whose lines an earlier CCA fix had written: the ledger's regression signal.
-        "regressions": sum(1 for r in bugs if r.caused_by),
+        # `caused_by` comes from `git blame` at commit grain: a fix touching any line whose last
+        # author was commit X links to every bug fixed in X, and X is usually a squash merge that
+        # also carries the feature. So this counts fixes in code an earlier audit had covered, an
+        # audit-escape signal, not regressions caused by a fix (2026-10-28: none of 53 were).
+        "fixes_in_audited_code": sum(1 for r in bugs if r.caused_by),
+        "audited_commits_blamed": len({c.split(":")[1] for r in bugs for c in r.caused_by
+                                       if c.count(":") >= 2}),
         "false_positives": sum(1 for r in others if isinstance(r, FalsePositiveRow)),
         "lessons": sum(1 for r in others if isinstance(r, LessonRow)),
     }
@@ -115,7 +120,9 @@ def render(s: dict) -> str:
     lines += [f"  {t['fixes']:>5}  {t['project']}  {t['file']}" for t in s["top_files"]]
     lines += ["", "By month: " + ", ".join(f"{m} {n}" for m, n in s["by_month"].items()),
               "Evidence tier: " + ", ".join(f"{k} {v}" for k, v in sorted(s["tier"].items())),
-              f"Regressions (a fix rewrote an earlier CCA fix's lines): {s['regressions']}",
+              f"Fixes in code last written by a commit that carried CCA fixes: "
+              f"{s['fixes_in_audited_code']} (blaming {s['audited_commits_blamed']} commits; "
+              "audit escapes, not regressions)",
               f"Beside the fixes: {s['false_positives']} false positives, {s['lessons']} lessons"]
     return "\n".join(lines)
 

@@ -22,7 +22,9 @@ finds the merge can supersede an unlinked one.
 **`bugs stats` counts what CCA fixed.** Read-only counts over the ledger: fixes by severity and
 project, by auditor domain (the finding id's prefix, since the `auditor` field is often absent),
 by category, by month and by evidence tier; the most-fixed files by anchor rather than by the fix
-commit's file list; and regressions, fixes that rewrote an earlier CCA fix's lines. False
+commit's file list; and fixes in code an earlier CCA-fixed commit last wrote, with how many such
+commits they blame. That last count is an audit-escape signal, not a regression count: `caused_by`
+links at commit grain, usually to a squash merge that also carries the feature. False
 positives and lessons are reported beside the fixes, never counted as fixes, and a superseded bug
 row counts once. `--repo`, `--top` and `--json` narrow or export it. On the 2026-10-28 ledger:
 897 fixes, P1 208, P2 554, P3 88, 47 with no severity; 438 carry no domain and 637 no category,

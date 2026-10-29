@@ -61,3 +61,20 @@ def test_domain_comes_from_the_finding_id_prefix():
     assert stats.domain(replace(row(), finding_id="STAKES-1")) == "STAKES"
     assert stats.domain(replace(row(), finding_id="P1-03")) == "unattributed"
     assert stats.domain(replace(row(), finding_id="F-12")) == "unattributed"
+
+
+def test_blame_links_count_commits_not_findings(tmp_path):
+    """Invariant: a fix linked through `caused_by` to three findings of one earlier commit counts
+    as one fix in audited code blaming one commit. `caused_by` links at commit grain, so counting
+    links would count that commit's findings (on 2026-10-28, 53 fixes held 486 links).
+
+    Red 2026-10-28: mutation in `stats.summarize`, the set comprehension behind
+    `audited_commits_blamed` became a list (`len([...])`); failed at
+    `assert s["audited_commits_blamed"] == 1` (3).
+    """
+    early = [replace(row(), finding_id=f"BUG-{n}", fix_commit="e" * 40) for n in (1, 2, 3)]
+    late = replace(row(), finding_id="SEC-9", fix_commit="f" * 40,
+                   caused_by=[r.bug_id for r in early])
+    s = stats.summarize(_ledger(tmp_path, [*early, late]))
+    assert s["fixes_in_audited_code"] == 1
+    assert s["audited_commits_blamed"] == 1
