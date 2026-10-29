@@ -86,6 +86,7 @@ def load_rows(ledger: Path) -> list[dict]:
                 if anchors:
                     value["anchors"] = anchors
             rows.append(value)
+    anchor_log.inherit_dicts(rows)
     return rows
 
 

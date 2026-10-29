@@ -160,6 +160,12 @@ sections above read.
 
 ### Fixed
 
+* **A correcting row keeps the place the row it replaces had.** Recovered anchors are keyed by
+  bug id, so `bugs relink` (rows re-keyed to their squash merge) dropped them: on 2026-10-29
+  RE-call:b27298bf4125:SEC-001 lost `recall/lite/refresh.py _refresh_locked`. A bug row with no
+  anchors of its own now inherits those of the row it `supersedes`, chains included, in
+  `read_ledger`, `bug_rows` and the legacy `prior.load_rows`, when every inherited file is one
+  its own fix touched. On the live ledger: 895 to 927 anchored fixes of 1,584.
 * **The Stop guard passes over a Codex run below the session.** A Codex run records no
   `owner_session` (Codex has no `CLAUDE_CODE_SESSION_ID`) and usually no worktree claim, so the
   owner test could not tell it was another client's, and a Claude session in the main checkout

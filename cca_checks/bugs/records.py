@@ -469,7 +469,7 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
             continue
         effective = with_effective_caused_by(row, annotations)
         rows.setdefault(row_id, anchor_log.apply(effective, recovered))
-    return rows, skipped
+    return anchor_log.inherit_rows(rows), skipped
 
 
 def rerender_all(root: Path, modified: str) -> RerenderReport:

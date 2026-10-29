@@ -2,6 +2,12 @@
 
 Annotations are scoped to the original bug, repository, fix and run. Authored anchors
 always win. This log enriches bug context only; it cannot create an accepted FP.
+
+A row that supersedes another and has no anchors of its own, authored or recovered, inherits
+its predecessor's (`inherit_rows`, `inherit_dicts`), when every inherited file is one the
+successor's fix touched. Annotations are keyed by bug id, so without this a correction such as
+`bugs relink` (a run's rows re-keyed to their squash merge) dropped the place the old row had:
+measured 2026-10-29, RE-call:b27298bf4125:SEC-001 lost `recall/lite/refresh.py _refresh_locked`.
 """
 from __future__ import annotations
 
@@ -142,6 +148,49 @@ def effective(row: dict, annotations: dict[str, dict]) -> list:
             or not all(a["file"] in files for a in note["anchors"])):
         return []
     return [dict(a) for a in note["anchors"]]
+
+
+def _fits(anchor_files: list[str], files: object) -> bool:
+    return (isinstance(files, list) and all(isinstance(f, str) for f in files)
+            and bool(anchor_files) and all(f in files for f in anchor_files))
+
+
+def inherit_rows(rows: dict[str, Row]) -> dict[str, Row]:
+    """`rows` by id, each anchorless bug row given its predecessor's anchors (chains included)."""
+    out = dict(rows)
+    for _ in range(len(out)):  # one link per pass; a chain of n rows settles in n passes
+        changed = False
+        for row_id, row in out.items():
+            if not isinstance(row, BugRow) or row.anchors or not row.supersedes:
+                continue
+            before = out.get(row.supersedes)
+            if (isinstance(before, BugRow) and before.anchors
+                    and _fits([a.file for a in before.anchors], row.files)):
+                out[row_id] = replace(row, anchors=list(before.anchors))
+                changed = True
+        if not changed:
+            break
+    return out
+
+
+def inherit_dicts(rows: list[dict]) -> None:
+    """The same rule for the legacy dictionary reader, in place."""
+    by_id = {r.get("bug_id"): r for r in rows
+             if isinstance(r, dict) and r.get("kind", "bug") == "bug" and r.get("bug_id")}
+    for _ in range(len(by_id)):
+        changed = False
+        for row in by_id.values():
+            before = by_id.get(row.get("supersedes"))
+            anchors = before.get("anchors") if isinstance(before, dict) else None
+            if (row.get("anchors") or not isinstance(anchors, list) or not anchors
+                    or not all(isinstance(a, dict) and isinstance(a.get("file"), str)
+                               for a in anchors)):
+                continue
+            if _fits([a["file"] for a in anchors], row.get("files")):
+                row["anchors"] = [dict(a) for a in anchors]
+                changed = True
+        if not changed:
+            break
 
 
 def apply(row: Row, annotations: dict[str, dict]) -> Row:
