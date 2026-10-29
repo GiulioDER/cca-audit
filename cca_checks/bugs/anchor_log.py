@@ -64,7 +64,7 @@ def _git_provenance(note: dict, provenance: object) -> bool:
     if not isinstance(provenance, dict):
         return False
     if (provenance.get("method") not in ("git-finding-file", "git-finding-symbol-file",
-                                          "git-single-production-file")
+                                          "git-single-production-file", "git-leading-stem-file")
             or provenance.get("commit") != note["fix_commit"]
             or not isinstance(provenance.get("finding_id"), str)
             or not provenance["finding_id"]
@@ -74,14 +74,22 @@ def _git_provenance(note: dict, provenance: object) -> bool:
             or any(a["symbol"] is not None for a in note["anchors"])):
         return False
     refs = provenance.get("references")
-    if provenance["method"] == "git-single-production-file":
+    if provenance["method"] in ("git-single-production-file", "git-leading-stem-file"):
         version = provenance.get("exclusions_version")
+        if provenance["method"] == "git-single-production-file":
+            refs_ok = refs == [{"file": a["file"]} for a in note["anchors"]]
+        else:
+            # The word of the summary that named the file, beside it.
+            refs_ok = (isinstance(refs, list) and len(refs) == len(note["anchors"]) == 1
+                       and isinstance(refs[0], dict) and set(refs[0]) == {"file", "token"}
+                       and refs[0]["file"] == note["anchors"][0]["file"]
+                       and isinstance(refs[0]["token"], str) and bool(refs[0]["token"]))
         return (isinstance(provenance.get("parent"), str)
                 and bool(SHA40.fullmatch(provenance["parent"]))
                 and isinstance(provenance.get("changed_sha256"), str)
                 and bool(_SHA.fullmatch(provenance["changed_sha256"]))
                 and type(version) is int and version >= 1
-                and refs == [{"file": a["file"]} for a in note["anchors"]])
+                and refs_ok)
     if provenance["method"] == "git-finding-symbol-file":
         if (not isinstance(provenance.get("parent"), str)
                 or not SHA40.fullmatch(provenance["parent"])

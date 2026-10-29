@@ -171,6 +171,20 @@ exits 1. The plan was sized on 213 rows on
 2026-10-28, which fell to about 92 the same evening after other recoveries; the real count is
 unmeasured until the dry run.
 
+Add `--leading-stem` to also anchor a fix that changed two or more production files when the
+row's summary opens with the name stem of exactly one changed source file: "crypto_payment
+TOCTOU race" anchors `polymarket_bot/sales_bot/crypto_payment.py`. An id prefix such as `F-07:`
+or `BUG-001:` and an opening backtick are skipped. The word must have four or more characters
+and not be a generic stem (`main`, `utils`, `config`, `core`, `store`, `cli`, `api` and the like),
+the file must have a source extension (`.py .js .ts .tsx .jsx .rs .go .sh .ps1 .sql`) and be in the
+row's files, and the summary must name no other changed file. The same exclusions, prefix
+refusals, single parent and blob checks as `--single-file` apply. The anchor is file level with
+no symbol, under the provenance method `git-leading-stem-file`, which records the word that named
+the file. The rule runs only on rows the bullet and single-file rules refuse, and `--write` is
+gated on the same reader as `--single-file`. Measured 2026-10-29 on 128 already-anchored
+multi-file rows, it picked the anchored file 121 times (0.945); that set is not the population
+the rule targets, so read a sample of the dry run before writing.
+
 After reviewing the JSON plan, add `--write` to append supported annotations, then run
 `python -m cca_checks bugs rerender --all`. Existing annotations and authored anchors retain
 precedence. No ledger row, missing run ID, severity or proof flag is rewritten.

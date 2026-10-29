@@ -25,7 +25,7 @@ import sys
 from collections import Counter
 from dataclasses import asdict
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import anchor_log, records
 from .anchors import code_sha, normalize, resolve_symbols, well_formed_file
@@ -259,8 +259,11 @@ def excluded(path: str) -> bool:
             or suffix in _EXCLUDED_SUFFIXES or name.startswith("CHANGELOG"))
 
 
-def _recover_single_file(row: BugRow, repo: Path, identity: str | None) -> dict:
-    """A file-level annotation from a fix that changed exactly one production file."""
+def _fix_changes(row: BugRow, repo: Path, identity: str | None) -> tuple[str, list, list]:
+    """(the fix's one parent, every path it changed, the production ones), or Unavailable.
+
+    The checks both file-level rules share, in the order the single-file rule always ran them.
+    """
     if not isinstance(row.repo, str) or not identity or identity.lower() != row.repo.lower():
         raise Unavailable("local repository identity differs")
     if not isinstance(row.fix_commit, str) or not SHA40.fullmatch(row.fix_commit):
@@ -277,12 +280,12 @@ def _recover_single_file(row: BugRow, repo: Path, identity: str | None) -> dict:
     raw = _git(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z",
                parent, row.fix_commit)
     changed = sorted({p.decode("utf-8") for p in raw.split(b"\0") if p})
-    production = [p for p in changed if not excluded(p)]
-    if not production:
-        raise Unavailable("fix changed no production file")
-    if len(production) > 1:
-        raise Unavailable("fix changed more than one production file")
-    file = production[0]
+    return parent, changed, [p for p in changed if not excluded(p)]
+
+
+def _file_note(row: BugRow, repo: Path, file: str, parent: str, changed: list, *,
+               method: str, reference: dict) -> dict:
+    """The file-level annotation for `file`, once the rule that chose it has run its checks."""
     if file not in row.files:
         raise Unavailable("production file is not in the row's files")
     # The row's files and the fix's changed files together, so a summary naming either kind of
@@ -301,12 +304,12 @@ def _recover_single_file(row: BugRow, repo: Path, identity: str | None) -> dict:
             "fix_commit": row.fix_commit,
             "anchors": [{"file": file, "symbol": None,
                          "code_sha": code_sha(_blob(repo, row.fix_commit, file))}],
-            "provenance": {"method": "git-single-production-file", "commit": row.fix_commit,
+            "provenance": {"method": method, "commit": row.fix_commit,
                            "parent": parent,
                            "message_sha256": hashlib.sha256(message).hexdigest(),
                            "summary_sha256": hashlib.sha256(row.summary.encode()).hexdigest(),
                            "finding_id": row.finding_id, "ordinal": row.ordinal,
-                           "references": [{"file": file}],
+                           "references": [reference],
                            # The sorted changed paths, joined by "\n" and UTF-8 encoded.
                            "changed_sha256": hashlib.sha256(
                                "\n".join(changed).encode("utf-8")).hexdigest(),
@@ -314,6 +317,54 @@ def _recover_single_file(row: BugRow, repo: Path, identity: str | None) -> dict:
     if not anchor_log.valid(note):
         raise Unavailable("derived Git annotation is invalid")
     return note
+
+
+def _recover_single_file(row: BugRow, repo: Path, identity: str | None) -> dict:
+    """A file-level annotation from a fix that changed exactly one production file."""
+    parent, changed, production = _fix_changes(row, repo, identity)
+    if not production:
+        raise Unavailable("fix changed no production file")
+    if len(production) > 1:
+        raise Unavailable("fix changed more than one production file")
+    return _file_note(row, repo, production[0], parent, changed,
+                      method="git-single-production-file", reference={"file": production[0]})
+
+
+#: The summary's leading word, after an optional finding id (`F-07:`, `BUG-001:`) and backtick.
+_LEADING = re.compile(r"\s*(?:[A-Z][A-Z0-9]*-[0-9A-Za-z]+:\s*)?`?([A-Za-z_][A-Za-z0-9_]*)")
+#: Stems shared by many modules, so a summary opening with one does not name a file.
+_GENERIC_STEMS = frozenset({
+    "main", "utils", "util", "config", "common", "base", "core", "init", "__init__", "models",
+    "types", "helpers", "settings", "constants", "errors", "server", "client", "app", "cli",
+    "api", "service", "services", "store", "test", "tests"})
+#: Files the leading word may name. A non-source file (an HTML page called `corpus`) is the
+#: error the 2026-10-29 measurement found.
+_SOURCE_SUFFIXES = frozenset({".py", ".js", ".ts", ".tsx", ".jsx", ".rs", ".go", ".sh",
+                              ".ps1", ".sql"})
+
+
+def _leading_word(summary: str) -> str | None:
+    match = _LEADING.match(summary)
+    return match.group(1) if match else None
+
+
+def _recover_leading_stem(row: BugRow, repo: Path, identity: str | None) -> dict:
+    """A file-level annotation from a multi-file fix whose summary opens with one file's stem."""
+    parent, changed, production = _fix_changes(row, repo, identity)
+    if len(production) < 2:
+        raise Unavailable("fix changed fewer than two production files")
+    word = _leading_word(row.summary)
+    if word is None:
+        raise Unavailable("summary has no leading identifier")
+    if len(word) < 4 or word.lower() in _GENERIC_STEMS:
+        raise Unavailable("leading word is too generic or too short")
+    candidates = [p for p in production if PurePosixPath(p).stem == word
+                  and PurePosixPath(p).suffix.lower() in _SOURCE_SUFFIXES]
+    if len(candidates) != 1:
+        raise Unavailable("leading word names no single changed source file")
+    return _file_note(row, repo, candidates[0], parent, changed,
+                      method="git-leading-stem-file",
+                      reference={"file": candidates[0], "token": word})
 
 
 _PROBE = """
@@ -366,7 +417,8 @@ def reader_ranks_file_level(root: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def plan(root: Path, repos: list[Path], single_file: bool = False) -> Report:
+def plan(root: Path, repos: list[Path], single_file: bool = False,
+         leading_stem: bool = False) -> Report:
     """Dry-run effective unanchored bug rows; preserve individual refusal reasons."""
     rows, errors = records.read_ledger(root)
     if errors:
@@ -399,6 +451,13 @@ def plan(root: Path, repos: list[Path], single_file: bool = False) -> Report:
                 continue
             except (OSError, ValueError, RecursionError) as exc:
                 reason = str(exc)
+        if leading_stem:
+            # Last: the bullet and single-file rules keep precedence.
+            try:
+                report.annotations.append(_recover_leading_stem(row, repo, row.repo))
+                continue
+            except (OSError, ValueError, RecursionError) as exc:
+                reason = str(exc)
         report.unresolved[row.id] = reason
     return report
 
@@ -409,11 +468,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--single-file", action="store_true",
                         help="also anchor refused rows whose fix changed one production file")
+    parser.add_argument("--leading-stem", action="store_true",
+                        help="also anchor refused multi-file rows whose summary opens with "
+                             "one changed source file's stem")
     args = parser.parse_args(argv)
     allowed, refusal = True, ""
+    gated = args.single_file or args.leading_stem
     try:
-        report = plan(bugs_dir(), args.repo, single_file=args.single_file)
-        if args.single_file:
+        report = plan(bugs_dir(), args.repo, single_file=args.single_file,
+                      leading_stem=args.leading_stem)
+        if gated:
             allowed, refusal = reader_ranks_file_level(_reader_root())
         if args.write and allowed:
             report.written = anchor_log.append(bugs_dir(), report.annotations)
@@ -422,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     data = asdict(report)
     data["reasons"] = dict(Counter(report.unresolved.values()))
-    if args.single_file:
+    if gated:
         data["write_allowed"] = allowed
         if not allowed:
             data["write_refusal"] = refusal
