@@ -18,6 +18,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..layer_outputs import ShapeError, l4_fixes
 from . import fp_records, run_facts
 from .gitread import remote_repo
 from .store import bugs_dir, write
@@ -88,7 +89,12 @@ def capture(root, run_id: str, verdict: str = "") -> Path | None:
     root = Path(root)
     run_dir = root / ".claude" / "audits" / "runs" / run_id
     l4 = run_dir / "L4.json"
-    fixes = json.loads(l4.read_text(encoding="utf-8-sig")) if l4.exists() else []
+    # An object-shaped L4 ({"fixes": []}) is truthy even when it fixed nothing; read the
+    # entries, so a run that fixed nothing is recorded now instead of waiting for a PR.
+    try:
+        fixes = l4_fixes(json.loads(l4.read_text(encoding="utf-8-sig"))) if l4.exists() else []
+    except ShapeError:
+        fixes = []
     stamp = datetime.now(timezone.utc)
     picked, skipped = fp_records.eligible_for_run(root, run_id, verdict)
     if not fixes and not picked:

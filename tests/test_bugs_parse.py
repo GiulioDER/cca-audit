@@ -262,3 +262,104 @@ def test_a_declined_heading_opens_nothing():
     """Measured, 2026-10-11. Red proof: remove 'declined' from _SKIP_HEADING -> CODE-007 counted."""
     body = "DECLINED:\n- CODE-007: closure refactor (verified correct; risk without benefit).\n"
     assert parse_message(body) == []
+
+
+# Formats measured 2026-10-29: 36 CCA fix commits on the default branches read as unparsed,
+# none with a ledger row. The structured ones are below; prose without per-fix structure stays
+# unparsed by design.
+
+SECOND_PASS = """fix(hft): 3 deferred fixes from CCA second pass
+
+P3 fixes:
+- CODE-001: a duplicate parser is now the shared one.
+- FIN-005: the kill file is honoured.
+
+Stale (skipped):
+- CODE-012: already documented.
+"""
+
+
+def test_a_second_pass_counts_its_p3_fixes_and_an_ordinary_run_does_not():
+    """Invariant: under a subject saying "second pass" or "deferred", a "P3 fixes:" section is
+    P3 fixes (the deferred pass verified them); elsewhere P3 stays skipped (LETTERED).
+
+    Red 2026-10-29: mutation in `_heading_kind`, `return (SEVERITY, "P3") if second_pass else
+    (SKIP, None)` became `return SKIP, None`; failed at the SECOND_PASS assert ([]).
+    """
+    assert _ids(parse_message(SECOND_PASS)) == [("CODE-001", "P3"), ("FIN-005", "P3")]
+    assert all(b.severity != "P3" for b in parse_message(LETTERED))
+
+
+FIXED = """fix(shadow): deferred P3 hygiene fixes from CCA second pass
+
+FIXED:
+- Named constants for the three thresholds.
+- Brief docstrings on non-obvious public functions.
+
+SKIPPED (with reason):
+- PERF-001: not a bottleneck.
+"""
+
+
+def test_a_fixed_heading_takes_the_one_level_its_subject_names():
+    """Invariant: "FIXED:" opens a fix section at the subject's single level, its ID-less
+    bullets as stand-ins; the SKIPPED section after it still counts nothing.
+
+    Red 2026-10-29: mutation in `_heading_kind`, the `_FIXED_HEADINGS` test became `if False:`;
+    failed at `assert _ids(...) == [("P3-1", "P3"), ("P3-2", "P3")]` ([]).
+    """
+    assert _ids(parse_message(FIXED)) == [("P3-1", "P3"), ("P3-2", "P3")]
+
+
+INLINE = """fix(discovery): 8 audit fixes from CCA v2 (9-auditor) review
+
+P1: close activity-truncation latency-gate bypass (FIN-008)
+P2: GRANT SELECT on new tables (DAT-001); single-commit atomicity
+    (DAT-002/FIN-001); a stand-in without an id
+Dropped FPs: resolved_ts-NULL (unreachable).
+"""
+
+
+def test_inline_severity_lines_give_one_fix_per_semicolon_part():
+    """Invariant: "P1: text" and "P2: a (ID); b (ID/ID)" lines, continuation lines joined, give
+    one fix per ';' part, named by its parenthesised IDs or by a stand-in, with the IDs
+    stripped from the summary; the "Dropped FPs" line counts nothing.
+
+    Red 2026-10-29: mutation in `parse_message`, `if inline:` became `if False:`; failed at the
+    `_ids` assert (a heading line, so nothing).
+    """
+    bullets = parse_message(INLINE)
+    assert _ids(bullets) == [("FIN-008", "P1"), ("DAT-001", "P2"), ("DAT-002", "P2"),
+                             ("FIN-001", "P2"), ("P2-1", "P2")]
+    assert bullets[1].summary == "GRANT SELECT on new tables"
+
+
+UNDERLINED = """fix(auth): 24 audit fixes from CCA (DEEP tier)
+
+P1 — the guard I killed, and the test that hid it
+--------------------------------------------------
+Prose about the first finding, with no bullet.
+
+P2 — the rest
+-------------
+- Rollback was not symmetric.
+- The subject split on the first colon.
+
+Docs, all verified against the code
+-----------------------------------
+- this bullet names no finding and is not a fix.
+"""
+
+
+def test_an_underlined_severity_title_is_a_section_and_its_own_fix_without_bullets():
+    """Invariant: "P1 — title" underlined opens a P1 section; with no bullet under it, the title
+    is the one fix; with bullets, the bullets are. An underlined topic section counts nothing.
+
+    Red 2026-10-29, two mutations in `parse_message`: deleting `continue` after
+    `if _UNDERLINE.match(line):`; failed at the `_ids` assert (the rule line reopened a topic
+    section, so the P2 bullets were dropped). `close_titled` made a no-op; failed at the same
+    assert (no P1-1).
+    """
+    bullets = parse_message(UNDERLINED)
+    assert _ids(bullets) == [("P1-1", "P1"), ("P2-1", "P2"), ("P2-2", "P2")]
+    assert bullets[0].summary == "the guard I killed, and the test that hid it"

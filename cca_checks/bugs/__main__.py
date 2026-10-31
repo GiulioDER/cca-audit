@@ -3,6 +3,11 @@ python -m cca_checks.bugs resolve [--write] [--json] [--stale-days N]
 python -m cca_checks.bugs brief [--root PATH] [--files F ...] [--out FILE] [--json]
 python -m cca_checks.bugs prior --records FILE [--code FILE] [--no-lessons] [--repo-name OWNER/NAME]
     [--root PATH] [--before YYYY-MM-DD] [--limit N] [--json]
+python -m cca_checks.bugs record-unlinked [--older-than-hours N] [--assume-repo OWNER/NAME]
+    [--write] [--json]
+python -m cca_checks.bugs relink --repo CLONE [--repo CLONE ...] [--assume-repo OWNER/NAME]
+    [--write] [--json]
+python -m cca_checks.bugs stats [--repo OWNER/NAME] [--top N] [--json]
 python -m cca_checks.bugs distill [--repo OWNER/NAME] [--draft] [--model ID] [--json]
 python -m cca_checks.bugs lesson accept PROPOSAL --by NAME
 python -m cca_checks.bugs lesson retract ID --reason TEXT --by NAME
@@ -424,6 +429,26 @@ def main(argv: list[str] | None = None) -> int:
     brief.add_argument("--skipped", choices=["unresolved-root", "own-checkout"],
                        help="HUNT mode only: read no memory, print the empty PRIOR FIXES form "
                             "and record why in --out")
+    u = sub.add_parser("record-unlinked", help="write pending runs no merged PR can be found "
+                                           "for, keyed by the run's own commit, as historical")
+    u.add_argument("--older-than-hours", type=float, default=24)
+    u.add_argument("--assume-repo", metavar="OWNER/NAME",
+                   help="the repository of a record whose meta.json names none")
+    u.add_argument("--write", action="store_true")
+    u.add_argument("--json", action="store_true")
+    rl = sub.add_parser("relink", help="link unlinked and pending runs to the squash merge "
+                                     "carrying their commit's whole message")
+    rl.add_argument("--repo", type=Path, action="append", required=True,
+                    help="a clone to read the default branch of")
+    rl.add_argument("--assume-repo", metavar="OWNER/NAME",
+                    help="the repository of a record whose meta.json names none")
+    rl.add_argument("--write", action="store_true")
+    rl.add_argument("--json", action="store_true")
+    st = sub.add_parser("stats", help="count the fixes in the ledger: severity, project, "
+                                      "domain, category, anchored files, regressions")
+    st.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's fixes")
+    st.add_argument("--top", type=_positive_int, default=15)
+    st.add_argument("--json", action="store_true")
     d = sub.add_parser("distill", help="group related bugs and draft lesson proposals")
     d.add_argument("--repo", metavar="OWNER/NAME", help="only this repository's bugs")
     d.add_argument("--draft", action="store_true",
@@ -509,6 +534,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if a.cmd == "retract-fp":
         return _retract_fp(a)
+
+    if a.cmd == "record-unlinked":
+        from . import unlinked
+        return unlinked.run(bugs_dir(), write=a.write, older_than_hours=a.older_than_hours,
+                            assume_repo=a.assume_repo, as_json=a.json)
+
+    if a.cmd == "relink":
+        from . import relink
+        return relink.run(bugs_dir(), a.repo, write=a.write, assume_repo=a.assume_repo,
+                          as_json=a.json)
+
+    if a.cmd == "stats":
+        from . import stats
+        return stats.run(repo=a.repo, top=a.top, as_json=a.json)
 
     if a.cmd == "distill":
         return _distill(a)

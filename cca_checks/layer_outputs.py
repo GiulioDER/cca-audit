@@ -1,4 +1,4 @@
-"""The shape of the work files L2, L2.5 and L3 store, checked when they are recorded.
+"""The shape of the work files L2, L2.5, L3 and L4 store, checked when they are recorded.
 
 `record` used to accept any JSON for these layers. A later run reads them back: the deferred
 pass finds its findings by id in L2, and its pool in L2.5 and L3. A file that disagreed with the
@@ -104,3 +104,38 @@ def l3_plan(data, to_fix: int, deferred: int, l25: dict[str, str]) -> dict[str, 
     if unconfirmed:
         raise ShapeError(f"L3 plans {', '.join(unconfirmed)}, which L2.5 did not confirm")
     return plan
+
+
+def l4_fixes(data) -> list[dict]:
+    """The applied fixes as one entry per finding, each with `fix_id` and `finding`.
+
+    Two shapes reach here. The canonical one is a JSON array of entries carrying `fix_id` and
+    `finding` (or `finding_id`). Runs on 2026-10-21 to 2026-10-27, from both clients, stored an
+    object instead: `{"fixes": [...]}`, whose entries are canonical or `{"id": "FIX-1",
+    "findings": [...]}`, beside keys such as `parked` or `not_fixed` that hold no applied fix.
+    The ledger reader iterated that object as a list, found no entries, and every such run's
+    fixes were lost as "no ledger rows could be built". Both shapes are read here, the second
+    expanded to one entry per finding; anything else is refused, so it is refused at record time.
+    """
+    entries = data.get("fixes") if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        raise ShapeError(
+            'L4\'s file must be a JSON array of fix entries, or an object whose "fixes" is one'
+        )
+    out: list[dict] = []
+    for n, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ShapeError(f"L4 entry {n} is not an object")
+        fix_id = entry.get("fix_id") or entry.get("id")
+        findings = entry.get("findings")
+        if isinstance(findings, list) and "finding" not in entry and "finding_id" not in entry:
+            if not findings or not all(isinstance(f, str) and f for f in findings):
+                raise ShapeError(f'L4 entry {n} needs "findings" to list finding id strings')
+            base = {k: v for k, v in entry.items() if k not in ("id", "findings")}
+            out.extend({**base, "fix_id": fix_id, "finding": f} for f in findings)
+            continue
+        finding = entry.get("finding") or entry.get("finding_id") or fix_id
+        if not isinstance(finding, str) or not finding:
+            raise ShapeError(f'L4 entry {n} names no finding ("finding" or "finding_id")')
+        out.append({**entry, "fix_id": fix_id} if fix_id is not None else entry)
+    return out

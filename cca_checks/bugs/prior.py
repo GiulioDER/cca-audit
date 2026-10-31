@@ -86,6 +86,7 @@ def load_rows(ledger: Path) -> list[dict]:
                 if anchors:
                     value["anchors"] = anchors
             rows.append(value)
+    anchor_log.inherit_dicts(rows)
     return rows
 
 
@@ -213,6 +214,35 @@ MATCH_ORDER = ("exact", "symbol_changed", "file_only")
 ANCHORS_SHOWN = 3
 
 
+def _brief_view(record: dict) -> tuple[str, bool]:
+    """(the level the block shows and ranks `record` at, whether a symbol-less anchor decided).
+
+    RE-call's matcher reports a record anchor with no symbol as `symbol_changed` against a
+    file-level query whenever the hashes differ, which ranked a file-level record above records
+    anchored at a real symbol. As in RE-call's local brief (`recall_hooks.auditor_brief`, #1063
+    and #1067), a symbol-less anchor counts as `file_only` at best, the best anchor decides, and
+    on a tie the symbol anchor does. An entry without per-anchor matches keeps its reported level.
+    """
+    views = []
+    for item in record.get("anchor_matches") or []:
+        level = item.get("match")
+        if level not in MATCH_ORDER:
+            continue
+        symbolless = item["anchor"].get("symbol") is None
+        if symbolless:
+            level = max(level, "file_only", key=MATCH_ORDER.index)
+        views.append((MATCH_ORDER.index(level), symbolless, level))
+    if not views:
+        return record["anchor_match"], False
+    _, symbolless, level = min(views)
+    return level, symbolless
+
+
+def brief_match(record: dict) -> str:
+    """The level the block labels, orders and counts `record` at (see `_brief_view`)."""
+    return _brief_view(record)[0]
+
+
 def select_records(records: list[dict], repo: str, before: str | None = None,
                    limit: int = 8, today: str | None = None) -> list[dict]:
     """The bug records of `repo` the block lists, best first, at most `limit`.
@@ -220,8 +250,9 @@ def select_records(records: list[dict], repo: str, before: str | None = None,
     Kept: kind bug, same repository, an anchor match of at least file_only, not superseded,
     not expired by `today` (a future `valid_until` is still current, as for the PRIOR_FP
     matcher), dated before `before` when given. Every other kind is dropped here, a false
-    positive above all: auditors are never shown one. Order: exact, then symbol_changed,
-    then file_only; within each, proved before historical, then newest.
+    positive above all: auditors are never shown one. Order by `brief_match`: exact, then
+    symbol_changed, then file_only; within each, a record decided by a symbol anchor first, then
+    proved before historical, then newest.
     """
     from .envelope import record_expired, utc_today
 
@@ -242,14 +273,14 @@ def select_records(records: list[dict], repo: str, before: str | None = None,
             continue
         found.append(record)
     found.sort(key=lambda r: str(r["recall_record"].get("date", "")), reverse=True)
-    found.sort(key=lambda r: (MATCH_ORDER.index(r["anchor_match"]),
+    found.sort(key=lambda r: (MATCH_ORDER.index(brief_match(r)), _brief_view(r)[1],
                               0 if r["recall_record"].get("tier") == "proved" else 1))
     return found[:limit]
 
 
 def block_counts(selected: list[dict]) -> dict[str, int]:
-    """The listed records by anchor match: what the measurement trigger counts."""
-    return {m: sum(1 for r in selected if r.get("anchor_match") == m) for m in MATCH_ORDER}
+    """The listed records by the level the block shows: what the measurement trigger counts."""
+    return {m: sum(1 for r in selected if brief_match(r) == m) for m in MATCH_ORDER}
 
 
 def code_label(anchor: dict, code: list[dict], repo: str) -> str | None:
@@ -276,7 +307,7 @@ def code_label(anchor: dict, code: list[dict], repo: str) -> str | None:
 def _record_entry(record: dict, code: list[dict] | None, repo: str) -> str:
     rec = record["recall_record"]
     entry = _entry(rec, [])
-    head = entry.split("\n", 1)[0] + f" [match: {record['anchor_match']}]"
+    head = entry.split("\n", 1)[0] + f" [match: {brief_match(record)}]"
     places = []
     for anchor in [a for a in rec.get("anchors") or [] if isinstance(a, dict)][:ANCHORS_SHOWN]:
         where = _clean(f"{anchor.get('file')} {anchor.get('symbol') or '(module level)'}")
@@ -343,7 +374,7 @@ def select_lessons(records: list[dict], repo: str, before: str | None = None,
             continue
         found.append(record)
     found.sort(key=lambda r: str(r["recall_record"].get("date", "")), reverse=True)
-    found.sort(key=lambda r: (0 if r["anchor_match"] != "file_only" else 1,
+    found.sort(key=lambda r: (0 if brief_match(r) != "file_only" else 1,
                               -len(r["recall_record"]["members"])))
     return found[:limit]
 
@@ -353,7 +384,7 @@ def _lesson_entry(record: dict) -> str:
     lesson_id = _clean(rec.get("id", ""))[:BUG_ID_MAX]
     date = _clean(rec.get("date", ""))
     date = date if _DATE.fullmatch(date) else "?"
-    where = "at a changed symbol" if record["anchor_match"] != "file_only" else "in a changed file"
+    where = "at a changed symbol" if brief_match(record) != "file_only" else "in a changed file"
     places = [_clean(f"{a.get('file')} {a.get('symbol') or '(module level)'}")[:FILES_MAX]
               for a in [a for a in rec.get("anchors") or [] if isinstance(a, dict)]
               [:ANCHORS_SHOWN]]

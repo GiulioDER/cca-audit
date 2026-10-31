@@ -66,7 +66,12 @@ def bug_rows(ledger: Path) -> list[BugRow]:
                 rows.append(anchor_log.apply(row, recovered))
         except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
             continue
-    return rows
+    by_id = anchor_log.inherit_rows({r.bug_id: r for r in rows})
+    out = []
+    for row in rows:
+        inherited = by_id.get(row.bug_id)
+        out.append(inherited if isinstance(inherited, BugRow) else row)
+    return out
 
 
 def caused_by_annotations(root: Path) -> dict[str, list[str]]:

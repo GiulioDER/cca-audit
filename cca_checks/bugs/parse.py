@@ -13,8 +13,18 @@ Every unindented line that is not a bullet is a heading, of one of three kinds:
                              stand-in ID, P1-1, P1-2, with its whole text as summary.
     Deferred (P3): ...       a SKIP section: P3 (never verified at L2.5), and any heading
                              saying deferred, stale, skipped, not fixed, and the like.
+                             Except in a second pass: when the subject says "second pass"
+                             or "deferred", a "P3:" / "P3 fixes:" heading is a SEVERITY
+                             section, because the deferred pass verified its P3s.
+    FIXED:                   a SEVERITY section at the one level the subject names
+                             ("deferred P3 hygiene fixes"); a TOPIC section otherwise.
+    P1 — title               underlined with ----- or =====: a SEVERITY section, and when
+                             no bullet follows, the title itself is the one fix.
     anything else            a TOPIC section ("Shipped library and install:"): only
                              bullets naming known finding IDs count, with no severity.
+
+    P2: a (DAT-001); b       an inline severity line, continuation lines indented: one
+                             fix per ';' part, named by its parenthesised IDs.
 
     - STAKES-001: text       also "- SEC-001 text", "- FIX-1, text"
       continuation lines     indented, joined into the summary
@@ -22,7 +32,10 @@ Every unindented line that is not a bullet is a heading, of one of three kinds:
 
 Measured on 2026-10-11 against real history: most fix commits outside the projects CCA
 was developed in list their fixes without finding IDs, or under topic headings, so a
-parser that needed an ID under a P1/P2 heading read 18% of them.
+parser that needed an ID under a P1/P2 heading read 18% of them. Measured 2026-10-29: 36
+CCA fix commits on the default branches still read as unparsed, none with a ledger row;
+the second-pass, FIXED, inline and underlined forms above cover the structured ones. The
+rest are prose without per-fix structure, and stay unparsed rather than guessed.
 """
 from __future__ import annotations
 
@@ -57,7 +70,15 @@ _SKIP_TEXT = ("deferred", "(deferred", "not fixed", "owner decision", "won't fix
 KNOWN_PREFIXES = frozenset({
     "FIX", "SEC", "BUG", "CODE", "PERF", "DOC", "ENV", "DEP", "DEPLOY",
     "STAKES", "NUM", "DAT", "DIFF", "ARCH",
+    # sentiment-agent's financial-correctness auditor (FIN-001 ...), in its fix commits.
+    "FIN",
 })
+_SECOND_PASS = re.compile(r"second pass|deferred", re.IGNORECASE)
+_UNDERLINE = re.compile(r"^[-=]{3,}\s*$")
+_TITLED = re.compile(r"^(P[123])\s+[\u2014\u2013-]+\s+(\S.*)$")
+_INLINE = re.compile(r"^(?:\*\*)?(P[12])(?:\*\*)?:\s+(\S.*)$")
+_PAREN_IDS = re.compile(rf"\s*\(({_ID}(?:\s*/\s*(?:[A-Z][A-Z0-9]*-)?\d+)*)\)")
+_FIXED_HEADINGS = ("fixed", "fixes", "fixed in this pass")
 SEVERITY, TOPIC, SKIP = "severity", "topic", "skip"
 
 
@@ -89,16 +110,20 @@ def _known_ids(ids: list[str]) -> list[str]:
     return [i for i in ids if i.split("-", 1)[0] in KNOWN_PREFIXES]
 
 
-def _heading_kind(line: str) -> tuple[str, str | None]:
+def _heading_kind(line: str, second_pass: bool = False,
+                  subject_level: str | None = None) -> tuple[str, str | None]:
     is_markdown = line.lstrip().startswith("#")
     text = line.strip().lstrip("#").strip().strip("*").strip()
     if any(word in text.lower() for word in _SKIP_HEADING):
         return SKIP, None  # "P2 (deferred to follow-up):", "Stale (already fixed):"
+    if text.lower().rstrip(":").strip() in _FIXED_HEADINGS and subject_level:
+        return SEVERITY, subject_level
     m = _SEVERITY.match(text)
-    if m and (text.endswith(":") or is_markdown or text == m.group(1)):
+    if m and (text.endswith(":") or is_markdown or text == m.group(1)
+              or (m.group(1) == "P3" and text.lower().rstrip(":") == "p3 fixes")):
         level = m.group(1)
         if level == "P3":
-            return SKIP, None
+            return (SEVERITY, "P3") if second_pass else (SKIP, None)
         if _P3.search(text):
             return TOPIC, None  # "P2/P3:" mixes a counted level with an uncounted one
         return SEVERITY, level
@@ -119,6 +144,22 @@ def parse_message(body: str, rejected: list[str] | None = None) -> list[Bullet]:
     kind, level = TOPIC, None
     stand_ins: Counter = Counter()
     current: dict | None = None
+    subject = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    second_pass = bool(_SECOND_PASS.search(subject))
+    levels = set(_SEVERITY.findall(subject))
+    subject_level = levels.pop() if len(levels) == 1 else None
+    # An underlined "P1 — title" section whose title is its only fix if no bullet follows.
+    titled: dict | None = None
+
+    def stand_in(sev: str, text: str) -> None:
+        stand_ins[sev] += 1
+        bullets.append(Bullet(f"{sev}-{stand_ins[sev]}", sev, text))
+
+    def close_titled() -> None:
+        nonlocal titled
+        if titled is not None and not titled["bullets"]:
+            stand_in(titled["level"], titled["title"])
+        titled = None
 
     def flush() -> None:
         nonlocal current
@@ -128,15 +169,28 @@ def parse_message(body: str, rejected: list[str] | None = None) -> list[Bullet]:
         full = _flat([current["full"], *current["more"]])
         ids, sect, sev = current["ids"], current["kind"], current["level"]
         current = None
+        if sect == "inline":
+            for part in (x.strip() for x in full.split(";")):
+                if not part or part.lower().startswith(_SKIP_TEXT):
+                    continue
+                named = _known_ids([i for m in _PAREN_IDS.finditer(part)
+                                    for i in expand_ids(m.group(1))])
+                text = _PAREN_IDS.sub("", part).strip()
+                if named:
+                    bullets.extend(Bullet(i, sev, text) for i in named)
+                else:
+                    stand_in(sev, part)
+            return
         if sect == SKIP or not full or rest.lower().startswith(_SKIP_TEXT):
             return
+        if titled is not None:
+            titled["bullets"] += 1
         known = _known_ids(ids)
         if sect == SEVERITY:
             if known:
                 bullets.extend(Bullet(i, sev, rest) for i in known)
             else:
-                stand_ins[sev] += 1
-                bullets.append(Bullet(f"{sev}-{stand_ins[sev]}", sev, full))
+                stand_in(sev, full)
         elif known:
             bullets.extend(Bullet(i, None, rest) for i in known)
         elif rejected is not None:
@@ -167,6 +221,21 @@ def parse_message(body: str, rejected: list[str] | None = None) -> list[Bullet]:
             }
             continue
         flush()
-        kind, level = _heading_kind(line)
+        if _UNDERLINE.match(line):
+            continue  # the rule under a heading, not a heading of its own
+        close_titled()
+        heading = _TITLED.match(line)
+        inline = _INLINE.match(line)
+        if heading and heading.group(1) != "P3":
+            kind, level = SEVERITY, heading.group(1)
+            titled = {"level": level, "title": heading.group(2).strip(), "bullets": 0}
+            continue
+        if inline:
+            current = {"ids": [], "rest": inline.group(2), "full": inline.group(2),
+                       "more": [], "kind": "inline", "level": inline.group(1)}
+            kind, level = TOPIC, None
+            continue
+        kind, level = _heading_kind(line, second_pass, subject_level)
     flush()
+    close_titled()
     return bullets

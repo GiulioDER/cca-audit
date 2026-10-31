@@ -8,6 +8,88 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**`recover_git_anchors --leading-stem` anchors multi-file fixes whose summary names the file.**
+On 2026-10-29, 557 unanchored rows came from fixes that changed two or more production files, so
+no existing rule could place them. Many summaries open with the module they are about
+("crypto_payment TOCTOU race", "whale_loser Decimal.ln() crash"). The new opt-in rule anchors the
+one changed source file whose name stem is that leading word, at file level with no symbol, under
+the provenance method `git-leading-stem-file`, after the bullet and single-file rules have
+refused the row. Generic stems, words under four characters and non-source files are refused.
+On 128 already-anchored multi-file rows it picked the anchored file 121 times (0.945; the
+single-file rule scored 0.920 on the same kind of check); it is expected to place about 81 of the
+557. `--write` is gated on the ranking reader, as for `--single-file`. The checks the two
+file-level rules share now live in one place, with the single-file rule's behaviour unchanged.
+
+**The hosted PRIOR BUGS block ranks a file-level record as the local brief does.** RE-call's
+matcher reports a record anchor with no symbol as `symbol_changed` against a file-level query
+whenever the file's hash differs, so a file-level record (1,042 of the ledger's rows are anchored,
+many at file level) ranked above records anchored at a real symbol. RE-call's local brief stopped
+doing that in RE-call #1063 and #1067. `prior.select_records`, `block_counts`, the block's
+`[match: ...]` label and `select_lessons` now do the same: the best per-anchor match decides, a
+symbol-less anchor counts as `file_only` at best, and within a level a record decided by a symbol
+anchor comes first. The run summary's `prior_block` counts therefore agree between the hosted
+and the local path; a module-level record that used to count as `symbol_changed` on the hosted
+path now counts as `file_only`. RE-call's matcher, and so the PRIOR_FP suppression, is unchanged.
+
+**The bug ledger and the records envelope read dates as RE-call does.** `match_fp.ledger_facts`
+now dates a local retraction by the UTC day, as the matcher already did, so a host past midnight
+locally no longer puts a retraction dated the next UTC day in effect early. `envelope.expired`
+reads `valid_until` only as `YYYY-MM-DD`, RE-call's format; a time, an offset or trailing text,
+which RE-call reports unreadable, now counts as lapsed instead of current. Both were left open by
+#98.
+
+**`bugs relink` links stuck runs to the squash merge that carries them.** A squash merge keeps
+each original commit as a `* <subject>` section followed by that commit's message. A run whose
+own commit's whole message, trailers aside, equals exactly one such section of one commit on
+the default branch gets rows keyed by that merge, `fixed` evidenced and the PR read from the
+merge subject; for an unlinked run each row supersedes the run-commit row, so readers count it
+once. A subject alone never links, since generic subjects repeat, and a message in two merges
+is reported ambiguous. On the 2026-10-29 ledger: 253 rows for 37 runs, 195 of them superseding
+unlinked rows. Run the archive anchor pass afterwards: recovered anchors are keyed by row id.
+
+**The backfill reads four more commit-message formats.** On 2026-10-29, 36 CCA fix commits on
+the default branches read as unparsed and none had a ledger row. The parser now reads: a
+`P3 fixes:` section when the subject says "second pass" or "deferred" (the deferred pass
+verified those P3s; elsewhere P3 stays skipped); a `FIXED:` section at the one level the subject
+names; inline `P1: a (ID); b (ID/ID)` lines, one fix per part; and underlined `P1 — title`
+sections, whose title is the fix when no bullet follows. `FIN` (sentiment-agent's financial
+auditor) is a known prefix. 23 of the 36 now yield 107 rows; the 13 left are prose with no
+per-fix structure, or changelog-only commits, and stay unparsed by design. Four commits the old
+parser read change: three gain fixes or a P3 level, and one renames a stand-in to `FIN-001`, so
+a backfill that writes rows on commits the ledger already holds should review them first.
+
+**`recover_git_anchors --single-file` anchors fixes that changed one production file.** Rows
+whose fix commit changed exactly one file outside tests, documentation and configuration get a
+file-level anchor labelled `git-single-production-file`, with the exclusion list version recorded.
+Directory exclusions (`tests/`, `test/`, `fixtures/`, `docs/`, `.github/`) match only at the
+first path component. `ENV`, `DEP`, `DEPLOY` and `DOC` findings are refused. Writing is refused unless
+the brief ranking reader understands the new method; that reader change is RE-call PR #1063,
+not merged at the time of writing. The plan was sized on 213 unanchored rows on 2026-10-28,
+which fell to about 92 the same evening after other recoveries; the real count is unmeasured
+until the dry run.
+
+**`bugs record-unlinked` records the fixes no merge can be found for.** `resolve` writes a run's
+rows only once GitHub names the merged pull request holding the run's commit, and that link is
+lost when a session amends or rebases before pushing or carries the fix to master on another
+branch. On 2026-10-28, 84 runs holding 461 fixes (P1 29, P2 228, P3 200) sat in pending/ for up to
+two weeks with everything but that link on disk. This writes their rows keyed by the run's own
+commit, with `fixed` claimed rather than evidenced (so `historical`, never `proved`) and an
+`unlinked:` source, and moves each record to unlinked/ so resolve cannot write it again. Runs
+newer than `--older-than-hours` (24) are left for resolve; a record naming no repository needs
+`--assume-repo`; a finding the ledger already holds for the same run is skipped. A later row that
+finds the merge can supersede an unlinked one.
+
+**`bugs stats` counts what CCA fixed.** Read-only counts over the ledger: fixes by severity and
+project, by auditor domain (the finding id's prefix, since the `auditor` field is often absent),
+by category, by month and by evidence tier; the most-fixed files by anchor rather than by the fix
+commit's file list; and fixes in code an earlier CCA-fixed commit last wrote, with how many such
+commits they blame. That last count is an audit-escape signal, not a regression count: `caused_by`
+links at commit grain, usually to a squash merge that also carries the feature. False
+positives and lessons are reported beside the fixes, never counted as fixes, and a superseded bug
+row counts once. `--repo`, `--top` and `--json` narrow or export it. On the 2026-10-28 ledger:
+897 fixes, P1 208, P2 554, P3 88, 47 with no severity; 438 carry no domain and 637 no category,
+which the output states rather than hides.
+
 **Audits remember what earlier audits settled, through RE-call.** 0.13.0 gave auditors the earlier
 fixes in the files they audit. This release turns the bug ledger into records RE-call serves by
 code anchor (file, symbol and a hash of the code), and uses them three ways: the bugs CCA fixed at
@@ -101,6 +183,20 @@ sections above read.
 
 ### Fixed
 
+* **A correcting row keeps the place the row it replaces had.** Recovered anchors are keyed by
+  bug id, so `bugs relink` (rows re-keyed to their squash merge) dropped them: on 2026-10-29
+  RE-call:b27298bf4125:SEC-001 lost `recall/lite/refresh.py _refresh_locked`. A bug row with no
+  anchors of its own now inherits those of the row it `supersedes`, chains included, in
+  `read_ledger`, `bug_rows` and the legacy `prior.load_rows`, when every inherited file is one
+  its own fix touched. On the live ledger: 895 to 927 anchored fixes of 1,584.
+* **The Stop guard passes over a Codex run below the session.** A Codex run records no
+  `owner_session` (Codex has no `CLAUDE_CODE_SESSION_ID`) and usually no worktree claim, so the
+  owner test could not tell it was another client's, and a Claude session in the main checkout
+  was held three times on 2026-10-29 by Codex's run in a worktree below it. This hook runs only in
+  Claude Code, so a run found below `cwd` that records `client: codex` is now allowed before the
+  refusal counter, but only when it also records no `owner_session` and no worktree claim names
+  this session: `client` is set by the agent at start, so a Claude session that starts its own
+  run with `--client codex` stays held. A Codex run in the session's own checkout still holds it.
 * **The Stop guard holds only the session that opened the run.** It judged every open run in or
   below the session's directory, and every worktree lies below the main checkout, so one session's
   run held others and spent its own three refusals on them. `pipeline start` and `resume` now
@@ -126,6 +222,13 @@ sections above read.
   one parent, exactly one changed definition, a file the row lists. Each reference records
   `form: bare` or `quoted`. Measured on the 2026-10-28 ledger: 81 more records anchored, each
   reviewed by hand.
+* **An object-shaped L4 file no longer loses its fixes.** From 2026-10-21 to 2026-10-27, 12 runs
+  from both clients stored L4 as `{"fixes": [...]}`, with entries either canonical or
+  `{"id": "FIX-1", "findings": [...]}`. The ledger reader iterated the object as a list and found
+  nothing, so resolve reported "no ledger rows could be built" and their fixes never reached the
+  ledger; run facts (anchors, blamed commits) were computed from an empty list too. A new
+  `layer_outputs.l4_fixes` reads both shapes, one entry per finding, for the ledger, the capture,
+  run facts and anchor recovery, and `pipeline record L4` now refuses a file in neither shape.
 
 **The L1 auditors get one output contract, a scope tied to the run's mode, and an evidence bar.**
 Over 316 verdicts in 47 runs (2026-10-25 to 2026-10-28) L1 precision was 0.81, and 26 of the 57
