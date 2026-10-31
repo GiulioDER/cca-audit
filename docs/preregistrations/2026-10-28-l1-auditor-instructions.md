@@ -75,3 +75,48 @@ deploy 5, 0.750; dep 3, 0.667. FP reasons: out_of_scope 26, not_real 25, settled
   should be excluded where their install can be told apart; the result states how many were.
 - **Model mix.** Auditors run with `model: inherit`; a change of session model inside the window
   moves every number.
+
+## Result (2026-10-30), the look at 15 runs
+
+**Status:** measured; inconclusive on precision, so the record's second look at 30 runs applies.
+
+Command, at master `64747b8` (#118):
+`python benchmarks/harness/l1_precision.py --root ~/Documents --since 2026-10-28T20:01:05Z --first 15`.
+Window: the 15 runs whose earliest verdict row falls after the install, from `20261028T204543Z`
+(2026-10-28T20:59Z) to `pr639-630-20261030` (2026-10-30T09:10Z); one run with no parseable time
+was left out, and no window run's worktree carried the old `cca-bug-auditor.md` (0 stale
+installs to exclude; a worktree with no own install runs the user-wide one, which was current). 130 L1 verdict rows; 104 CONFIRMED, 22 FALSE_POSITIVE.
+
+| Prediction | Baseline (as pre-registered) | Measured | Verdict |
+|---|---|---|---|
+| 1. out_of_scope share of L1 FPs below 0.25 | 0.456 (26 of 57) | **0.045** (1 of 22) | met |
+| 2. precision at least 0.85 | 0.810 (243 of 300) | **0.825** (104 of 126), Wilson 95% 0.750 to 0.882 | not met; not falsified (above 0.81); the interval includes 0.81, so inconclusive |
+| 3. confirmed per run at least 3.2 | 5.17 | **6.93** | met |
+| 4. perf-auditor fewer findings per run | 0.43 (20 in 47) | **0.80** (12 in 15) | **wrong direction** |
+
+**Gap.** The scope rule did what it was for: out_of_scope false positives went from about half of
+all L1 false positives to one. Precision moved little because the false positives that remain are
+mostly `not_real` (16 of 22: the defect is handled elsewhere) and `settled` (5), which the scope
+rule does not touch and which the evidence bar's mitigation search has not yet measurably reduced.
+I expected removing a whole class of false positives to lift precision by about 0.04; it lifted it
+by 0.015, because the class it removed was replaced in part by `not_real` ones (25 of 57 in the
+baseline, 16 of 22 now). Prediction 4 was wrong: the hot-path rule did not cut perf volume; 9 of
+its 12 findings were confirmed.
+
+**Apparatus defect, found at this look.** At the committed version (`4aed87d`) `--since`
+compared run ids as text, so ids that are names (`pr659-650-...`, `cca-deep-20260906`) passed any
+`--since`: the first count of this look took in six runs from August to 2026-10-12. #118 selects
+runs by their earliest verdict time and keeps the old comparison behind `--by-id`. The
+pre-registered baseline used only `--until`, which every named id fails, so its numbers above
+stand. Re-run today, the baseline moves slightly because more scorecard copies are on disk:
+`--until 20261029T000000Z --by-id` gives 52 runs, precision 0.814, out_of_scope 26 of 64; by
+time, `--since 2026-10-25 --until` the install, 49 runs, 0.810, 26 of 58. The pre-registered
+snapshot (`~/.claude/cca-measurements/2026-10-28-l1-baseline.jsonl`, sha256 above) is the baseline.
+
+**Confounds that happened.** Inside the window: run-archive, single-file and leading-stem anchors
+were written to the ledger (2026-10-28 evening to 2026-10-29 afternoon, 46 + 149 + 93 + 72
+annotations), and the
+RE-call auditor-brief reader was redeployed about 2026-10-29T12:30Z (file-level records rank below
+symbol records), so what the brief showed changed during the window. One deferred pass
+(`pr709-700-deferred-20261029`) is among the 15; the record does not exclude them. CCA was
+reinstalled from `b15bae0` and `8d6f4f7` with no change to any prompt, command or hook.
