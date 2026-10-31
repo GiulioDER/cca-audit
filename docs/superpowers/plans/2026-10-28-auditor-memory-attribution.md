@@ -98,6 +98,32 @@ Task 1 is needed by Step 3; build Task 1 first if the gate is reached before it 
 - [ ] **Step 4:** Run the file green; record the red proof (the pre-change run of Step 2) in the test module docstring.
 - [ ] **Step 5:** Commit `cca_checks/pipeline_state.py tests/test_memory_attribution.py`.
 
+### Task 2b: Memory holdout (added 2026-10-31, spec revision of that date)
+
+**Files:**
+- Create: `cca_checks/bugs/holdout.py`
+- Modify: `cca_checks/bugs/__main__.py` (`_brief`, `_prior_records`), `cca_checks/pipeline_state.py` (`prior_brief`, `memory_attribution`, `_write_summary`), `benchmarks/harness/memory_gap.py`, `cca_checks/plugin/commands/audit-fix.md` (Step 1, one paragraph)
+- Test: `tests/test_memory_holdout.py`, extend `tests/test_memory_gap.py`
+
+**Interfaces:**
+- Produces: `holdout.ACTIVE: bool = True`; `holdout.DENOM = 3`; `holdout.RULE = "int(sha256(run_id), 16) % 3 == 0"`; `holdout.withheld(run_id: str) -> bool` (False when `ACTIVE` is False); `memory-arm.json` in the run directory, `{"run_id": str, "arm": "brief" | "holdout", "rule": str}` plus `"reason"` when the mode was unreadable; `summary.json` key `memory_arm` (`"brief"`, `"holdout"` or `null` when no arm file).
+- `memory_gap.runs()` rows gain `arm` (`"brief"`, `"holdout"` or `None`); `report()` gains `by_arm: {"brief": {"n", "mean"}, "holdout": {"n", "mean"}, "gap"}`, with runs whose arm is `None` counted under `excluded["no_arm"]` for `by_arm` only (the existing keys keep their meaning).
+
+- [ ] **Step 1: Write the failing tests:**
+  - `test_assignment_is_the_sha256_rule`: for a fixed list of 30 run ids, `withheld` equals the rule computed in the test; about a third are withheld.
+  - `test_a_withheld_local_brief_renders_as_empty`: `bugs brief --out <runs>/<id>/local-prior.json` for a withheld DIFF run id prints exactly what the same command prints when the ledger has no record for the files, the receipt lists no BUG or LESSON line, and `memory-arm.json` says `holdout`.
+  - `test_a_brief_arm_run_is_unchanged_and_recorded`: a non-withheld id gives the normal output and `memory-arm.json` says `brief`.
+  - `test_a_withheld_hosted_brief_renders_as_empty`: `bugs prior --records <runs>/<id>/prior-records.json` for a withheld id prints the empty PRIOR BUGS form and no lessons block.
+  - `test_hunt_is_never_withheld`: a HUNT run with a withheld id gets its brief and arm `brief`.
+  - `test_the_dispatch_guard_accepts_a_holdout_prompt`: `cca_gate_core.dispatch_reasons` returns `[]` for a holdout run whose prompt carries the printed block.
+  - `test_summary_records_the_arm`: a holdout run closes with `memory_arm == "holdout"` and `memory_attribution is None`.
+  - `test_gap_by_arm` (memory_gap): brief arm 4 and 6, holdout 2 and 2 give `by_arm.gap == 3.0`.
+  - `test_inactive_withholds_nothing`: with `ACTIVE` patched False, a withheld id gets its brief.
+- [ ] **Step 2:** Run the new tests; each FAILS on its assertion.
+- [ ] **Step 3:** Implement. The mode comes from the open run's pipeline state (as `cca_gate_core` reads it); if it cannot be read, do not withhold and record `reason`.
+- [ ] **Step 4:** Run green; red-prove by mutation where the pre-change code lacks the symbol; record proofs in the test module docstrings.
+- [ ] **Step 5:** Commit.
+
 ### Task 3: Ask for the fields in the auditor prompts
 
 **Files:**

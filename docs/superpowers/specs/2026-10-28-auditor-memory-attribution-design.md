@@ -152,3 +152,32 @@ The split lives in `benchmarks/harness/l1_precision.py` or a sibling script (bui
 - The JSON shape of `memory_attribution`, and whether the split by brief lives in
   `l1_precision.py` or a sibling script.
 - Whether the deferred pass (which reloads L1 findings) needs any change to keep the fields.
+
+## Revision 2026-10-31: a random holdout replaces the before gap
+
+Measured 2026-10-31 with `benchmarks/harness/memory_gap.py` (after its time-window fix) over
+`~/Documents` and `~/.codex/worktrees`, 2026-10-28T20:01:05Z to 2026-10-31T11:06:21Z: 24 DIFF runs
+at STANDARD or DEEP, every one with a non-empty brief, none without (excluded: hunt 2, deferred 4,
+fast 3, untimed 6). The anchors written in that window put a record in front of every run, so the
+"before" gap above has an empty arm and cannot be computed. The owner chose, 2026-10-31, a random
+holdout instead. This section supersedes "Measurement" where they differ; the text above stays as
+the record of what was first decided.
+
+- **Assignment.** A DIFF run is in the holdout arm when `int(sha256(run_id), 16) % 3 == 0`, so
+  about one run in three. The rule is deterministic, so anyone can recompute a run's arm from its
+  id, and nobody choosing a run id can see its arm without computing it.
+- **What the holdout withholds.** The CCA brief only: the local `bugs brief` block and the hosted
+  PRIOR BUGS and lessons blocks render as they do when the ledger has nothing for the change. The
+  auditors are not told that anything was withheld, so both arms read the same prompt except for
+  the records. The project's own SETTLED DECISIONS memory (Step 1 item 2) is not withheld.
+- **Where it is recorded.** Whichever command builds the brief writes
+  `.claude/audits/runs/<run_id>/memory-arm.json` in both arms: `{"run_id", "arm": "brief" |
+  "holdout", "rule"}`. `summary.json` carries `memory_arm`. In a holdout run `memory_attribution`
+  is `null`.
+- **Scope.** DIFF runs only. HUNT runs, deferred passes and runs whose mode cannot be read are
+  never withheld (arm `brief`, with the reason recorded when the mode was unreadable).
+- **Metric.** Confirmed L1 findings per run, brief arm minus holdout arm, by assigned arm (a brief
+  arm run whose brief happened to be empty stays in the brief arm). The attribution fields remain
+  the direct view.
+- **End.** The holdout is on while a single constant says so; a follow-up PR turns it off after
+  the pre-registered look.
