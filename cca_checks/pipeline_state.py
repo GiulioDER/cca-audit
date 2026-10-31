@@ -1325,9 +1325,11 @@ def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
     from .bugs import envelope, prior
 
     saved = _saved_brief_answer(state, root)
-    if saved is None or saved[1] is None:
+    if saved is None:
         return []
     records, repo = saved
+    if repo is None:  # unpacked first, so the type checker sees `repo` as a str below
+        return []
     # The code answer labels the anchors and so lengthens the entries, as `bugs prior --code`
     # reads it: an unreadable one labels nothing.
     code, _, code_why = envelope.load(deferred.runs_dir(root) / state.run_id / PRIOR_CODE)
@@ -1374,10 +1376,11 @@ def memory_attribution(state: PipelineState, root) -> dict | None:
     for row in verdicts if isinstance(verdicts, list) else []:
         if isinstance(row, dict):
             by_id[row.get("id")] = row.get("verdict")
-    out = {"findings_citing": 0, "missing": 0, "malformed": 0,
+    out: dict = {"findings_citing": 0, "missing": 0, "malformed": 0,
            "by_verdict": {"CONFIRMED": 0, "FALSE_POSITIVE": 0, "other": 0},
-           "confirmed_ids": [], "unlisted": 0}
+           "confirmed_ids": [], "unlisted": 0, "cited_ids": [], "unlisted_ids": []}
     confirmed: set[str] = set()
+    every: set[str] = set()
     for finding in findings if isinstance(findings, list) else []:
         if not isinstance(finding, dict):
             continue
@@ -1392,13 +1395,18 @@ def memory_attribution(state: PipelineState, root) -> dict | None:
             continue
         cited = set(ids)
         out["findings_citing"] += 1
+        # Per finding: an id two findings cite counts twice here. `unlisted_ids` below is the
+        # distinct form, the one a share over distinct cited ids (`cited_ids`) divides.
         out["unlisted"] += len(cited - listed)
+        every |= cited
         verdict = by_id.get(finding.get("id"))
         key = verdict if verdict in ("CONFIRMED", "FALSE_POSITIVE") else "other"
         out["by_verdict"][key] += 1
         if verdict == "CONFIRMED":
             confirmed |= cited
     out["confirmed_ids"] = sorted(confirmed)
+    out["cited_ids"] = sorted(every)
+    out["unlisted_ids"] = sorted(every - listed)
     return out
 
 

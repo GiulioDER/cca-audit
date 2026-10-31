@@ -40,7 +40,32 @@ assertion, not on import or collection):
 - test_gap_by_arm (2026-10-31): baseline is this branch at 0f0b62e (rows carry no `arm`); fails on
   `assert rows["h1"].get("arm") == "holdout" ...` (None). Mutation: `_classify` sets
   `row["arm"] = None`; fails on the same assertion. Mutation: `by_arm["gap"]` computed as
-  `ah - ab`; fails on `assert out["by_arm"]["gap"] == 3.0` (-3.0).
+  `ah - ab`; fails on `assert out["by_arm"]["gap"] == 3.0` (-3.0). (Its last assertion was
+  widened on 2026-10-31 to the full `by_arm.excluded` table, whose other keys are proved below.)
+
+Final review fixes, 2026-10-31 (each mutation run alone, then restored and green). The 720e740
+baseline runs used a copy of this module whose import line drops `welch_interval`, which that
+baseline lacks; the four tests below that name the baseline do not call it:
+
+- test_by_arm_counts_a_run_whose_receipt_is_unreadable (I3): baseline is this branch at 720e740
+  (`by_arm` read from rows with a known brief only); fails on
+  `assert out["by_arm"]["brief"] == {"n": 2, "mean": 5.0}` ({"n": 1, "mean": 4.0}). Targets
+  `arm_reason` and the count kept on `unknown_brief` and `no_receipt` rows in `_classify_brief`.
+- test_by_arm_names_why_a_run_is_out (I3): baseline 720e740; fails on the
+  `out["by_arm"]["excluded"] == {...}` comparison ({"no_arm": 1}).
+- test_welch_interval (I4): `welch_interval` is new, so mutations: (a) `statistics.variance`
+  replaced by `statistics.pvariance`, fails on `assert welch_interval([1, 3, 5], [0, 2]) == ...`
+  (low -3.071); (b) the guard made `< 3`, fails on the same assertion (None); (c) the guard
+  returning `{"low": None, "high": None}` instead of None, fails on
+  `assert welch_interval([4], [1, 2]) is None`.
+- test_report_carries_the_interval (I4): baseline 720e740 (no interval); fails on
+  `assert out["by_arm"].get("interval") == ...` (None).
+- test_roots_are_merged_in_order_first_seen_kept (I4): baseline 720e740 (`--root` keeps the last
+  value only); fails on `assert out["by_arm"]["brief"] == {"n": 1, "mean": 4.0}`
+  ({"n": 1, "mean": 9.0}).
+- test_rows_prints_each_included_run (I4): `--rows` is new, so mutation: `main` prints every row
+  (`for r in rows`) instead of `arm_rows(rows)`; fails on `assert [r["run_id"] for r in printed]
+  == ["b1", "h1"]` (the HUNT row printed too).
 """
 import json
 import pathlib
@@ -50,7 +75,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "benchmarks" / "harness"))
 
-from memory_gap import confirmed_l1, had_brief, report, runs  # noqa: E402
+from memory_gap import confirmed_l1, had_brief, main, report, runs, welch_interval  # noqa: E402
 
 HEADING = "## Prior bugs\n"
 
@@ -240,5 +265,107 @@ def test_gap_by_arm(tmp_path):
     assert out["by_arm"]["gap"] == 3.0
     assert out["by_arm"]["brief"] == {"n": 2, "mean": 5.0}
     assert out["by_arm"]["holdout"] == {"n": 2, "mean": 2.0}
-    assert out["by_arm"]["excluded"] == {"no_arm": 1}
+    assert out["by_arm"]["excluded"] == {"hunt": 0, "deferred": 0, "fast": 0, "untimed": 0,
+                                         "no_verdicts": 0, "unreadable": 0, "no_arm": 1}
     assert out["n_none"] == 5 and out["excluded"]["hunt"] == 0
+
+
+def _arm(d, arm):
+    (d / "memory-arm.json").write_text(json.dumps(
+        {"run_id": d.name, "arm": arm, "rule": "int(sha256(run_id), 16) % 3 == 0"}))
+    return d
+
+
+def _confirmed(n):
+    return [(f"BUG-{i}", "CONFIRMED") for i in range(n)]
+
+
+def test_by_arm_counts_a_run_whose_receipt_is_unreadable(tmp_path):
+    """Invariant (I3): `by_arm` is by assigned arm only, so a brief arm run whose brief reader
+    was unavailable, and a holdout run with no receipt, still count in their arms; the top-level
+    keys keep their meaning (those runs stay `unknown_brief` and `no_receipt` there)."""
+    _arm(make_run(tmp_path, "b1", prior="BUG x\n", verdicts=_confirmed(4)), "brief")
+    down = _arm(make_run(tmp_path, "b2", verdicts=_confirmed(6)), "brief")
+    (down / "local-prior.json").write_text(json.dumps({"status": "unavailable", "block": ""}))
+    _arm(make_run(tmp_path, "h1", verdicts=_confirmed(2)), "holdout")
+    _arm(make_run(tmp_path, "h2", prior=HEADING, verdicts=_confirmed(2)), "holdout")
+    out = report(runs(tmp_path, "", ""))
+    assert out["by_arm"]["brief"] == {"n": 2, "mean": 5.0}
+    assert out["by_arm"]["holdout"] == {"n": 2, "mean": 2.0}
+    assert out["by_arm"]["gap"] == 3.0
+    assert out["excluded"]["unknown_brief"] == 1 and out["excluded"]["no_receipt"] == 1
+    assert (out["n_brief"], out["n_none"]) == (1, 1)
+
+
+def test_by_arm_names_why_a_run_is_out(tmp_path):
+    """Invariant (I3): `by_arm.excluded` names, per run, why it is out of the arm comparison by
+    the pre-registration's list; a run with an unreadable receipt and no verdicts is out for
+    `no_verdicts`, not for its receipt."""
+    _arm(make_run(tmp_path, "a", {"mode": "HUNT"}, prior=HEADING, verdicts=[]), "brief")
+    _arm(make_run(tmp_path, "b", verdicts=None), "brief")
+    _arm(make_run(tmp_path, "c", prior=HEADING, verdicts=[], dispatch=()), "holdout")
+    make_run(tmp_path, "d", prior=HEADING, verdicts=[])
+    _arm(make_run(tmp_path, "e", prior=HEADING, verdicts=[]), "holdout")
+    out = report(runs(tmp_path, "", ""))
+    assert out["by_arm"]["excluded"] == {"hunt": 1, "deferred": 0, "fast": 0, "untimed": 1,
+                                         "no_verdicts": 1, "unreadable": 0, "no_arm": 1}
+    assert out["by_arm"]["holdout"] == {"n": 1, "mean": 0.0}
+
+
+def test_welch_interval():
+    """Invariant (I4): the Welch 95% interval of mean(a) minus mean(b) uses sample variances and
+    the tabled t at the floor of the Welch df; None when a side has fewer than 2 runs. Expected
+    values by hand: a = [1, 3, 5] (mean 3, s2 4), b = [0, 2] (mean 1, s2 2), se = sqrt(4/3 + 1) =
+    1.5275, df = 2.8824, t(2) = 4.303, so 2 -+ 6.573."""
+    assert welch_interval([1, 3, 5], [0, 2]) == {"low": -4.573, "high": 8.573, "df": 2.882,
+                                                 "t": 4.303}
+    assert welch_interval([4], [1, 2]) is None
+    assert welch_interval([1, 2], []) is None
+    assert welch_interval([3, 3], [1, 1]) == {"low": 2.0, "high": 2.0, "df": None, "t": None}
+
+
+def test_report_carries_the_interval(tmp_path):
+    """Invariant (I4): the report's `by_arm.interval` is the Welch interval of the per-run
+    counts of the two arms, brief minus holdout."""
+    for run_id, arm, n in [("b1", "brief", 1), ("b2", "brief", 3), ("b3", "brief", 5),
+                           ("h1", "holdout", 0), ("h2", "holdout", 2)]:
+        _arm(make_run(tmp_path, run_id, prior=HEADING, verdicts=_confirmed(n)), arm)
+    out = report(runs(tmp_path, "", ""))
+    assert out["by_arm"].get("interval") == {"low": -4.573, "high": 8.573, "df": 2.882,
+                                             "t": 4.303}
+
+
+def _two_roots(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    _arm(make_run(a, "r1", prior=HEADING, verdicts=_confirmed(4)), "brief")
+    _arm(make_run(a, "r2", prior=HEADING, verdicts=_confirmed(2)), "holdout")
+    _arm(make_run(b, "r1", prior=HEADING, verdicts=_confirmed(9)), "brief")
+    _arm(make_run(b, "r3", prior=HEADING, verdicts=_confirmed(4)), "holdout")
+    return a, b
+
+
+def test_roots_are_merged_in_order_first_seen_kept(tmp_path, monkeypatch, capsys):
+    """Invariant (I4): `--root` is repeatable; roots are read in the order given and the first
+    row seen for a run id is kept."""
+    a, b = _two_roots(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["memory_gap.py", "--root", str(a), "--root", str(b)])
+    main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["by_arm"]["brief"] == {"n": 1, "mean": 4.0}
+    assert out["by_arm"]["holdout"] == {"n": 2, "mean": 3.0}
+
+
+def test_rows_prints_each_included_run(tmp_path, monkeypatch, capsys):
+    """Invariant (I4): `--rows` prints one JSON object per run included in `by_arm`, with
+    `run_id`, `arm`, `brief`, `confirmed` and `root`, and nothing for an excluded run."""
+    a = tmp_path / "a"
+    _arm(make_run(a, "b1", prior="BUG x\n", verdicts=_confirmed(3)), "brief")
+    _arm(make_run(a, "h1", verdicts=_confirmed(1)), "holdout")
+    _arm(make_run(a, "x1", {"mode": "HUNT"}, prior=HEADING, verdicts=[]), "brief")
+    main(["--root", str(a), "--rows"])
+    printed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [r["run_id"] for r in printed] == ["b1", "h1"]
+    assert printed == [
+        {"run_id": "b1", "arm": "brief", "brief": True, "confirmed": 3, "root": str(a)},
+        {"run_id": "h1", "arm": "holdout", "brief": None, "confirmed": 1, "root": str(a)},
+    ]

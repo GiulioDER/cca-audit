@@ -52,6 +52,15 @@ test_memory_section_explains_the_brief failed 9 of 9 on `assert 'copied as the b
 (local and hosted id forms), and the changed test_schema_and_consolidation_carry_the_fields failed
 on the "In every merge above" union assertion. After the edit both pass; replacing that sentence
 with "In rule 1 only, ..." failed the consolidation test again, and it was restored.
+
+Final review fix M1 (run 2026-10-31, against the prose of 720e740 before the edit: the nine
+files restored from `git show 720e740:<file>`): the changed
+test_memory_section_explains_the_brief failed 9 of 9 on
+`assert "headed LOCAL AUDITOR MEMORY, PRIOR BUGS or PRIOR FIXES" in memory`. The new
+test_memory_section_is_the_same_in_all_nine passes there too (the nine were already identical),
+so it was proved by mutation: the edited sentence reverted in cca-doc-auditor.md alone failed it
+on `assert 2 == 1`; the file was restored and it passed. It is the guard that keeps the nine
+from drifting.
 """
 
 from __future__ import annotations
@@ -173,6 +182,7 @@ def test_memory_section_explains_the_brief(name):
     """The section says what the records are, what to do with each, and when to cite."""
     memory = " ".join(section(text(name), "Prior bugs and lessons").split())
     assert "bugs CCA confirmed and fixed" in memory
+    assert "headed LOCAL AUDITOR MEMORY, PRIOR BUGS or PRIOR FIXES" in memory
     assert "name its bug class" in memory
     assert "led you to" in memory
     assert "copied as the brief prints it" in memory
@@ -181,6 +191,11 @@ def test_memory_section_explains_the_brief(name):
     assert "without brackets or the trailing comma" in memory
     assert "exactly as valid as one that cites" in memory
     assert "holdout" not in text(name).lower()
+
+
+def test_memory_section_is_the_same_in_all_nine():
+    """The nine L1 files carry one shared `## Prior bugs and lessons` section, word for word."""
+    assert len({section(text(name), "Prior bugs and lessons") for name in L1}) == 1
 
 
 @pytest.mark.parametrize("name", L1)

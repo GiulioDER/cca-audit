@@ -13,17 +13,21 @@ without the brief.** Each L1 finding now carries `memory_ids`, the record ids fr
 led to it (`[]` when none), and `memory_how`. The nine L1 agent files explain what the brief's
 records are and say that a finding without memory is exactly as valid as one with it; L2
 consolidation takes the union of `memory_ids` in every merge. `summary.json` gains
-`memory_attribution`, the citing findings counted by L2.5 verdict plus `missing`, `malformed` and
-`unlisted` (null when there was no brief, outside DIFF, or in a holdout run), and `memory_arm`;
+`memory_attribution`, the citing findings counted by L2.5 verdict plus `missing`, `malformed`,
+`unlisted` (per finding) and the distinct `cited_ids` and `unlisted_ids` (null when there was no
+brief, outside DIFF, or in a holdout run), and `memory_arm`;
 hosted runs record in `prior_brief.ids` the record ids the hosted block actually printed. The
 holdout, `cca_checks/bugs/holdout.py`, picks a DIFF run when `int(sha256(run_id), 16) % 3 == 0`
-and renders its brief in the empty no-match form, with `memory-arm.json` recorded in both arms.
+and renders its brief in the empty no-match form, with `memory-arm.json` recorded in both arms;
+a `bugs brief` given no run directory (no `--out`) applies the same rule to the DIFF run open at
+its root.
 It runs while `holdout.ACTIVE` is True, for the pre-registered measurement
 `docs/preregistrations/2026-10-31-auditor-memory-holdout.md`. Codex runs also need the RE-call hook
 change on branch `claude/cca-holdout-skip` deployed, or their holdout auditors still receive
 memory from RE-call's SubagentStart hook. `benchmarks/harness/memory_gap.py` reports confirmed L1
-findings per run with and without a brief and by holdout arm, selecting runs by time (dispatch
-receipts), not by run-id text. The effect is pre-registered and unmeasured.
+findings per run with and without a brief and by assigned holdout arm, with the Welch 95%
+interval of the arm gap, selecting runs by time (dispatch receipts), not by run-id text; `--root`
+is repeatable and `--rows` prints the included runs. The effect is pre-registered and unmeasured.
 
 **`recover_git_anchors --leading-stem` anchors multi-file fixes whose summary names the file.**
 On 2026-10-29, 557 unanchored rows came from fixes that changed two or more production files, so

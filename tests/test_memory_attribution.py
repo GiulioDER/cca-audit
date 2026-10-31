@@ -48,6 +48,15 @@ Mutations on the green implementation, one per test, restored afterwards (all in
   None`; failed at `assert summary["memory_attribution"] is None`.
 - test_hosted_brief_records_its_ids: lessons ordered before bugs; failed at the `prior_brief` ids
   comparison.
+
+Final review fix I5, 2026-10-31 (test_attribution_counts_citations_by_verdict now also expects
+the two new keys):
+
+- test_unlisted_ids_are_distinct_across_findings: baseline = this branch at 720e740 (no
+  `cited_ids` or `unlisted_ids`); ran, was collected and failed at
+  `assert got.get("unlisted_ids") == ["ghost"]` (None). Mutation on the green implementation:
+  `unlisted_ids` built from a list that appends each finding's `cited - listed` (so a repeat
+  across findings is kept); failed at the same assertion (["ghost", "ghost"]).
 """
 
 from __future__ import annotations
@@ -220,6 +229,7 @@ def test_attribution_counts_citations_by_verdict(git_repo):
         "findings_citing": 2, "missing": 0, "malformed": 0,
         "by_verdict": {"CONFIRMED": 1, "FALSE_POSITIVE": 1, "other": 0},
         "confirmed_ids": [BUG_ID], "unlisted": 1,
+        "cited_ids": sorted([BUG_ID, "nope"]), "unlisted_ids": ["nope"],
     }
 
 
@@ -243,6 +253,20 @@ def test_a_repeated_id_counts_once(git_repo):
     assert got["findings_citing"] == 1
     assert got["unlisted"] == 1
     assert got["confirmed_ids"] == ["ghost"]
+
+
+def test_unlisted_ids_are_distinct_across_findings(git_repo):
+    """Invariant: `unlisted` stays a per finding count, while `cited_ids` and `unlisted_ids` are
+    the sorted distinct ids, so an unlisted id two findings cite is one distinct id (the
+    pre-registration's unlisted share divides by distinct cited ids)."""
+    findings = [_finding("BUG-001", memory_ids=["ghost", BUG_ID]),
+                _finding("BUG-002", memory_ids=["ghost"])]
+    summary = _run(git_repo, findings, {"BUG-001": "CONFIRMED", "BUG-002": "FALSE_POSITIVE"})
+    assert "memory_attribution" in summary
+    got = summary["memory_attribution"]
+    assert got["unlisted"] == 2
+    assert got.get("unlisted_ids") == ["ghost"]
+    assert got.get("cited_ids") == sorted([BUG_ID, "ghost"])
 
 
 def test_case_variant_is_unlisted(git_repo):

@@ -7,6 +7,9 @@ The rule is deterministic, so anyone can recompute a run's arm from its id.
 Whichever command builds the brief (`bugs brief --out` or `bugs prior --records`) calls
 `assign` with the path it was given. When that path lies in a run directory,
 `.claude/audits/runs/<run_id>/`, the arm is written to `memory-arm.json` there, in both arms.
+A `bugs brief` given no run directory (no `--out`, or one outside every run, as the
+`auditor-memory` skill runs it) finds the DIFF run open at its root (`open_run`) and calls
+`assign` for that run's directory, so a brief printed outside Step 1 honours the same arm.
 A holdout run's brief renders as the empty form the same command prints when the ledger has
 nothing for the change; the auditors are not told anything was withheld.
 
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 #: The holdout runs while this is True; a follow-up turns it off after the pre-registered look.
@@ -64,6 +68,37 @@ def _mode_reason(root: Path, run_id: str) -> tuple[str | None, str | None]:
     if not isinstance(mode, str):
         return None, "the open run state has no readable mode"
     return mode.upper(), None
+
+
+def project_root() -> Path:
+    """The Git top level of the working directory, else the working directory itself."""
+    try:
+        done = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                              text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return Path(".")
+    top = done.stdout.strip() if done.returncode == 0 else ""
+    return Path(top) if top else Path(".")
+
+
+def open_run(root: Path) -> Path | None:
+    """The run directory of the DIFF run open at `root` (read through the same state reader as
+    `assign`), or None when no run is open there, its state cannot be read, its id is not a run
+    id, or its mode is not DIFF (a missing mode is DIFF). Only a DIFF run is ever withheld, so
+    any other open run keeps today's behaviour: no arm is written for it here."""
+    from cca_checks.pipeline_state import _RUN_ID, core
+
+    try:
+        state = core.read_state(root)
+    except (OSError, ValueError):
+        return None
+    if state is None:
+        return None
+    run_id, mode = state.get("run_id"), state.get("mode", "DIFF")
+    if (not isinstance(run_id, str) or not _RUN_ID.fullmatch(run_id) or run_id in (".", "..")
+            or not isinstance(mode, str) or mode.upper() != "DIFF"):
+        return None
+    return Path(root) / ".claude" / "audits" / "runs" / run_id
 
 
 def assign(path: Path, *, never: bool = False) -> bool:

@@ -46,6 +46,30 @@ assertion named:
   (3 / 0 / 1). The explicit holdout check at the top of `memory_attribution` is a second guard:
   removing it alone leaves the test green, because the hosted ids are already empty; removing
   both is the baseline above, which fails at the `memory_attribution` assertion.
+
+Final review fix I6, 2026-10-31: a `bugs brief` given no run directory (no `--out`, or one
+outside every run) honours the arm of the DIFF run open at `--root`, else at the working
+directory's project root. Baseline = this branch at 720e740 (arm decided from `--out` only);
+each test ran, was collected and failed in the assertion named:
+
+- test_a_brief_without_out_honours_an_open_holdout_run: baseline; failed at `assert out ==
+  empty` (the BUG and LESSON lines were printed).
+- test_a_brief_with_out_outside_the_run_honours_its_holdout: baseline; same assertion.
+- test_a_brief_without_root_finds_the_run_at_the_project_root: baseline; same assertion.
+- test_a_brief_arm_run_without_out_gets_the_normal_brief: baseline; failed at `assert _arm(run)
+  == ...` (None, no arm file).
+
+Mutations on the green implementation (`cca_checks/bugs/__main__.py` `_brief` and
+`cca_checks/bugs/holdout.py` `open_run`), one per test, restored afterwards:
+
+- test_no_open_run_prints_the_normal_brief: in `_brief`, `withhold = run is not None and ...`
+  became `withhold = run is None or ...`; failed at `assert out == normal`.
+- test_an_open_hunt_run_without_out_keeps_todays_behaviour: in `open_run`, the
+  `mode.upper() != "DIFF"` test removed; failed at `assert _arm(run) is None` (an arm `brief`
+  was written for the HUNT run).
+- test_a_brief_arm_run_without_out_gets_the_normal_brief, second mutation: in `_brief`, the
+  open run withheld whatever its arm, after recording it (`withhold = run is not None and
+  (holdout.assign(...) or True)`); failed at `assert out == normal and ...`.
 """
 from __future__ import annotations
 
@@ -257,3 +281,89 @@ def test_a_completed_run_gets_no_arm(git_repo, tmp_path, monkeypatch, capsys):
     out = _brief(git_repo, run / ps.LOCAL_PRIOR, capsys)
     assert _arm(run) is None
     assert "BUG RE-call:aaa:BUG-001" in out
+
+
+def _bare(argv: list[str], capsys) -> str:
+    capsys.readouterr()
+    assert main(["brief", *argv]) == 0
+    return capsys.readouterr().out
+
+
+def test_a_brief_without_out_honours_an_open_holdout_run(git_repo, tmp_path, monkeypatch,
+                                                         capsys):
+    """Invariant (I6): `bugs brief` with no `--out`, as the auditor-memory skill runs it, inside
+    an open DIFF run the rule withholds prints the empty form and records arm `holdout`; the
+    guard is satisfied by Step 1's receipt, so this print must not leak the records."""
+    _reader(tmp_path, monkeypatch, "")
+    empty, _ = _plain(tmp_path, monkeypatch, capsys, "")
+    monkeypatch.setenv("STUB_BLOCK", BLOCK)
+    ps.start("STANDARD", run_id=WITHHELD, root=git_repo)
+    run = _run(git_repo, WITHHELD)
+    out = _bare(["--root", str(git_repo)], capsys)
+    assert out == empty
+    assert _arm(run) == {"run_id": WITHHELD, "arm": "holdout", "rule": holdout.RULE}
+
+
+def test_a_brief_with_out_outside_the_run_honours_its_holdout(git_repo, tmp_path, monkeypatch,
+                                                              capsys):
+    """Invariant (I6): an `--out` outside every run directory names no run, so the open run
+    decides, and its holdout holds."""
+    _reader(tmp_path, monkeypatch, "")
+    empty, _ = _plain(tmp_path, monkeypatch, capsys, "")
+    monkeypatch.setenv("STUB_BLOCK", BLOCK)
+    ps.start("STANDARD", run_id=WITHHELD, root=git_repo)
+    out = _bare(["--root", str(git_repo), "--out", str(tmp_path / "elsewhere" / "b.json")],
+                capsys)
+    assert out == empty
+    assert _arm(_run(git_repo, WITHHELD))["arm"] == "holdout"
+
+
+def test_a_brief_without_root_finds_the_run_at_the_project_root(git_repo, tmp_path,
+                                                                monkeypatch, capsys):
+    """Invariant (I6): with no `--root`, the open run is looked for at the working directory's
+    project root (its Git top level), here from a subdirectory."""
+    _reader(tmp_path, monkeypatch, "")
+    empty, _ = _plain(tmp_path, monkeypatch, capsys, "")
+    monkeypatch.setenv("STUB_BLOCK", BLOCK)
+    ps.start("STANDARD", run_id=WITHHELD, root=git_repo)
+    sub = git_repo / "sub"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    out = _bare([], capsys)
+    assert out == empty
+    assert _arm(_run(git_repo, WITHHELD))["arm"] == "holdout"
+
+
+def test_a_brief_arm_run_without_out_gets_the_normal_brief(git_repo, tmp_path, monkeypatch,
+                                                           capsys):
+    """Invariant (I6): an open DIFF run outside the holdout gets the normal brief from a bare
+    `bugs brief`, and its arm file says `brief` (the same file and rule as Step 1)."""
+    _reader(tmp_path, monkeypatch, BLOCK)
+    normal, _ = _plain(tmp_path, monkeypatch, capsys, BLOCK)
+    ps.start("STANDARD", run_id=KEPT, root=git_repo)
+    run = _run(git_repo, KEPT)
+    out = _bare(["--root", str(git_repo)], capsys)
+    assert _arm(run) == {"run_id": KEPT, "arm": "brief", "rule": holdout.RULE}
+    assert out == normal and "BUG RE-call:aaa:BUG-001" in out
+
+
+def test_no_open_run_prints_the_normal_brief(git_repo, tmp_path, monkeypatch, capsys):
+    """Invariant (I6): with no open run, a bare `bugs brief` behaves as before: the normal
+    brief, and no arm file anywhere."""
+    _reader(tmp_path, monkeypatch, BLOCK)
+    normal, _ = _plain(tmp_path, monkeypatch, capsys, BLOCK)
+    out = _bare(["--root", str(git_repo)], capsys)
+    assert out == normal and "BUG RE-call:aaa:BUG-001" in out
+    assert not list(git_repo.rglob(holdout.ARM_FILE))
+
+
+def test_an_open_hunt_run_without_out_keeps_todays_behaviour(git_repo, tmp_path, monkeypatch,
+                                                             capsys):
+    """Invariant (I6): only a DIFF run is looked up; an open HUNT run whose id the rule would
+    withhold gets the normal brief and no arm is written for it here."""
+    _reader(tmp_path, monkeypatch, BLOCK)
+    ps.start("DEEP", mode="HUNT", run_id=WITHHELD, root=git_repo)
+    run = _run(git_repo, WITHHELD)
+    out = _bare(["--root", str(git_repo)], capsys)
+    assert "BUG RE-call:aaa:BUG-001" in out
+    assert _arm(run) is None

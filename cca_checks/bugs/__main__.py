@@ -151,6 +151,11 @@ def _brief(a: argparse.Namespace) -> int:
     from . import holdout, local_brief
 
     withhold = a.out is not None and holdout.assign(a.out, never=a.skipped is not None)
+    if a.skipped is None and (a.out is None or holdout.run_dir(a.out) is None):
+        # No run directory from --out (the auditor-memory skill prints the brief this way): the
+        # DIFF run open at --root, else at the working directory's project root, decides.
+        run = holdout.open_run(a.root if a.root is not None else holdout.project_root())
+        withhold = run is not None and holdout.assign(run / holdout.ARM_FILE)
     if a.skipped is not None:
         # A hunt whose target root is unresolved or is the user's own checkout: read no
         # memory, but leave the receipt the L1 gate asks for.
@@ -160,7 +165,7 @@ def _brief(a: argparse.Namespace) -> int:
         # its readers are those of a change the ledger holds nothing for.
         result = {"status": "empty", "block": ""}
     else:
-        result = local_brief.build(a.root, a.files)
+        result = local_brief.build(a.root if a.root is not None else Path("."), a.files)
     if a.out is not None:
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(result, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -429,7 +434,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="--records: leave the LESSONS block out (a replay's ablation arm)")
     q.add_argument("--json", action="store_true")
     brief = sub.add_parser("brief", help="local bugs and accepted lessons via the shared reader")
-    brief.add_argument("--root", type=Path, default=Path("."))
+    brief.add_argument("--root", type=Path,
+                       help="the target Git root (default: the working directory; the open "
+                            "run is then looked for at its project root)")
     brief.add_argument("--files", nargs="+", default=[],
                        help="files relative to --root; otherwise the committed diff")
     brief.add_argument("--json", action="store_true")
