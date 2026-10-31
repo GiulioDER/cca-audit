@@ -46,6 +46,12 @@ test_memory_never_suppresses[cca-perf-auditor] failed on `assert 'suppress' not 
 was restored and the test passed. Production targets: the new `## Prior bugs and lessons` section
 and the memory lines of `## Return value` in the nine L1 files, and the Findings Schema block and
 Step 2 rule 1 of audit-fix.md.
+
+Fix round 1 (run 2026-10-31, against the prose of commit 0282a33 before the edit): the changed
+test_memory_section_explains_the_brief failed 9 of 9 on `assert 'copied as the brief prints it' in`
+(local and hosted id forms), and the changed test_schema_and_consolidation_carry_the_fields failed
+on the "In every merge above" union assertion. After the edit both pass; replacing that sentence
+with "In rule 1 only, ..." failed the consolidation test again, and it was restored.
 """
 
 from __future__ import annotations
@@ -169,7 +175,10 @@ def test_memory_section_explains_the_brief(name):
     assert "bugs CCA confirmed and fixed" in memory
     assert "name its bug class" in memory
     assert "led you to" in memory
-    assert "exactly as printed" in memory
+    assert "copied as the brief prints it" in memory
+    assert "after `BUG ` or `LESSON ` in the local form" in memory
+    assert "the token after `- [P1] `" in memory and "before the first comma in the hosted form" in memory
+    assert "without brackets or the trailing comma" in memory
     assert "exactly as valid as one that cites" in memory
     assert "holdout" not in text(name).lower()
 
@@ -186,5 +195,9 @@ def test_schema_and_consolidation_carry_the_fields():
     """The Findings Schema holds both keys; a merged finding takes the union of memory_ids."""
     schema = TEMPLATE.split("## Findings Schema (canonical)")[1].split("## Step 1:")[0]
     assert '"memory_ids"' in schema and '"memory_how"' in schema
-    rule = TEMPLATE.split("## Step 2: Layer 2")[1].split("2. **Same category")[0]
-    assert "takes the union of its sources' `memory_ids`" in rule
+    step2 = TEMPLATE.split("## Step 2: Layer 2")[1].split("Re-map each auditor")[0]
+    merges = step2
+    assert "2. **Same category on same file within" in merges
+    union = "In every merge above, the merged finding takes the union of its sources' `memory_ids`"
+    assert union in merges
+    assert merges.index(union) > merges.index("2. **Same category on same file within")

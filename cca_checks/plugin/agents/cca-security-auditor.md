@@ -157,8 +157,9 @@ or has a sibling of it. A record never raises or lowers the bar for a finding: r
 you find by the rules above, whether or not any record mentions it.
 
 Cite a record only when it led you to the place or the bug class you then reported. Put its id in
-`memory_ids`, copied exactly as printed on its `BUG <id> [...]` or `LESSON <id> [...]` line, and
-write one sentence in `memory_how` tying the record to the code. A record that is merely consistent
+`memory_ids`, copied as the brief prints it: after `BUG ` or `LESSON ` in the local form, or the token
+after `- [P1] ` (any severity) or after `- ` and before the first comma in the hosted form,
+without brackets or the trailing comma. Write one sentence in `memory_how` tying the record to the code. A record that is merely consistent
 with a defect you found independently is not cited. When no record led to a finding, or the brief
 is empty, write `memory_ids: []` and `memory_how: ""`. A finding with `memory_ids: []` is exactly as
 valid as one that cites a record.

@@ -601,10 +601,12 @@ produced raw claims. Nothing has been verified yet.
 ## Step 2: Layer 2 — Consolidate Findings (deterministic)
 
 Collect every auditor's JSON return value. Deterministic dedup:
-1. **Same `(file, line, category)`** → merge into one, keep highest severity, cite all source auditors. The merged finding takes the union of its sources' `memory_ids` and keeps every non-empty `memory_how`.
+1. **Same `(file, line, category)`** → merge into one, keep highest severity, cite all source auditors.
 2. **Same category on same file within ±3 lines** → merge.
 3. **ENV/DAT/DEPLOY "missing config/table/grant"** → tag for L2.5 verification (common FP: exists in
    another module/migration).
+
+In every merge above, the merged finding takes the union of its sources' `memory_ids` and keeps every non-empty `memory_how`.
 
 Re-map each auditor `priority` to the canonical framework (auditors propose; orchestrator decides):
 - **P1 Critical** (fix before deploy): security vulns, data corruption, auth bypass, injection, unsafe
