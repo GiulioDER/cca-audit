@@ -32,6 +32,35 @@ failed on its assertion, and all 38 passed after the restore):
 - test_repository_wide_checks_are_hunt_only[cca-code-auditor]: " are HUNT-only" removed.
 - test_bug_auditor_starts_from_logic_and_contracts: "- **Reachability.**" removed.
 - test_perf_auditor_names_why_a_path_is_hot: ", missing `__slots__`" put back.
+
+Memory attribution (Task 3 of the auditor memory attribution feature). Red proof, run 2026-10-31:
+the new tests were run against a `git archive HEAD` copy of the master before the prose edit, with
+`python -m pytest tests/test_l1_auditor_prose.py -q -p no:cacheprovider`. 28 failed, 38 passed,
+each of the 28 on an `assert` (AssertionError, no collection or fixture error):
+test_every_finding_carries_memory_fields x9, test_memory_section_explains_the_brief x9,
+test_memory_never_suppresses x9 and test_schema_and_consolidation_carry_the_fields. On that copy the
+last two failed because the section or the schema keys did not exist, which is the defect. The
+no-suppression test was therefore also proved by mutation (2026-10-31): "(suppress nothing)" was
+inserted into the cca-perf-auditor.md Prior bugs and lessons section, then
+test_memory_never_suppresses[cca-perf-auditor] failed on `assert 'suppress' not in ...`; the file
+was restored and the test passed. Production targets: the new `## Prior bugs and lessons` section
+and the memory lines of `## Return value` in the nine L1 files, and the Findings Schema block and
+Step 2 rule 1 of audit-fix.md.
+
+Fix round 1 (run 2026-10-31, against the prose of commit 0282a33 before the edit): the changed
+test_memory_section_explains_the_brief failed 9 of 9 on `assert 'copied as the brief prints it' in`
+(local and hosted id forms), and the changed test_schema_and_consolidation_carry_the_fields failed
+on the "In every merge above" union assertion. After the edit both pass; replacing that sentence
+with "In rule 1 only, ..." failed the consolidation test again, and it was restored.
+
+Final review fix M1 (run 2026-10-31, against the prose of 720e740 before the edit: the nine
+files restored from `git show 720e740:<file>`): the changed
+test_memory_section_explains_the_brief failed 9 of 9 on
+`assert "headed LOCAL AUDITOR MEMORY, PRIOR BUGS or PRIOR FIXES" in memory`. The new
+test_memory_section_is_the_same_in_all_nine passes there too (the nine were already identical),
+so it was proved by mutation: the edited sentence reverted in cca-doc-auditor.md alone failed it
+on `assert 2 == 1`; the file was restored and it passed. It is the guard that keeps the nine
+from drifting.
 """
 
 from __future__ import annotations
@@ -138,3 +167,52 @@ def test_template_states_the_mode_and_the_same_scope():
     assert "Mode: HUNT. Read each file IN FULL." in TEMPLATE
     assert "Focus ONLY on new/changed code" not in TEMPLATE
     assert "including unchanged code\n  whose behaviour the change alters" in TEMPLATE
+
+
+@pytest.mark.parametrize("name", L1)
+def test_every_finding_carries_memory_fields(name):
+    """Every finding says which brief records led to it, with an explicit empty value."""
+    contract = section(text(name), "Return value")
+    assert "`memory_ids`" in contract and "`memory_how`" in contract
+    assert "`[]` when no record led to it" in contract
+
+
+@pytest.mark.parametrize("name", L1)
+def test_memory_section_explains_the_brief(name):
+    """The section says what the records are, what to do with each, and when to cite."""
+    memory = " ".join(section(text(name), "Prior bugs and lessons").split())
+    assert "bugs CCA confirmed and fixed" in memory
+    assert "headed LOCAL AUDITOR MEMORY, PRIOR BUGS or PRIOR FIXES" in memory
+    assert "name its bug class" in memory
+    assert "led you to" in memory
+    assert "copied as the brief prints it" in memory
+    assert "after `BUG ` or `LESSON ` in the local form" in memory
+    assert "the token after `- [P1] `" in memory and "before the first comma in the hosted form" in memory
+    assert "without brackets or the trailing comma" in memory
+    assert "exactly as valid as one that cites" in memory
+    assert "holdout" not in text(name).lower()
+
+
+def test_memory_section_is_the_same_in_all_nine():
+    """The nine L1 files carry one shared `## Prior bugs and lessons` section, word for word."""
+    assert len({section(text(name), "Prior bugs and lessons") for name in L1}) == 1
+
+
+@pytest.mark.parametrize("name", L1)
+def test_memory_never_suppresses(name):
+    """Nothing in the memory section tells an auditor to leave a defect out."""
+    memory = " ".join(section(text(name), "Prior bugs and lessons").lower().split())
+    for phrase in ("do not report", "suppress", "skip", "only report"):
+        assert phrase not in memory
+
+
+def test_schema_and_consolidation_carry_the_fields():
+    """The Findings Schema holds both keys; a merged finding takes the union of memory_ids."""
+    schema = TEMPLATE.split("## Findings Schema (canonical)")[1].split("## Step 1:")[0]
+    assert '"memory_ids"' in schema and '"memory_how"' in schema
+    step2 = TEMPLATE.split("## Step 2: Layer 2")[1].split("Re-map each auditor")[0]
+    merges = step2
+    assert "2. **Same category on same file within" in merges
+    union = "In every merge above, the merged finding takes the union of its sources' `memory_ids`"
+    assert union in merges
+    assert merges.index(union) > merges.index("2. **Same category on same file within")

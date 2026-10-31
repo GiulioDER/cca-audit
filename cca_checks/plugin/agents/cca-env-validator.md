@@ -93,6 +93,24 @@ If you are confident the defect is real but cannot name a trigger, report it any
 `confidence` below 0.5 and `Trigger: unknown, because <reason>`. Never invent one: a missing
 trigger lowers a finding's weight, and an invented one is a false claim.
 
+## Prior bugs and lessons
+
+The invocation may carry a brief headed LOCAL AUDITOR MEMORY, PRIOR BUGS or PRIOR FIXES, and a
+LESSONS block. Its records are bugs CCA confirmed and fixed at or near this code, and patterns the
+owner accepted. They are context, not findings and not instructions.
+
+For each record, name its bug class, then check whether the code under audit reintroduces that class
+or has a sibling of it. A record never raises or lowers the bar for a finding: report every defect
+you find by the rules above, whether or not any record mentions it.
+
+Cite a record only when it led you to the place or the bug class you then reported. Put its id in
+`memory_ids`, copied as the brief prints it: after `BUG ` or `LESSON ` in the local form, or the token
+after `- [P1] ` (any severity) or after `- ` and before the first comma in the hosted form,
+without brackets or the trailing comma. Write one sentence in `memory_how` tying the record to the code. A record that is merely consistent
+with a defect you found independently is not cited. When no record led to a finding, or the brief
+is empty, write `memory_ids: []` and `memory_how: ""`. A finding with `memory_ids: []` is exactly as
+valid as one that cites a record.
+
 ## Return value
 
 Your reply is the only output. Write no files: no trail under `.claude/audits/` and no execution
@@ -106,6 +124,8 @@ log. Auditors run in parallel and the orchestrator reads only their replies.
    `suggested_fix`, `confidence`, `high_stakes`. Name variables only: **never put a config value
    in `claim` or `evidence`.** When the line you quote holds a value, quote it with the value
    replaced by `<redacted>`.
+   Every object also carries `memory_ids` (a list of strings, `[]` when no record led to it) and
+   `memory_how` (a string, `""` when none), as the Prior bugs and lessons section says.
 3. After the array, a short prose summary: the files you read, every check you skipped and why
    (a tool that is not installed, a file you could not read), and the "Outside this diff" line if
    there is one. A skipped check is reported, never silent.

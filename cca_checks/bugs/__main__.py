@@ -29,7 +29,9 @@ and exits 0 on any data or environment problem (a missing ledger, origin or read
 file prints the empty block), and 2 on a usage error. With `--records` it renders the anchored
 block from a saved `recall_records` answer (DIFF mode), with `--files` the ledger join (HUNT
 mode); the same answer's current lessons follow as a LESSONS block, at most three, printed only
-when one applies. `distill` groups related bug rows and lists the groups; with --draft it asks a
+when one applies. When `brief --out` or `prior --records` names a file in a run directory, the
+memory holdout (`holdout.py`) records the run's arm there, and a holdout DIFF run prints the empty
+form. `distill` groups related bug rows and lists the groups; with --draft it asks a
 model to draft a rule and pattern per new group and stores each under `lessons/proposed/` beside
 the ledger, never in it (exit 1 when a draft was refused). `lesson accept` appends the lesson a
 proposal names and writes its memo; `lesson retract` appends a `lesson_retraction`; both exit 1
@@ -146,14 +148,24 @@ def _prior(a: argparse.Namespace) -> int:
 
 
 def _brief(a: argparse.Namespace) -> int:
-    from . import local_brief
+    from . import holdout, local_brief
 
+    withhold = a.out is not None and holdout.assign(a.out, never=a.skipped is not None)
+    if a.skipped is None and (a.out is None or holdout.run_dir(a.out) is None):
+        # No run directory from --out (the auditor-memory skill prints the brief this way): the
+        # DIFF run open at --root, else at the working directory's project root, decides.
+        run = holdout.open_run(a.root if a.root is not None else holdout.project_root())
+        withhold = run is not None and holdout.assign(run / holdout.ARM_FILE)
     if a.skipped is not None:
         # A hunt whose target root is unresolved or is the user's own checkout: read no
         # memory, but leave the receipt the L1 gate asks for.
         result = {"status": "skipped", "block": "", "reason": a.skipped}
+    elif withhold:
+        # The holdout arm: the reader's own no-match receipt, so the print, the receipt and
+        # its readers are those of a change the ledger holds nothing for.
+        result = {"status": "empty", "block": ""}
     else:
-        result = local_brief.build(a.root, a.files)
+        result = local_brief.build(a.root if a.root is not None else Path("."), a.files)
     if a.out is not None:
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(result, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -165,8 +177,10 @@ def _brief(a: argparse.Namespace) -> int:
 
 
 def _prior_records(a: argparse.Namespace, repo: str | None, reason: str | None) -> int:
-    from . import envelope, prior
+    from . import envelope, holdout, prior
 
+    # The holdout arm selects nothing, so the blocks are those of an answer with no records.
+    withhold = holdout.assign(a.records)
     records, _, why = envelope.load(a.records)
     reason = reason or why
     code = None
@@ -178,7 +192,7 @@ def _prior_records(a: argparse.Namespace, repo: str | None, reason: str | None) 
             reason = "; ".join(r for r in (reason, f"code: {code_why}") if r)
     selected = []
     lessons = []
-    if repo is not None and why is None:
+    if repo is not None and why is None and not withhold:
         selected = prior.select_records(records, repo, before=a.before, limit=a.limit)
         if not a.no_lessons:
             lessons = prior.select_lessons(records, repo, before=a.before)
@@ -420,7 +434,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="--records: leave the LESSONS block out (a replay's ablation arm)")
     q.add_argument("--json", action="store_true")
     brief = sub.add_parser("brief", help="local bugs and accepted lessons via the shared reader")
-    brief.add_argument("--root", type=Path, default=Path("."))
+    brief.add_argument("--root", type=Path,
+                       help="the target Git root (default: the working directory; the open "
+                            "run is then looked for at its project root)")
     brief.add_argument("--files", nargs="+", default=[],
                        help="files relative to --root; otherwise the committed diff")
     brief.add_argument("--json", action="store_true")

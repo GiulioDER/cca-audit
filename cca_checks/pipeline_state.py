@@ -1199,6 +1199,7 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 
 #: The saved `recall_records` answer Step 1 renders the prior-bugs block from.
 PRIOR_RECORDS = "prior-records.json"
+PRIOR_CODE = "prior-code.json"
 #: The receipt `bugs brief --out` writes: Step 1's local reader path.
 LOCAL_PRIOR = "local-prior.json"
 
@@ -1237,6 +1238,8 @@ def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | N
     path = deferred.runs_dir(root) / state.run_id / PRIOR_RECORDS
     if state.mode != "DIFF" or not path.is_file():
         return None
+    if memory_arm(state, root) == "holdout":
+        return [], None  # the holdout's blocks selected nothing from the saved answer
     from .bugs import envelope
     from .bugs.gitread import GitError, remote_repo
 
@@ -1312,15 +1315,111 @@ def lessons_block_count(state: PipelineState, root) -> int | None:
     return len(prior.select_lessons(records, repo)) if repo else 0
 
 
+def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
+    """The ids the hosted blocks print: bugs first, then lessons, after the length cut.
+
+    Taken from the render itself (`prior.printed_ids`), so a citation can be compared with
+    exactly what the auditors saw. Empty when the answer or the origin cannot be read, or in a
+    non-DIFF run: the brief then listed nothing.
+    """
+    from .bugs import envelope, prior
+
+    saved = _saved_brief_answer(state, root)
+    if saved is None:
+        return []
+    records, repo = saved
+    if repo is None:  # unpacked first, so the type checker sees `repo` as a str below
+        return []
+    # The code answer labels the anchors and so lengthens the entries, as `bugs prior --code`
+    # reads it: an unreadable one labels nothing.
+    code, _, code_why = envelope.load(deferred.runs_dir(root) / state.run_id / PRIOR_CODE)
+    return prior.printed_ids(prior.select_records(records, repo),
+                             prior.select_lessons(records, repo), repo,
+                             None if code_why else code)
+
+
+def memory_arm(state: PipelineState, root) -> str | None:
+    """The arm `memory-arm.json` assigned this run, `brief` or `holdout`; None when the file is
+    absent, unreadable, or names another run (unknown is not an arm)."""
+    from .bugs import holdout
+
+    path = deferred.runs_dir(root) / state.run_id / holdout.ARM_FILE
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("run_id") != state.run_id:
+        return None
+    arm = value.get("arm")
+    return arm if arm in holdout.ARMS else None
+
+
+def memory_attribution(state: PipelineState, root) -> dict | None:
+    """How many L2 findings cite prior-bug record ids, split by their L2.5 verdict.
+
+    None, not zeros, when the run is not a DIFF run or its brief listed no id: unknown is not
+    zero. A cited id is never refused. One the brief did not list (exact string match) is only
+    counted as `unlisted`, so measuring cannot stop a run or push anyone to edit auditor output.
+    A finding cites when `memory_ids` is a non-empty list of strings; one without the key is
+    `missing`, one whose value is anything else is `malformed`, and neither is read further.
+    A holdout run's auditors were shown no record, so its attribution is None too.
+    """
+    if memory_arm(state, root) == "holdout":
+        return None
+    brief = prior_brief(state, root) if state.mode == "DIFF" else None
+    listed = set(brief.get("ids") or []) if brief else set()
+    if not listed:
+        return None
+    findings = _stored_json(state, "L2", root)
+    verdicts = _stored_json(state, "L2.5", root)
+    by_id = {}
+    for row in verdicts if isinstance(verdicts, list) else []:
+        if isinstance(row, dict):
+            by_id[row.get("id")] = row.get("verdict")
+    out: dict = {"findings_citing": 0, "missing": 0, "malformed": 0,
+           "by_verdict": {"CONFIRMED": 0, "FALSE_POSITIVE": 0, "other": 0},
+           "confirmed_ids": [], "unlisted": 0, "cited_ids": [], "unlisted_ids": []}
+    confirmed: set[str] = set()
+    every: set[str] = set()
+    for finding in findings if isinstance(findings, list) else []:
+        if not isinstance(finding, dict):
+            continue
+        if "memory_ids" not in finding:
+            out["missing"] += 1
+            continue
+        ids = finding["memory_ids"]
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            out["malformed"] += 1
+            continue
+        if not ids:
+            continue
+        cited = set(ids)
+        out["findings_citing"] += 1
+        # Per finding: an id two findings cite counts twice here. `unlisted_ids` below is the
+        # distinct form, the one a share over distinct cited ids (`cited_ids`) divides.
+        out["unlisted"] += len(cited - listed)
+        every |= cited
+        verdict = by_id.get(finding.get("id"))
+        key = verdict if verdict in ("CONFIRMED", "FALSE_POSITIVE") else "other"
+        out["by_verdict"][key] += 1
+        if verdict == "CONFIRMED":
+            confirmed |= cited
+    out["confirmed_ids"] = sorted(confirmed)
+    out["cited_ids"] = sorted(every)
+    out["unlisted_ids"] = sorted(every - listed)
+    return out
+
+
 def prior_brief(state: PipelineState, root) -> dict | None:
     """Which Step 1 brief this run built, its status and the record ids it listed.
 
     Recorded for every mode, so the ledger can later say which prior bugs and lessons each
-    run's auditors were shown, and a recurrence replay can join a new finding to them.
+    run's auditors were shown, and a recurrence replay can join a new finding to them. A
+    holdout run lists no hosted id, since its blocks printed none (`_saved_brief_answer`).
     """
     run = deferred.runs_dir(root) / state.run_id
     if (run / PRIOR_RECORDS).is_file():
-        return {"source": "hosted"}
+        return {"source": "hosted", "ids": _hosted_brief_ids(state, root)}
     local = _local_brief(state, root)
     if local is None:
         return None
@@ -1351,6 +1450,8 @@ def _write_summary(state: PipelineState, root) -> None:
         "prior_block": prior_block_counts(state, root),
         "lessons_block": lessons_block_count(state, root),
         "prior_brief": prior_brief(state, root),
+        "memory_attribution": memory_attribution(state, root),
+        "memory_arm": memory_arm(state, root),
         "client": state.client, "auditors": state.auditors,
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"
