@@ -182,6 +182,11 @@ _CLOSING = "\n```"
 
 def _block(heading: str, items: list[str], empty: str) -> str:
     """One fenced block within BLOCK_MAX: whole entries are dropped from the tail first."""
+    return _block_kept(heading, items, empty)[0]
+
+
+def _block_kept(heading: str, items: list[str], empty: str) -> tuple[str, int]:
+    """(the block `_block` renders, how many leading entries it keeps)."""
     items = list(items)
 
     def whole() -> str:
@@ -195,7 +200,7 @@ def _block(heading: str, items: list[str], empty: str) -> str:
     if len(text) > BLOCK_MAX:
         # Only reachable when a single entry is oversized: cut the tail, keep the fence closed.
         text = text[:BLOCK_MAX - len(_CLOSING)] + _CLOSING
-    return text
+    return text, len(items)
 
 
 def render(selected: list[tuple[dict, list[str]]], reason: str | None = None) -> str:
@@ -405,3 +410,26 @@ def render_lessons(selected: list[dict]) -> str:
     if not selected:
         return ""
     return _block(LESSONS_HEADING, [_lesson_entry(r) for r in selected], "")
+
+
+def printed_ids(bugs: list[dict], lessons: list[dict], repo: str = "") -> list[str]:
+    """The ids the PRIOR BUGS and LESSONS blocks print, in printed order.
+
+    Bug entries show `recall_record.bug_id` and lessons `recall_record.id`, each cut to
+    BUG_ID_MAX, and entries past the BLOCK_MAX cut are not printed: the ids are those of the
+    entries the rendered blocks keep. An entry that prints no id contributes nothing.
+    """
+    out: list[str] = []
+    for heading, selected, text_of, id_of in (
+        (RECORDS_HEADING, bugs, lambda r: _record_entry(r, None, repo),
+         lambda r: r["recall_record"].get("bug_id", "")),
+        (LESSONS_HEADING, lessons, _lesson_entry, lambda r: r["recall_record"].get("id", "")),
+    ):
+        if not selected:
+            continue
+        _, kept = _block_kept(heading, [text_of(r) for r in selected], "")
+        for record in selected[:kept]:
+            printed = _clean(id_of(record))[:BUG_ID_MAX]
+            if printed:
+                out.append(printed)
+    return out

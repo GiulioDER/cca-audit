@@ -1313,11 +1313,11 @@ def lessons_block_count(state: PipelineState, root) -> int | None:
 
 
 def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
-    """The ids of the records the hosted block listed: bugs first, then lessons.
+    """The ids the hosted blocks print: bugs first, then lessons, after the length cut.
 
-    Selected as the block selects them, so a citation can be compared with what the auditors
-    saw. Empty when the answer or the origin cannot be read, or in a non-DIFF run: the brief
-    then listed nothing.
+    Taken from the render itself (`prior.printed_ids`), so a citation can be compared with
+    exactly what the auditors saw. Empty when the answer or the origin cannot be read, or in a
+    non-DIFF run: the brief then listed nothing.
     """
     from .bugs import prior
 
@@ -1325,8 +1325,8 @@ def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
     if saved is None or saved[1] is None:
         return []
     records, repo = saved
-    return [str(r["id"]) for r in prior.select_records(records, repo)
-            + prior.select_lessons(records, repo)]
+    return prior.printed_ids(prior.select_records(records, repo),
+                             prior.select_lessons(records, repo), repo)
 
 
 def memory_attribution(state: PipelineState, root) -> dict | None:

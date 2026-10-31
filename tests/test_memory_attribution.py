@@ -16,6 +16,17 @@ KeyError; every test ran, was collected and failed in its own assertion:
 
 - test_a_run_without_a_brief_closes_with_null: baseline; same assertion.
 
+Fix round 1, 2026-10-31, baseline = the implementation of commit 07ca920 (`str(r["id"])` over
+every selected record, no length cut); each ran, was collected and failed:
+
+- test_a_record_without_an_id_does_not_block_close: `KeyError: 'id'` raised by that production
+  line itself (`pipeline_state._hosted_brief_ids`) inside `ps.close`. The defect is the crash, so
+  the exception at the production line is the intended failure, not a fixture or setup error.
+- test_ids_stop_at_the_entries_the_block_keeps: failed at
+  `assert summary["prior_brief"]["ids"] == printed` (eight ids against the four printed).
+- test_the_printed_bug_id_is_listed_not_the_outer_id: failed at the `prior_brief` comparison
+  (outer ids listed instead of `PRINTED:bug-1`).
+
 Mutations on the green implementation, one per test, restored afterwards (all in
 `pipeline_state.memory_attribution`; each failed in the intended assertion):
 
@@ -38,6 +49,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+import re
 import subprocess
 
 from conftest import plan_output, write_output
@@ -54,15 +66,21 @@ def _finding(fid, **extra) -> dict:
             "file": "app.py", "line": 1, "claim": f"claim {fid}", "high_stakes": False, **extra}
 
 
-def _hosted_answer(run_dir) -> None:
-    """Save a hosted answer holding one bug and one lesson of RE-call (a subset of the fixture)."""
+def _fixture_records() -> list[dict]:
     answer = json.loads((RESPONSES / "bug_answer.json").read_text(encoding="utf-8"))
-    answer["records"] = [r for r in answer["records"] if r["id"] in (BUG_ID, LESSON_ID)]
+    return [r for r in answer["records"] if r["id"] in (BUG_ID, LESSON_ID)]
+
+
+def _hosted_answer(run_dir, records=None) -> None:
+    """Save a hosted answer holding one bug and one lesson of RE-call (a subset of the fixture),
+    or `records` when given."""
+    answer = json.loads((RESPONSES / "bug_answer.json").read_text(encoding="utf-8"))
+    answer["records"] = _fixture_records() if records is None else records
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / ps.PRIOR_RECORDS).write_text(json.dumps(answer), encoding="utf-8")
 
 
-def _open_run(repo, findings, verdicts, *, hosted=True):
+def _open_run(repo, findings, verdicts, *, hosted=True, records=None):
     """Record L1 to L6 of a DIFF run, leaving it open; returns its state.
 
     `verdicts` maps finding id to verdict; findings are recorded as L2 in the order given.
@@ -72,7 +90,7 @@ def _open_run(repo, findings, verdicts, *, hosted=True):
     state = ps.start("FAST", root=repo)
     run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
     if hosted:
-        _hosted_answer(run_dir)
+        _hosted_answer(run_dir, records)
     ps.record("L1", output=write_output(repo), root=repo)
     ps.record("L2", counts={"unique": len(findings)}, output=write_output(repo, findings),
               root=repo)
@@ -92,9 +110,9 @@ def _open_run(repo, findings, verdicts, *, hosted=True):
     return state
 
 
-def _run(repo, findings, verdicts, *, hosted=True) -> dict:
+def _run(repo, findings, verdicts, *, hosted=True, records=None) -> dict:
     """Drive a run to `pipeline close` and return its summary.json."""
-    state = _open_run(repo, findings, verdicts, hosted=hosted)
+    state = _open_run(repo, findings, verdicts, hosted=hosted, records=records)
     ps.close(root=repo)
     run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
     return json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
@@ -105,6 +123,53 @@ def test_hosted_brief_records_its_ids(git_repo):
     first and lessons after, so a citation can be compared with what the auditors saw."""
     summary = _run(git_repo, [], {})
     assert summary["prior_brief"] == {"source": "hosted", "ids": [BUG_ID, LESSON_ID]}
+
+
+def test_a_record_without_an_id_does_not_block_close(git_repo):
+    """Invariant: a saved answer holding a record with no outer `id` closes cleanly, and the
+    ids are the ones the block prints (the record's bug_id), never a KeyError at close."""
+    records = _fixture_records()
+    for record in records:
+        if record["kind"] == "bug":
+            del record["id"]
+    summary = _run(git_repo, [], {}, records=records)
+    assert summary["prior_brief"] == {"source": "hosted", "ids": [BUG_ID, LESSON_ID]}
+
+
+def test_ids_stop_at_the_entries_the_block_keeps(git_repo):
+    """Invariant: ids past the BLOCK_MAX cut are not listed, since the auditors never saw them.
+    The expected ids are read back from the rendered block, not from the selection."""
+    base = [r for r in _fixture_records() if r["kind"] == "bug"][0]
+    records = []
+    for n in range(8):
+        clone = json.loads(json.dumps(base))
+        rid = f"RE-call:{n:012x}:BUG-{n}"
+        clone["id"] = clone["recall_record"]["id"] = clone["recall_record"]["bug_id"] = rid
+        clone["recall_record"]["supersedes"] = None
+        clone["recall_record"]["summary"] = "s" * 240
+        for anchor in clone["recall_record"]["anchors"]:
+            anchor["symbol"] = "Sym." + "y" * 150
+        for match in clone["anchor_matches"]:
+            match["anchor"]["symbol"] = "Sym." + "y" * 150
+        records.append(clone)
+    summary = _run(git_repo, [], {}, records=records)
+    from cca_checks.bugs import prior
+    selected = prior.select_records(records, "GiulioDER/RE-call")
+    block = prior.render_records(selected, None, None, "GiulioDER/RE-call")
+    printed = re.findall(r"^- \[P\d\] (\S+),", block, flags=re.MULTILINE)
+    assert 0 < len(printed) < len(selected)
+    assert summary["prior_brief"]["ids"] == printed
+
+
+def test_the_printed_bug_id_is_listed_not_the_outer_id(git_repo):
+    """Invariant: the block prints `recall_record.bug_id`; a record whose outer id differs is
+    listed by the printed one."""
+    records = _fixture_records()
+    for record in records:
+        if record["kind"] == "bug":
+            record["recall_record"]["bug_id"] = "PRINTED:bug-1"
+    summary = _run(git_repo, [], {}, records=records)
+    assert summary["prior_brief"] == {"source": "hosted", "ids": ["PRINTED:bug-1", LESSON_ID]}
 
 
 def test_attribution_counts_citations_by_verdict(git_repo):
