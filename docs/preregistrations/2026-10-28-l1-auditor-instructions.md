@@ -120,3 +120,45 @@ RE-call auditor-brief reader was redeployed about 2026-10-29T12:30Z (file-level 
 symbol records), so what the brief showed changed during the window. One deferred pass
 (`pr709-700-deferred-20261029`) is among the 15; the record does not exclude them. CCA was
 reinstalled from `b15bae0` and `8d6f4f7` with no change to any prompt, command or hook.
+
+## Result (2026-10-31), the look at 30 runs
+
+**Status:** measured; the record's last look. Predictions 1 and 3 met, prediction 2 met on the
+point estimate with the interval clear of the baseline, prediction 4 wrong.
+
+Command, at master `11829af`:
+`python benchmarks/harness/l1_precision.py --root ~/Documents --since 2026-10-28T20:01:05Z --first 30`.
+Window: the first 15 runs above, then 15 more to `pr529-520-20261031` (2026-10-31T11:06Z); one
+run with no parseable time (`mtrag-salvage-1`) was left out. No window run's worktree carried its
+own copy of the agent files (0 stale installs to exclude), and the user-wide copies equal master's
+for all nine L1 agents. 294 L1 verdict rows; 243 CONFIRMED, 33 FALSE_POSITIVE.
+
+| Prediction | Baseline (as pre-registered) | Measured | Verdict |
+|---|---|---|---|
+| 1. out_of_scope share of L1 FPs below 0.25 | 0.456 (26 of 57) | **0.121** (4 of 33) | met |
+| 2. precision at least 0.85 | 0.810 (243 of 300) | **0.880** (243 of 276), Wilson 95% 0.837 to 0.914 | met on the point estimate; the interval excludes 0.81 but includes 0.85 |
+| 3. confirmed per run at least 3.2 | 5.17 | **8.10** | met |
+| 4. perf-auditor fewer findings per run | 0.43 (20 in 47) | **0.80** (24 in 30) | **wrong direction** |
+
+Per role (n, precision; baseline in brackets): code 67, 0.815 (0.750); doc 46, 0.911 (0.833); bug
+45, 1.000 (0.914); security 25, 0.810 (0.769); perf 24, 0.789 (0.625); env 22, 0.762 (0.824); data
+21, 1.000 (0.933); deploy 14, 1.000 (0.750); numeric 13, 1.000 (1.000); stakes 12, 0.917 (0.923);
+dep 5, 0.400 (0.667). FP reasons: not_real 22, settled 7, out_of_scope 4.
+
+**Gap.** The two looks disagree more than the record's design assumed. Runs 1 to 15 gave 0.825
+(104 of 126); runs 16 to 30 alone give 0.927 (139 of 150). I do not read the rise as the
+instructions improving with time, because the prompts did not change between the halves. The
+likelier cause is the diff mix: the second half holds ten descending audits of RE-call PR ranges
+(`pr619-610` to `pr529-520`, including one deferred pass), which together produced 57 confirmed
+findings and no false positive, while all 11 of the half's false positives came from four
+timestamp-named runs. The baseline's run mix differs from both halves, so the 0.07 gain is the
+instructions plus a run mix I did not control. The scope rule result holds at both looks. perf
+volume stayed at 0.80 per run, and its precision rose (15 of 19 decided), so the hot-path rule
+made perf findings better, not fewer.
+
+**Confounds that happened, after the first look.** No prompt, command or hook changed (the
+2026-10-29T21:24Z rewrite of the agent files was the reinstall from `8d6f4f7`, content equal to
+`cd8a204`). A second deferred pass (`pr639-630-deferred-20261030`) is in the window; the record
+does not exclude them. The confounds listed under the first look still apply to every run after
+them, and the ledger kept growing (bugs.jsonl last written 2026-10-31T15:12Z), so what the brief
+showed kept changing.
