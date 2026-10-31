@@ -1312,6 +1312,70 @@ def lessons_block_count(state: PipelineState, root) -> int | None:
     return len(prior.select_lessons(records, repo)) if repo else 0
 
 
+def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
+    """The ids of the records the hosted block listed: bugs first, then lessons.
+
+    Selected as the block selects them, so a citation can be compared with what the auditors
+    saw. Empty when the answer or the origin cannot be read, or in a non-DIFF run: the brief
+    then listed nothing.
+    """
+    from .bugs import prior
+
+    saved = _saved_brief_answer(state, root)
+    if saved is None or saved[1] is None:
+        return []
+    records, repo = saved
+    return [str(r["id"]) for r in prior.select_records(records, repo)
+            + prior.select_lessons(records, repo)]
+
+
+def memory_attribution(state: PipelineState, root) -> dict | None:
+    """How many L2 findings cite prior-bug record ids, split by their L2.5 verdict.
+
+    None, not zeros, when the run is not a DIFF run or its brief listed no id: unknown is not
+    zero. A cited id is never refused. One the brief did not list (exact string match) is only
+    counted as `unlisted`, so measuring cannot stop a run or push anyone to edit auditor output.
+    A finding cites when `memory_ids` is a non-empty list of strings; one without the key is
+    `missing`, one whose value is anything else is `malformed`, and neither is read further.
+    """
+    brief = prior_brief(state, root) if state.mode == "DIFF" else None
+    listed = set(brief.get("ids") or []) if brief else set()
+    if not listed:
+        return None
+    findings = _stored_json(state, "L2", root)
+    verdicts = _stored_json(state, "L2.5", root)
+    by_id = {}
+    for row in verdicts if isinstance(verdicts, list) else []:
+        if isinstance(row, dict):
+            by_id[row.get("id")] = row.get("verdict")
+    out = {"findings_citing": 0, "missing": 0, "malformed": 0,
+           "by_verdict": {"CONFIRMED": 0, "FALSE_POSITIVE": 0, "other": 0},
+           "confirmed_ids": [], "unlisted": 0}
+    confirmed: set[str] = set()
+    for finding in findings if isinstance(findings, list) else []:
+        if not isinstance(finding, dict):
+            continue
+        if "memory_ids" not in finding:
+            out["missing"] += 1
+            continue
+        ids = finding["memory_ids"]
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            out["malformed"] += 1
+            continue
+        if not ids:
+            continue
+        cited = set(ids)
+        out["findings_citing"] += 1
+        out["unlisted"] += len(cited - listed)
+        verdict = by_id.get(finding.get("id"))
+        key = verdict if verdict in ("CONFIRMED", "FALSE_POSITIVE") else "other"
+        out["by_verdict"][key] += 1
+        if verdict == "CONFIRMED":
+            confirmed |= cited
+    out["confirmed_ids"] = sorted(confirmed)
+    return out
+
+
 def prior_brief(state: PipelineState, root) -> dict | None:
     """Which Step 1 brief this run built, its status and the record ids it listed.
 
@@ -1320,7 +1384,7 @@ def prior_brief(state: PipelineState, root) -> dict | None:
     """
     run = deferred.runs_dir(root) / state.run_id
     if (run / PRIOR_RECORDS).is_file():
-        return {"source": "hosted"}
+        return {"source": "hosted", "ids": _hosted_brief_ids(state, root)}
     local = _local_brief(state, root)
     if local is None:
         return None
@@ -1351,6 +1415,7 @@ def _write_summary(state: PipelineState, root) -> None:
         "prior_block": prior_block_counts(state, root),
         "lessons_block": lessons_block_count(state, root),
         "prior_brief": prior_brief(state, root),
+        "memory_attribution": memory_attribution(state, root),
         "client": state.client, "auditors": state.auditors,
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"

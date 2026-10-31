@@ -1,0 +1,182 @@
+"""`pipeline close` counts the memory ids L1 findings cite against the L2.5 verdicts.
+
+Red proof, 2026-10-31, all against the commit before this change (the tree at 0bfb8f6, with no
+`memory_attribution` key in `_write_summary` and no `ids` in the hosted `prior_brief`). Each test
+asserts `"memory_attribution" in summary` first, so a missing key is an AssertionError and not a
+KeyError; every test ran, was collected and failed in its own assertion:
+
+- test_hosted_brief_records_its_ids: baseline; failed at `assert summary["prior_brief"] == {...}`
+  (`{"source": "hosted"}` has no `ids`).
+- test_attribution_counts_citations_by_verdict: baseline; failed at
+  `assert "memory_attribution" in summary`.
+- test_missing_and_malformed_are_counted_apart: baseline; same assertion.
+- test_a_repeated_id_counts_once: baseline; same assertion.
+- test_case_variant_is_unlisted: baseline; same assertion.
+- test_no_brief_and_non_diff_runs_report_null: baseline; same assertion.
+
+- test_a_run_without_a_brief_closes_with_null: baseline; same assertion.
+
+Mutations on the green implementation, one per test, restored afterwards (all in
+`pipeline_state.memory_attribution`; each failed in the intended assertion):
+
+- test_case_variant_is_unlisted: `len(cited - listed)` became a lower-cased comparison; failed at
+  `assert summary["memory_attribution"]["unlisted"] == 1`.
+- test_missing_and_malformed_are_counted_apart: the list-of-strings check became
+  `isinstance(ids, (list, str))`; failed at the (missing, malformed, findings_citing) tuple.
+- test_a_repeated_id_counts_once: `unlisted` counted `ids` instead of the set `cited`; failed at
+  `assert got["unlisted"] == 1`.
+- test_no_brief_and_non_diff_runs_report_null: the `state.mode == "DIFF"` condition removed, with
+  a local receipt in a HUNT run; failed at `assert summary["memory_attribution"] is None, mode`.
+- test_a_run_without_a_brief_closes_with_null: the `if not listed` guard became `if brief is
+  None`; failed at `assert summary["memory_attribution"] is None`.
+- test_hosted_brief_records_its_ids: lessons ordered before bugs; failed at the `prior_brief` ids
+  comparison.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import pathlib
+import subprocess
+
+from conftest import plan_output, write_output
+
+from cca_checks import pipeline_state as ps
+
+RESPONSES = pathlib.Path(__file__).parent / "fixtures" / "audit_memory_responses"
+BUG_ID = "RE-call:abcdef012345:BUG-002"
+LESSON_ID = "RE-call:lesson:6a3ae35062b9"
+
+
+def _finding(fid, **extra) -> dict:
+    return {"id": fid, "auditor": "cca-bug-auditor", "category": "x", "priority": "P2",
+            "file": "app.py", "line": 1, "claim": f"claim {fid}", "high_stakes": False, **extra}
+
+
+def _hosted_answer(run_dir) -> None:
+    """Save a hosted answer holding one bug and one lesson of RE-call (a subset of the fixture)."""
+    answer = json.loads((RESPONSES / "bug_answer.json").read_text(encoding="utf-8"))
+    answer["records"] = [r for r in answer["records"] if r["id"] in (BUG_ID, LESSON_ID)]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / ps.PRIOR_RECORDS).write_text(json.dumps(answer), encoding="utf-8")
+
+
+def _open_run(repo, findings, verdicts, *, hosted=True):
+    """Record L1 to L6 of a DIFF run, leaving it open; returns its state.
+
+    `verdicts` maps finding id to verdict; findings are recorded as L2 in the order given.
+    """
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin",
+                    "https://github.com/GiulioDER/RE-call.git"], check=True)
+    state = ps.start("FAST", root=repo)
+    run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
+    if hosted:
+        _hosted_answer(run_dir)
+    ps.record("L1", output=write_output(repo), root=repo)
+    ps.record("L2", counts={"unique": len(findings)}, output=write_output(repo, findings),
+              root=repo)
+    rows = [{"id": i, "verdict": v} for i, v in verdicts.items()]
+    confirmed = sum(1 for v in verdicts.values() if v == "CONFIRMED")
+    fp = sum(1 for v in verdicts.values() if v == "FALSE_POSITIVE")
+    ps.record("L2.5", counts={"confirmed": confirmed, "fp": fp, "uncertain": 0, "duplicate": 0},
+              output=write_output(repo, rows), root=repo)
+    ids = [i for i, v in verdicts.items() if v == "CONFIRMED"]
+    ps.record("L3", counts={"to_fix": 0, "deferred": len(ids)},
+              output=plan_output(repo, deferred=len(ids), ids=ids), root=repo)
+    fps = [i for i, v in verdicts.items() if v == "FALSE_POSITIVE"]
+    accepted = {"fp_acceptance": [{"id": i, "decision": "ACCEPT", "reason": "read it"}
+                                  for i in fps]}
+    ps.record("L6", detail="APPROVED", output=write_output(repo, accepted) if fps else None,
+              root=repo)
+    return state
+
+
+def _run(repo, findings, verdicts, *, hosted=True) -> dict:
+    """Drive a run to `pipeline close` and return its summary.json."""
+    state = _open_run(repo, findings, verdicts, hosted=hosted)
+    ps.close(root=repo)
+    run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
+    return json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+
+
+def test_hosted_brief_records_its_ids(git_repo):
+    """Invariant: a hosted run's `prior_brief.ids` lists the records the block rendered, bugs
+    first and lessons after, so a citation can be compared with what the auditors saw."""
+    summary = _run(git_repo, [], {})
+    assert summary["prior_brief"] == {"source": "hosted", "ids": [BUG_ID, LESSON_ID]}
+
+
+def test_attribution_counts_citations_by_verdict(git_repo):
+    """Invariant: findings citing memory are split by L2.5 verdict; an empty list does not cite;
+    an id the brief did not list counts as unlisted."""
+    findings = [_finding("BUG-001", memory_ids=[BUG_ID]),
+                _finding("CODE-002", memory_ids=[]),
+                _finding("SEC-003", memory_ids=[BUG_ID, "nope"])]
+    summary = _run(git_repo, findings, {"BUG-001": "CONFIRMED", "CODE-002": "CONFIRMED",
+                                        "SEC-003": "FALSE_POSITIVE"})
+    assert "memory_attribution" in summary
+    assert summary["memory_attribution"] == {
+        "findings_citing": 2, "missing": 0, "malformed": 0,
+        "by_verdict": {"CONFIRMED": 1, "FALSE_POSITIVE": 1, "other": 0},
+        "confirmed_ids": [BUG_ID], "unlisted": 1,
+    }
+
+
+def test_missing_and_malformed_are_counted_apart(git_repo):
+    """Invariant: a finding without the key is `missing`, one whose value is not a list of
+    strings is `malformed`, and a bare string is never iterated into characters."""
+    findings = [_finding("BUG-001"), _finding("BUG-002", memory_ids="id1")]
+    summary = _run(git_repo, findings, {"BUG-001": "CONFIRMED", "BUG-002": "CONFIRMED"})
+    assert "memory_attribution" in summary
+    got = summary["memory_attribution"]
+    assert (got["missing"], got["malformed"], got["findings_citing"]) == (1, 1, 0)
+    assert got["unlisted"] == 0
+
+
+def test_a_repeated_id_counts_once(git_repo):
+    """Invariant: the same id twice in one finding is one citation, not two unlisted ones."""
+    findings = [_finding("BUG-001", memory_ids=["ghost", "ghost"])]
+    summary = _run(git_repo, findings, {"BUG-001": "CONFIRMED"})
+    assert "memory_attribution" in summary
+    got = summary["memory_attribution"]
+    assert got["findings_citing"] == 1
+    assert got["unlisted"] == 1
+    assert got["confirmed_ids"] == ["ghost"]
+
+
+def test_case_variant_is_unlisted(git_repo):
+    """Invariant: the comparison with the listed ids is exact, so a case variant is unlisted."""
+    findings = [_finding("BUG-001", memory_ids=[BUG_ID.upper()])]
+    summary = _run(git_repo, findings, {"BUG-001": "CONFIRMED"})
+    assert "memory_attribution" in summary
+    assert summary["memory_attribution"]["unlisted"] == 1
+
+
+def test_no_brief_and_non_diff_runs_report_null(git_repo):
+    """Invariant: unknown is null, never zeros: a run with no brief reports null, and so does
+    a HUNT or DEFERRED run even when its brief and its findings exist."""
+    findings = [_finding("BUG-001", memory_ids=[BUG_ID])]
+    verdicts = {"BUG-001": "CONFIRMED"}
+    state = _open_run(git_repo, findings, verdicts, hosted=False)
+    run_dir = git_repo / ".claude" / "audits" / "runs" / state.run_id
+    block = f"```text\nBUG {BUG_ID} [exact] app.py run: a race in run\n```"
+    (run_dir / ps.LOCAL_PRIOR).write_text(json.dumps({"status": "ok", "block": block}),
+                                          encoding="utf-8")
+    summary_path = git_repo / ".claude" / "audits" / "runs" / state.run_id / "summary.json"
+    for mode in ("HUNT", "DEFERRED"):
+        ps._write_summary(dataclasses.replace(state, mode=mode), git_repo)
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        assert "memory_attribution" in summary, mode
+        assert summary["memory_attribution"] is None, mode
+    ps._write_summary(state, git_repo)
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["memory_attribution"] is not None
+
+
+def test_a_run_without_a_brief_closes_with_null(git_repo):
+    """Invariant: a DIFF run with an empty receipt writes `memory_attribution: null`."""
+    summary = _run(git_repo, [_finding("BUG-001", memory_ids=[BUG_ID])],
+                   {"BUG-001": "CONFIRMED"}, hosted=False)
+    assert "memory_attribution" in summary
+    assert summary["memory_attribution"] is None
