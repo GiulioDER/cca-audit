@@ -8,6 +8,10 @@ Confirmed means an L2.5 CONFIRMED verdict on an L1 finding id (l1_precision.PREF
 
     python benchmarks/harness/memory_gap.py --root ~/Documents --since 2026-10-29T00:00:00Z
 
+Each row also carries `arm`, the memory holdout arm `memory-arm.json` assigned (`brief`,
+`holdout`, or None without a readable file naming the run), and the report's `by_arm` compares
+the arms by assignment: brief minus holdout, whatever a brief arm run's brief happened to hold.
+
 `--since` and `--until` take an ISO time or a stamp such as 20261029T000000Z. A run's time is its
 earliest dispatch `checked_utc`, else its run id read as a stamp; a run with neither is reported as
 excluded "untimed" and never counted.
@@ -71,11 +75,30 @@ def confirmed_l1(run_dir: pathlib.Path) -> int | None:
                and str(v.get("id", "")).split("-")[0].upper() in PREFIX)
 
 
-def _row(run_id: str, brief, confirmed, excluded) -> dict:
-    return {"run_id": run_id, "brief": brief, "confirmed": confirmed, "excluded": excluded}
+ARMS = ("brief", "holdout")
+
+
+def memory_arm(run_dir: pathlib.Path) -> str | None:
+    """The arm in the run's memory-arm.json; None when absent, unreadable or another run's."""
+    data = _load(run_dir / "memory-arm.json")
+    if not isinstance(data, dict) or data.get("run_id") != run_dir.name:
+        return None
+    arm = data.get("arm")
+    return arm if arm in ARMS else None
+
+
+def _row(run_id: str, brief, confirmed, excluded, arm=None) -> dict:
+    return {"run_id": run_id, "brief": brief, "confirmed": confirmed, "excluded": excluded,
+            "arm": arm}
 
 
 def _classify(run_id: str, run_dir: pathlib.Path) -> dict:
+    row = _classify_brief(run_id, run_dir)
+    row["arm"] = memory_arm(run_dir)
+    return row
+
+
+def _classify_brief(run_id: str, run_dir: pathlib.Path) -> dict:
     summary = _load(run_dir / "summary.json")
     if not isinstance(summary, dict):
         return _row(run_id, None, None, "unreadable")
@@ -163,9 +186,17 @@ def report(rows: list[dict]) -> dict:
     for r in rows:
         if r.get("excluded"):
             excluded[r["excluded"]] += 1
+    by_arm: dict = {}
+    for arm in ARMS:
+        values = [r["confirmed"] for r in used if r.get("arm") == arm]
+        by_arm[arm] = {"n": len(values), "mean": _mean(values)}
+    ab, ah = by_arm["brief"]["mean"], by_arm["holdout"]["mean"]
+    by_arm["gap"] = round(ab - ah, 3) if ab is not None and ah is not None else None
+    # Left out of by_arm only: these runs still count in n_brief and n_none above.
+    by_arm["excluded"] = {"no_arm": sum(1 for r in used if r.get("arm") not in ARMS)}
     return {"n_brief": len(brief), "n_none": len(none), "mean_brief": mb, "mean_none": mn,
             "gap": round(mb - mn, 3) if mb is not None and mn is not None else None,
-            "excluded": excluded}
+            "excluded": excluded, "by_arm": by_arm}
 
 
 def main() -> None:

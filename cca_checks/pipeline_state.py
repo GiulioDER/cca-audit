@@ -1238,6 +1238,8 @@ def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | N
     path = deferred.runs_dir(root) / state.run_id / PRIOR_RECORDS
     if state.mode != "DIFF" or not path.is_file():
         return None
+    if memory_arm(state, root) == "holdout":
+        return [], None  # the holdout's blocks selected nothing from the saved answer
     from .bugs import envelope
     from .bugs.gitread import GitError, remote_repo
 
@@ -1334,6 +1336,22 @@ def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
                              None if code_why else code)
 
 
+def memory_arm(state: PipelineState, root) -> str | None:
+    """The arm `memory-arm.json` assigned this run, `brief` or `holdout`; None when the file is
+    absent, unreadable, or names another run (unknown is not an arm)."""
+    from .bugs import holdout
+
+    path = deferred.runs_dir(root) / state.run_id / holdout.ARM_FILE
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("run_id") != state.run_id:
+        return None
+    arm = value.get("arm")
+    return arm if arm in holdout.ARMS else None
+
+
 def memory_attribution(state: PipelineState, root) -> dict | None:
     """How many L2 findings cite prior-bug record ids, split by their L2.5 verdict.
 
@@ -1342,7 +1360,10 @@ def memory_attribution(state: PipelineState, root) -> dict | None:
     counted as `unlisted`, so measuring cannot stop a run or push anyone to edit auditor output.
     A finding cites when `memory_ids` is a non-empty list of strings; one without the key is
     `missing`, one whose value is anything else is `malformed`, and neither is read further.
+    A holdout run's auditors were shown no record, so its attribution is None too.
     """
+    if memory_arm(state, root) == "holdout":
+        return None
     brief = prior_brief(state, root) if state.mode == "DIFF" else None
     listed = set(brief.get("ids") or []) if brief else set()
     if not listed:
@@ -1385,7 +1406,8 @@ def prior_brief(state: PipelineState, root) -> dict | None:
     """Which Step 1 brief this run built, its status and the record ids it listed.
 
     Recorded for every mode, so the ledger can later say which prior bugs and lessons each
-    run's auditors were shown, and a recurrence replay can join a new finding to them.
+    run's auditors were shown, and a recurrence replay can join a new finding to them. A
+    holdout run lists no hosted id, since its blocks printed none (`_saved_brief_answer`).
     """
     run = deferred.runs_dir(root) / state.run_id
     if (run / PRIOR_RECORDS).is_file():
@@ -1421,6 +1443,7 @@ def _write_summary(state: PipelineState, root) -> None:
         "lessons_block": lessons_block_count(state, root),
         "prior_brief": prior_brief(state, root),
         "memory_attribution": memory_attribution(state, root),
+        "memory_arm": memory_arm(state, root),
         "client": state.client, "auditors": state.auditors,
     }
     path = deferred.runs_dir(root) / state.run_id / "summary.json"

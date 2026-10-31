@@ -37,6 +37,10 @@ assertion, not on import or collection):
   `DID NOT RAISE SystemExit`.
 - test_a_named_run_inside_the_window_counts_by_its_dispatch_time: the `until` test removed from
   runs; fails on `assert runs(tmp_path, "", "2026-10-31T00:00:00Z") == []` (the run is returned).
+- test_gap_by_arm (2026-10-31): baseline is this branch at 0f0b62e (rows carry no `arm`); fails on
+  `assert rows["h1"].get("arm") == "holdout" ...` (None). Mutation: `_classify` sets
+  `row["arm"] = None`; fails on the same assertion. Mutation: `by_arm["gap"]` computed as
+  `ah - ab`; fails on `assert out["by_arm"]["gap"] == 3.0` (-3.0).
 """
 import json
 import pathlib
@@ -217,3 +221,24 @@ def test_a_bad_bound_is_an_error(tmp_path):
         runs(tmp_path, "yesterday", "")
     with pytest.raises(SystemExit):
         runs(tmp_path, "", "yesterday")
+
+
+def test_gap_by_arm(tmp_path):
+    """Invariant: `by_arm` compares runs by the arm their memory-arm.json assigned, brief minus
+    holdout, whatever their brief held; a run with no arm file is left out of `by_arm` only."""
+    for run_id, arm, confirmed in [("b1", "brief", 4), ("b2", "brief", 6), ("h1", "holdout", 2),
+                                   ("h2", "holdout", 2), ("n1", None, 9)]:
+        d = make_run(tmp_path, run_id, prior=HEADING,
+                     verdicts=[(f"BUG-{n}", "CONFIRMED") for n in range(confirmed)])
+        if arm is not None:
+            (d / "memory-arm.json").write_text(json.dumps(
+                {"run_id": run_id, "arm": arm, "rule": "int(sha256(run_id), 16) % 3 == 0"}))
+    rows = {r["run_id"]: r for r in runs(tmp_path, "", "")}
+    assert rows["h1"].get("arm") == "holdout" and rows["n1"].get("arm") is None
+    out = report(list(rows.values()))
+    assert "by_arm" in out
+    assert out["by_arm"]["gap"] == 3.0
+    assert out["by_arm"]["brief"] == {"n": 2, "mean": 5.0}
+    assert out["by_arm"]["holdout"] == {"n": 2, "mean": 2.0}
+    assert out["by_arm"]["excluded"] == {"no_arm": 1}
+    assert out["n_none"] == 5 and out["excluded"]["hunt"] == 0

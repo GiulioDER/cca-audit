@@ -454,6 +454,13 @@ the PRIOR FIXES form quoted above.
 answer, for the measurement of both blocks; that is why the answer is saved under the run's own
 directory.
 
+**Memory holdout:** in a DIFF run, `bugs brief` and `bugs prior` may print the empty form by
+design. About one DIFF run in three is assigned, from its run id, to a holdout arm whose brief
+renders as if the ledger held nothing for the change, so confirmed findings can be compared
+between runs with and without memory. The command records the arm in
+`.claude/audits/runs/<run_id>/memory-arm.json`. Build every auditor prompt from the printed output
+as always, and do not tell the auditors about the holdout or the arm.
+
 ### Generic auditors
 
 | # | Agent | subagent_type | Prefix | Scope |
