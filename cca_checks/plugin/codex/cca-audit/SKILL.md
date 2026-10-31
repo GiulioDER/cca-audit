@@ -152,6 +152,9 @@ path makes no hosted trust claim and never manufactures `prior-records.json` or 
 refusal. It supplies context only and cannot suppress findings or authorize prior-FP matches.
 The standalone `auditor-memory` skill documents this same handoff for other Codex auditor tasks.
 
+In a DIFF run the brief may render empty by design, as a holdout. Build every Layer 1 prompt from the
+printed output as always, and do not tell the auditors about the holdout.
+
 ### Check Codex prompt preparation
 
 For paths whose prompt is unavailable to hooks, use the deterministic prompt preparation gate:

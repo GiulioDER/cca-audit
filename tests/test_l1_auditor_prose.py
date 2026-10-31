@@ -32,6 +32,20 @@ failed on its assertion, and all 38 passed after the restore):
 - test_repository_wide_checks_are_hunt_only[cca-code-auditor]: " are HUNT-only" removed.
 - test_bug_auditor_starts_from_logic_and_contracts: "- **Reachability.**" removed.
 - test_perf_auditor_names_why_a_path_is_hot: ", missing `__slots__`" put back.
+
+Memory attribution (Task 3 of the auditor memory attribution feature). Red proof, run 2026-10-31:
+the new tests were run against a `git archive HEAD` copy of the master before the prose edit, with
+`python -m pytest tests/test_l1_auditor_prose.py -q -p no:cacheprovider`. 28 failed, 38 passed,
+each of the 28 on an `assert` (AssertionError, no collection or fixture error):
+test_every_finding_carries_memory_fields x9, test_memory_section_explains_the_brief x9,
+test_memory_never_suppresses x9 and test_schema_and_consolidation_carry_the_fields. On that copy the
+last two failed because the section or the schema keys did not exist, which is the defect. The
+no-suppression test was therefore also proved by mutation (2026-10-31): "(suppress nothing)" was
+inserted into the cca-perf-auditor.md Prior bugs and lessons section, then
+test_memory_never_suppresses[cca-perf-auditor] failed on `assert 'suppress' not in ...`; the file
+was restored and the test passed. Production targets: the new `## Prior bugs and lessons` section
+and the memory lines of `## Return value` in the nine L1 files, and the Findings Schema block and
+Step 2 rule 1 of audit-fix.md.
 """
 
 from __future__ import annotations
@@ -138,3 +152,39 @@ def test_template_states_the_mode_and_the_same_scope():
     assert "Mode: HUNT. Read each file IN FULL." in TEMPLATE
     assert "Focus ONLY on new/changed code" not in TEMPLATE
     assert "including unchanged code\n  whose behaviour the change alters" in TEMPLATE
+
+
+@pytest.mark.parametrize("name", L1)
+def test_every_finding_carries_memory_fields(name):
+    """Every finding says which brief records led to it, with an explicit empty value."""
+    contract = section(text(name), "Return value")
+    assert "`memory_ids`" in contract and "`memory_how`" in contract
+    assert "`[]` when no record led to it" in contract
+
+
+@pytest.mark.parametrize("name", L1)
+def test_memory_section_explains_the_brief(name):
+    """The section says what the records are, what to do with each, and when to cite."""
+    memory = " ".join(section(text(name), "Prior bugs and lessons").split())
+    assert "bugs CCA confirmed and fixed" in memory
+    assert "name its bug class" in memory
+    assert "led you to" in memory
+    assert "exactly as printed" in memory
+    assert "exactly as valid as one that cites" in memory
+    assert "holdout" not in text(name).lower()
+
+
+@pytest.mark.parametrize("name", L1)
+def test_memory_never_suppresses(name):
+    """Nothing in the memory section tells an auditor to leave a defect out."""
+    memory = " ".join(section(text(name), "Prior bugs and lessons").lower().split())
+    for phrase in ("do not report", "suppress", "skip", "only report"):
+        assert phrase not in memory
+
+
+def test_schema_and_consolidation_carry_the_fields():
+    """The Findings Schema holds both keys; a merged finding takes the union of memory_ids."""
+    schema = TEMPLATE.split("## Findings Schema (canonical)")[1].split("## Step 1:")[0]
+    assert '"memory_ids"' in schema and '"memory_how"' in schema
+    rule = TEMPLATE.split("## Step 2: Layer 2")[1].split("2. **Same category")[0]
+    assert "takes the union of its sources' `memory_ids`" in rule
