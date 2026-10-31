@@ -1199,6 +1199,7 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
 
 #: The saved `recall_records` answer Step 1 renders the prior-bugs block from.
 PRIOR_RECORDS = "prior-records.json"
+PRIOR_CODE = "prior-code.json"
 #: The receipt `bugs brief --out` writes: Step 1's local reader path.
 LOCAL_PRIOR = "local-prior.json"
 
@@ -1319,14 +1320,18 @@ def _hosted_brief_ids(state: PipelineState, root) -> list[str]:
     exactly what the auditors saw. Empty when the answer or the origin cannot be read, or in a
     non-DIFF run: the brief then listed nothing.
     """
-    from .bugs import prior
+    from .bugs import envelope, prior
 
     saved = _saved_brief_answer(state, root)
     if saved is None or saved[1] is None:
         return []
     records, repo = saved
+    # The code answer labels the anchors and so lengthens the entries, as `bugs prior --code`
+    # reads it: an unreadable one labels nothing.
+    code, _, code_why = envelope.load(deferred.runs_dir(root) / state.run_id / PRIOR_CODE)
     return prior.printed_ids(prior.select_records(records, repo),
-                             prior.select_lessons(records, repo), repo)
+                             prior.select_lessons(records, repo), repo,
+                             None if code_why else code)
 
 
 def memory_attribution(state: PipelineState, root) -> dict | None:

@@ -27,6 +27,12 @@ every selected record, no length cut); each ran, was collected and failed:
 - test_the_printed_bug_id_is_listed_not_the_outer_id: failed at the `prior_brief` comparison
   (outer ids listed instead of `PRINTED:bug-1`).
 
+Fix round 2, 2026-10-31, baseline = the implementation of commit 414be07 (render with
+`code=None`, `prior-code.json` ignored):
+
+- test_the_saved_code_answer_moves_the_cut: failed at `assert summary["prior_brief"]["ids"] ==
+  labelled` (one more id than the labelled block prints).
+
 Mutations on the green implementation, one per test, restored afterwards (all in
 `pipeline_state.memory_attribution`; each failed in the intended assertion):
 
@@ -80,7 +86,7 @@ def _hosted_answer(run_dir, records=None) -> None:
     (run_dir / ps.PRIOR_RECORDS).write_text(json.dumps(answer), encoding="utf-8")
 
 
-def _open_run(repo, findings, verdicts, *, hosted=True, records=None):
+def _open_run(repo, findings, verdicts, *, hosted=True, records=None, code=None):
     """Record L1 to L6 of a DIFF run, leaving it open; returns its state.
 
     `verdicts` maps finding id to verdict; findings are recorded as L2 in the order given.
@@ -91,6 +97,8 @@ def _open_run(repo, findings, verdicts, *, hosted=True, records=None):
     run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
     if hosted:
         _hosted_answer(run_dir, records)
+        if code is not None:
+            (run_dir / ps.PRIOR_CODE).write_text(json.dumps(code), encoding="utf-8")
     ps.record("L1", output=write_output(repo), root=repo)
     ps.record("L2", counts={"unique": len(findings)}, output=write_output(repo, findings),
               root=repo)
@@ -110,9 +118,9 @@ def _open_run(repo, findings, verdicts, *, hosted=True, records=None):
     return state
 
 
-def _run(repo, findings, verdicts, *, hosted=True, records=None) -> dict:
+def _run(repo, findings, verdicts, *, hosted=True, records=None, code=None) -> dict:
     """Drive a run to `pipeline close` and return its summary.json."""
-    state = _open_run(repo, findings, verdicts, hosted=hosted, records=records)
+    state = _open_run(repo, findings, verdicts, hosted=hosted, records=records, code=code)
     ps.close(root=repo)
     run_dir = repo / ".claude" / "audits" / "runs" / state.run_id
     return json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
@@ -136,9 +144,8 @@ def test_a_record_without_an_id_does_not_block_close(git_repo):
     assert summary["prior_brief"] == {"source": "hosted", "ids": [BUG_ID, LESSON_ID]}
 
 
-def test_ids_stop_at_the_entries_the_block_keeps(git_repo):
-    """Invariant: ids past the BLOCK_MAX cut are not listed, since the auditors never saw them.
-    The expected ids are read back from the rendered block, not from the selection."""
+def _clones(symbol_len: int) -> list[dict]:
+    """Eight long bug records of RE-call, each with two anchors of a `symbol_len` symbol."""
     base = [r for r in _fixture_records() if r["kind"] == "bug"][0]
     records = []
     for n in range(8):
@@ -147,18 +154,46 @@ def test_ids_stop_at_the_entries_the_block_keeps(git_repo):
         clone["id"] = clone["recall_record"]["id"] = clone["recall_record"]["bug_id"] = rid
         clone["recall_record"]["supersedes"] = None
         clone["recall_record"]["summary"] = "s" * 240
+        symbol = "Sym." + "y" * symbol_len
         for anchor in clone["recall_record"]["anchors"]:
-            anchor["symbol"] = "Sym." + "y" * 150
+            anchor["symbol"] = symbol
         for match in clone["anchor_matches"]:
-            match["anchor"]["symbol"] = "Sym." + "y" * 150
+            match["anchor"]["symbol"] = symbol
         records.append(clone)
-    summary = _run(git_repo, [], {}, records=records)
+    return records
+
+
+def _printed(records, code=None) -> list[str]:
     from cca_checks.bugs import prior
     selected = prior.select_records(records, "GiulioDER/RE-call")
-    block = prior.render_records(selected, None, None, "GiulioDER/RE-call")
-    printed = re.findall(r"^- \[P\d\] (\S+),", block, flags=re.MULTILINE)
-    assert 0 < len(printed) < len(selected)
+    block = prior.render_records(selected, None, code, "GiulioDER/RE-call")
+    return re.findall(r"^- \[P\d\] (\S+),", block, flags=re.MULTILINE)
+
+
+def test_ids_stop_at_the_entries_the_block_keeps(git_repo):
+    """Invariant: ids past the BLOCK_MAX cut are not listed, since the auditors never saw them.
+    The expected ids are read back from the rendered block, not from the selection."""
+    records = _clones(150)
+    summary = _run(git_repo, [], {}, records=records)
+    printed = _printed(records)
+    assert 0 < len(printed) < 8
     assert summary["prior_brief"]["ids"] == printed
+
+
+def test_the_saved_code_answer_moves_the_cut(git_repo):
+    """Invariant: when Step 1 saved a `prior-code.json`, its labels lengthen the entries, so the
+    listed ids are those of the labelled render, one fewer here than without the labels."""
+    code = {"tenant_id": "cca", "generation_id": "g", "truncated": False, "records": []}
+    for length in range(100, 300):
+        records = _clones(length)
+        if len(_printed(records, code["records"])) < len(_printed(records)):
+            break
+    else:
+        raise AssertionError("no symbol length lets the labels move the cut")
+    labelled, plain = _printed(records, code["records"]), _printed(records)
+    assert 0 < len(labelled) < len(plain)
+    summary = _run(git_repo, [], {}, records=records, code=code)
+    assert summary["prior_brief"]["ids"] == labelled
 
 
 def test_the_printed_bug_id_is_listed_not_the_outer_id(git_repo):

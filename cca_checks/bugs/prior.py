@@ -412,16 +412,18 @@ def render_lessons(selected: list[dict]) -> str:
     return _block(LESSONS_HEADING, [_lesson_entry(r) for r in selected], "")
 
 
-def printed_ids(bugs: list[dict], lessons: list[dict], repo: str = "") -> list[str]:
+def printed_ids(bugs: list[dict], lessons: list[dict], repo: str = "",
+                code: list[dict] | None = None) -> list[str]:
     """The ids the PRIOR BUGS and LESSONS blocks print, in printed order.
 
     Bug entries show `recall_record.bug_id` and lessons `recall_record.id`, each cut to
     BUG_ID_MAX, and entries past the BLOCK_MAX cut are not printed: the ids are those of the
-    entries the rendered blocks keep. An entry that prints no id contributes nothing.
+    entries the rendered blocks keep. Pass the `code` answer `render_records` gets, since its
+    anchor labels lengthen the entries and move the cut. An entry that prints no id adds nothing.
     """
     out: list[str] = []
     for heading, selected, text_of, id_of in (
-        (RECORDS_HEADING, bugs, lambda r: _record_entry(r, None, repo),
+        (RECORDS_HEADING, bugs, lambda r: _record_entry(r, code, repo),
          lambda r: r["recall_record"].get("bug_id", "")),
         (LESSONS_HEADING, lessons, _lesson_entry, lambda r: r["recall_record"].get("id", "")),
     ):
