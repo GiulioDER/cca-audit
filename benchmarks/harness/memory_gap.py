@@ -6,7 +6,11 @@ brief when its receipt shows at least one injected record: `local-prior.json` (a
 `prior_block` and `lessons_block` counts). Only DIFF runs at STANDARD or DEEP tier are compared.
 Confirmed means an L2.5 CONFIRMED verdict on an L1 finding id (l1_precision.PREFIX).
 
-    python benchmarks/harness/memory_gap.py --root ~/Documents --since 20261029T000000Z
+    python benchmarks/harness/memory_gap.py --root ~/Documents --since 2026-10-29T00:00:00Z
+
+`--since` and `--until` take an ISO time or a stamp such as 20261029T000000Z. A run's time is its
+earliest dispatch `checked_utc`, else its run id read as a stamp; a run with neither is reported as
+excluded "untimed" and never counted.
 """
 from __future__ import annotations
 
@@ -17,11 +21,11 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from l1_precision import PREFIX  # noqa: E402
+from l1_precision import PREFIX, moment  # noqa: E402
 
 BRIEF_LINE = re.compile(r"^(BUG|LESSON) ", re.MULTILINE)
 REASONS = ("hunt", "deferred", "fast", "no_receipt", "unknown_brief", "no_verdicts",
-           "unreadable")
+           "unreadable", "untimed")
 
 
 def _load(path: pathlib.Path):
@@ -98,15 +102,48 @@ def _classify(run_id: str, run_dir: pathlib.Path) -> dict:
     return _row(run_id, brief, confirmed, None)
 
 
+def run_time(run_id: str, run_dir: pathlib.Path):
+    """Earliest dispatch `checked_utc`, else the run id as a stamp, else None."""
+    times = []
+    for path in sorted(run_dir.glob("dispatch-*.json")):
+        data = _load(path)
+        t = moment(data.get("checked_utc")) if isinstance(data, dict) else None
+        if t is not None:
+            times.append(t)
+    return min(times) if times else moment(run_id)
+
+
+def _bound(value: str, name: str):
+    if not value:
+        return None
+    parsed = moment(value)
+    if parsed is None:
+        raise SystemExit(
+            f"{name} takes an ISO time or a stamp like 20261028T200105Z, got {value!r}")
+    return parsed
+
+
 def runs(root: pathlib.Path, since: str, until: str) -> list[dict]:
-    """One row per run id, deduplicated (worktrees copy runs). `excluded` names why a run is out."""
+    """One row per run id, deduplicated (worktrees copy runs). `excluded` names why a run is out.
+
+    The window is on the run's time, `since <= t < until`; an empty bound is open. A run with no
+    time is returned as an "untimed" row and is never inside the window.
+    """
+    lo, hi = _bound(since, "--since"), _bound(until, "--until")
     seen, out = set(), []
     for path in sorted(root.rglob("summary.json")):
         run_dir = path.parent
         if "node_modules" in path.parts or run_dir.parent.name != "runs":
             continue
         run_id = run_dir.name
-        if not since <= run_id < until or run_id in seen:
+        if run_id in seen:
+            continue
+        t = run_time(run_id, run_dir)
+        if t is None:
+            seen.add(run_id)
+            out.append(_row(run_id, None, None, "untimed"))
+            continue
+        if (lo is not None and t < lo) or (hi is not None and t >= hi):
             continue
         seen.add(run_id)
         out.append(_classify(run_id, run_dir))
@@ -135,7 +172,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", type=pathlib.Path, default=pathlib.Path.home() / "Documents")
     ap.add_argument("--since", default="")
-    ap.add_argument("--until", default="~")
+    ap.add_argument("--until", default="")
     a = ap.parse_args()
     print(json.dumps(report(runs(a.root.expanduser(), a.since, a.until)), indent=1))
 
