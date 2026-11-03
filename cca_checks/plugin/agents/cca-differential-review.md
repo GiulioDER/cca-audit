@@ -27,6 +27,7 @@ hunks_reviewed: [count]
 safe: [count]
 scope_creep: [count]
 regression_risk: [count]
+difftastic: used | unavailable
 errors: []
 ---
 ```
@@ -47,6 +48,53 @@ Verify:
 - No unrelated refactor rode along with the fix.
 
 Map each hunk to the finding it serves. Flag any hunk that changes behavior NOT tied to a finding.
+
+## Syntactic check with difftastic
+
+`difft --check-only --exit-code OLD NEW` compares two files by syntax tree: exit 0 means no
+syntactic change, exit 1 means there is one. Use it as evidence for a verdict; it is
+never a merge gate, and a verdict still needs your reasoning. Run it per hunk, in a scratch
+directory outside the repository:
+
+```bash
+S=$(mktemp -d); P=<path>
+mkdir -p "$S/before/$(dirname "$P")"
+cp ".claude/audits/.prefix_snapshot/prefix/$P" "$S/before/$P"   # Step 4 snapshot: pre-fix content
+mkdir -p "$S/after/$(dirname "$P")"; cp "$P" "$S/after/$P"       # the working tree as it stands
+(cd "$S" && git diff --no-index -U0 before after > full.patch)
+# regions are numbered 1 to $(grep -c '^@@' "$S/full.patch"); region N alone, on the pre-fix file:
+(cd "$S" && rm -rf hN && cp -r before hN \
+  && awk -v n=N '/^@@/{h++} h==0 || h==n' full.patch > hN.patch \
+  && cd hN && git apply --unidiff-zero -p2 ../hN.patch)
+difft --check-only --exit-code "$S/before/$P" "$S/hN/$P"; echo "exit=$?"
+```
+
+A whole-file comparison exits 1 when any other change in the file is real, so isolate each one.
+`-U0` matters: with default context, git merges edits a few lines apart into one hunk, and a
+formatting edit next to a real one would then exit 1. A hunk of the fix diff can therefore hold
+several regions; it is formatting only when every region in it exits 0. Keep the file's real name:
+difft picks the parser from the extension.
+
+Reading the result (measured on Python with difftastic 0.71.0):
+
+- **Exit 0** on a hunk claimed to be formatting only is evidence for SAFE. It covers spacing,
+  blank lines, consistent re-indentation of a block, line ending changes, and a call reflowed over
+  several lines with trailing commas.
+- **Exit 1** means a real change, to be judged against the finding's intent. A renamed variable,
+  a changed literal, reordered arguments and a statement moved out of a block all exit 1. So does a
+  comment or docstring edit, a quote style change (`'x'` to `"x"`) and redundant parentheses: those
+  are not behavior changes, so exit 1 on them alone is not a regression.
+- **A header reading `Text`** (a parse error, an unknown extension, or a size limit) means difft
+  compared lines, not syntax. Exit 1 then says nothing about formatting; judge the hunk by reading it.
+- If the snapshot has no copy of the file (a new file, or one a Step 5 repair touched without a
+  snapshot), there is no pre-fix side to compare: judge the hunk by reading it and say why.
+
+difft cannot produce or apply patches and has no documented JSON output; read its exit code and
+header only. It can use a lot of memory on a file with many changes, which per-hunk runs avoid.
+
+**Fallback.** If `difft` is not on PATH, review every hunk by the Review Process alone, set
+`difftastic: unavailable` in the status block, and say in the reply that no syntactic check ran.
+Otherwise set `difftastic: used` and cite the exit code in the Reasoning of each hunk it informed.
 
 ## Return value (authoritative)
 
