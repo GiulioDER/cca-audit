@@ -68,6 +68,7 @@ def through_l25(repo, rows_for, run_id="", **l2_over):
     rows = rows_for(state.run_id)
     n = len(rows)
     l2 = [{"id": r["finding_id"], "auditor": r["auditor"], "category": r["category"],
+           "defect_class": "logic-error",
            "priority": r["priority"], "high_stakes": r["high_stakes"], "file": "pool.py",
            "line": 2, "claim": r["claim"], **l2_over} for r in rows]
     ps.record("L1", output=write_output(repo), root=repo)

@@ -6,6 +6,20 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**Every L2 finding names one of 20 fixed defect classes.** The free-text `category` (830 distinct
+values over 1,076 confirmed RE-call findings, measured 2026-11-04) could not be counted across
+runs. Findings now also carry `defect_class`, one of the list in `audit-fix.md` § Defect classes
+(`secret-exposure` to `maintainability`, in precedence order, plus `other` with a required
+`defect_class_reason`), and `category` stays as the slug dedup, false-positive matching and the
+scorecard key on. `record L2` refuses a finding without a valid class
+(`layer_outputs.l2_defect_classes`); re-reading an L2 stored before this does not, so a run in
+progress still finishes. The nine L1 agent files list the field, L2 consolidation keeps the
+earliest class in precedence order, scorecard rows carry it, and the deferred pass assigns one to
+a pool recorded without. Not yet in ledger rows: RE-call's `recall_record.v1` schema refuses
+unknown fields.
+
 ## [0.14.0] - 2026-11-04
 
 **L1 findings say whether the prior-bugs brief led to them, and about one DIFF run in three runs

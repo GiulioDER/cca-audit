@@ -281,7 +281,7 @@ def _gated_run(repo):
                     "https://github.com/acme/widgets.git"], check=True)
     state = ps.start("FAST", root=repo)
     place = at(repo, ["app.py:1"])[0]["anchor"]
-    l2 = [{"id": f"F-{i}", "category": c, "priority": "P2", "high_stakes": False,
+    l2 = [{"id": f"F-{i}", "category": c, "defect_class": "logic-error", "priority": "P2", "high_stakes": False,
            "file": "app.py", "line": 1, "claim": "c"} for i, c in ((1, "x"), (2, "y"))]
     ps.record("L1", output=write_output(repo), root=repo)
     ps.record("L2", counts={"unique": 2}, output=write_output(repo, l2), root=repo)
@@ -384,7 +384,7 @@ def test_match_fp_cli_writes_the_match_file(git_repo, monkeypatch):
     failed at `assert out.exists()`.
     """
     (git_repo / "recall").mkdir()
-    l2 = write_output(git_repo, [{"id": "BUG-7", "category": "concurrency", "priority": "P2",
+    l2 = write_output(git_repo, [{"id": "BUG-7", "category": "concurrency", "defect_class": "race", "priority": "P2",
                                   "high_stakes": False, "file": "recall/nothere.py",
                                   "line": 3}])
     out = git_repo / ".claude" / "audits" / "runs" / "r" / "match_fp.json"
@@ -471,7 +471,7 @@ def test_prior_fp_is_refused_outside_diff_mode(git_repo):
     state = ps.start("FAST", "HUNT", root=git_repo)
     ps.record("L0.4", detail="PASS", root=git_repo)
     place = at(git_repo, ["app.py:1"])[0]["anchor"]
-    l2 = [{"id": "F-1", "category": "x", "priority": "P2", "high_stakes": False,
+    l2 = [{"id": "F-1", "category": "x", "defect_class": "logic-error", "priority": "P2", "high_stakes": False,
            "file": "app.py", "line": 1, "claim": "c"}]
     ps.record("L1", output=write_output(git_repo), root=git_repo)
     ps.record("L2", counts={"unique": 1}, output=write_output(git_repo, l2), root=git_repo)

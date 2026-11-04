@@ -130,7 +130,7 @@ log. Auditors run in parallel and the orchestrator reads only their replies.
    `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
    heading.
 2. Each object: `id` (`DEPLOY-NNN`, or the prefix the invocation gave you), `auditor`
-   (`deploy-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   (`deploy-auditor`), `severity`, `priority`, `category`, `defect_class` (one class from "Defect classes" in `audit-fix.md`; `other` adds `defect_class_reason`), `file`, `line`, `claim`, `evidence`,
    `suggested_fix`, `confidence`, `high_stakes`. `suggested_fix` names the concrete fix: "ship via the privileged path, not the normal
    deploy", "add the GRANT to the migration", "pin the dependency to the target-supported range".
    Every object also carries `memory_ids` (a list of strings, `[]` when no record led to it) and

@@ -173,7 +173,7 @@ log. Auditors run in parallel and the orchestrator reads only their replies.
    `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
    heading.
 2. Each object: `id` (`SEC-NNN`, or the prefix the invocation gave you), `auditor`
-   (`security-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   (`security-auditor`), `severity`, `priority`, `category`, `defect_class` (one class from "Defect classes" in `audit-fix.md`; `other` adds `defect_class_reason`), `file`, `line`, `claim`, `evidence`,
    `suggested_fix`, `confidence`, `high_stakes`.
    **Never put a secret value in `claim` or `evidence`**: reference the name and location only.
    When the line you quote holds a secret, quote it with the value replaced by `<redacted>`.

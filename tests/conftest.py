@@ -138,7 +138,7 @@ def findings_output(root, n=0, *, priorities=None) -> str:
     (a dict of id to P1, P2 or P3) says otherwise."""
     priorities = priorities or {}
     rows = [{"id": finding_id(i), "auditor": "cca-bug-auditor", "category": "x",
-             "priority": priorities.get(finding_id(i), "P2"), "file": "app.py", "line": i,
+             "defect_class": "logic-error", "priority": priorities.get(finding_id(i), "P2"), "file": "app.py", "line": i,
              "claim": f"claim {i}", "high_stakes": False} for i in range(1, n + 1)]
     return write_output(root, rows)
 
