@@ -45,7 +45,9 @@ def read(root: Path) -> dict[Key, dict]:
         if not isinstance(value, dict) or value.get("defect_class") not in DEFECT_CLASSES:
             continue
         repo, run, finding = value.get("repo"), value.get("run"), value.get("finding_id")
-        if not all(isinstance(v, str) and v for v in (repo, run, finding)):
+        # Written out, not as all(...): the type checker narrows each name only this way.
+        if not (isinstance(repo, str) and repo and isinstance(run, str) and run
+                and isinstance(finding, str) and finding):
             continue
         key = _key(repo, run.rsplit("__", 1)[0], finding)
         if key in out and out[key]["defect_class"] != value["defect_class"]:
@@ -62,9 +64,11 @@ def apply(row: Row, notes: dict[Key, dict]) -> Row:
         return row
     # A malformed ledger line can hold a list here; as a dictionary key it would raise and take
     # every reader of the ledger down with it (the identity rule of anchor recovery, BUG-002).
-    if not all(isinstance(v, str) and v for v in (row.repo, row.run_id, row.finding_id)):
+    repo, run_id, finding = row.repo, row.run_id, row.finding_id
+    if not (isinstance(repo, str) and repo and isinstance(run_id, str) and run_id
+            and isinstance(finding, str) and finding):
         return row
-    note = notes.get(_key(row.repo, row.run_id, row.finding_id))
+    note = notes.get(_key(repo, run_id, finding))
     if note is None:
         return row
     reason = note.get("defect_class_reason")
