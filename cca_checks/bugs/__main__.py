@@ -166,6 +166,8 @@ def _brief(a: argparse.Namespace) -> int:
         result = {"status": "empty", "block": ""}
     else:
         result = local_brief.build(a.root if a.root is not None else Path("."), a.files)
+        if result["status"] == "unavailable" and a.files:
+            result = _ledger_brief(a, result)
     if a.out is not None:
         a.out.parent.mkdir(parents=True, exist_ok=True)
         a.out.write_text(json.dumps(result, ensure_ascii=True) + "\n", encoding="utf-8")
@@ -174,6 +176,23 @@ def _brief(a: argparse.Namespace) -> int:
     else:
         _emit(local_brief.render(result))
     return 0
+
+
+def _ledger_brief(a: argparse.Namespace, unavailable: dict[str, str]) -> dict[str, str]:
+    """The ledger's PRIOR FIXES block when the RE-call reader gave nothing, else `unavailable`.
+
+    Without RE-call installed the reader is absent, and a DIFF brief would carry no memory
+    where 0.13.0 printed the fixes the user's own ledger holds for these files.
+    """
+    from . import prior
+    from .store import LEDGER
+
+    repo, ledger = _repo(a), bugs_dir() / LEDGER
+    if repo is None or not ledger.is_file():
+        return unavailable
+    selected = prior.select(prior.load_rows(ledger), repo, a.files)
+    return {"status": "ledger", "block": prior.render(selected),
+            "reason": unavailable.get("reason", "reader refused")}
 
 
 def _prior_records(a: argparse.Namespace, repo: str | None, reason: str | None) -> int:

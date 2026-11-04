@@ -115,6 +115,9 @@ def render(result: dict[str, str]) -> str:
                 f"\n\n{result['block']}")
     if status == "empty":
         return f"{HEADING}\n{MARKER}\nNo matching local bug or accepted lesson records."
+    if status == "ledger":
+        # The RE-call reader was unavailable; the block is the CCA ledger's PRIOR FIXES form.
+        return result["block"]
     if status == "skipped":
         # Step 1's empty PRIOR FIXES form, the exact text a hunt pastes when it reads nothing.
         from .prior import HEADING as PRIOR_FIXES

@@ -431,7 +431,9 @@ python -P -m cca_checks bugs brief --root <target Git root> --out .claude/audits
 ```
 
 Paste the whole output as `{PRIOR_BUGS}`. The shared local RE-call reader admits, matches and
-renders both bugs and owner-accepted lessons. The status distinguishes no matches from an
+renders both bugs and owner-accepted lessons. When that reader is not installed (no RE-call),
+the command prints the CCA ledger's PRIOR FIXES block for `--files` instead, and the receipt
+says `ledger`. The status distinguishes no matches from an
 unavailable reader, and makes no hosted trust claim. Do not manufacture `prior-records.json`,
 combine local data with a hosted trust envelope, or hide a hosted refusal. If the command itself
 fails, paste `Local memory unavailable; this does not establish that memory is empty.` and

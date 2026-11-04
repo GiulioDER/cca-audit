@@ -204,6 +204,10 @@ sections above read.
 
 ### Fixed
 
+* **A DIFF brief without RE-call shows the ledger's past fixes again.** The local reader path
+  needs RE-call's reader; without it `bugs brief` printed "Local memory unavailable" where
+  0.13.0 printed the fixes the user's own CCA ledger holds for the changed files. It now falls
+  back to that PRIOR FIXES block, with receipt status `ledger`.
 * **A correcting row keeps the place the row it replaces had.** Recovered anchors are keyed by
   bug id, so `bugs relink` (rows re-keyed to their squash merge) dropped them: on 2026-10-29
   RE-call:b27298bf4125:SEC-001 lost `recall/lite/refresh.py _refresh_locked`. A bug row with no
