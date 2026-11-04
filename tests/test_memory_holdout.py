@@ -70,15 +70,23 @@ Mutations on the green implementation (`cca_checks/bugs/__main__.py` `_brief` an
 - test_a_brief_arm_run_without_out_gets_the_normal_brief, second mutation: in `_brief`, the
   open run withheld whatever its arm, after recording it (`withhold = run is not None and
   (holdout.assign(...) or True)`); failed at `assert out == normal and ...`.
+
+Opt-in, 2026-11-04: the holdout is off unless `CCA_MEMORY_HOLDOUT=1`, and the tests above opt
+in through `_opted_in`. test_the_holdout_is_off_unless_the_environment_opts_in: mutation of
+`holdout.ACTIVE` back to `True`; the unset and "0" cases failed at `assert done.stdout.strip()
+== str(active)` ('True' == 'False').
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 from conftest import plan_output, write_output
 
 from cca_checks import pipeline_state as ps
@@ -91,6 +99,12 @@ BUG_ID = "RE-call:abcdef012345:BUG-002"
 MARKER = "<!-- recall:auditor-brief -->"
 BLOCK = (f"{MARKER}\n```text\nBUG RE-call:aaa:BUG-001 [exact] app.py run: a race in run\n"
          "LESSON RE-call:lesson:ccc [file_only] app.py (module): parse once\n```")
+
+
+@pytest.fixture(autouse=True)
+def _opted_in(monkeypatch):
+    """Every test here exercises the holdout, which a released install leaves off."""
+    monkeypatch.setattr(holdout, "ACTIVE", True)
 
 
 def _rule(run_id: str) -> bool:
@@ -269,6 +283,19 @@ def test_inactive_withholds_nothing(git_repo, tmp_path, monkeypatch, capsys):
     assert holdout.withheld(WITHHELD) is False
     assert "BUG RE-call:aaa:BUG-001" in out
     assert _arm(run) is None
+
+
+@pytest.mark.parametrize("value,active", [(None, False), ("0", False), ("1", True)])
+def test_the_holdout_is_off_unless_the_environment_opts_in(value, active):
+    """Invariant: a fresh process withholds nothing unless CCA_MEMORY_HOLDOUT is exactly "1"."""
+    env = {k: v for k, v in os.environ.items() if k != holdout.ENV}
+    if value is not None:
+        env[holdout.ENV] = value
+    done = subprocess.run(
+        [sys.executable, "-c", f"from cca_checks.bugs import holdout; print(holdout.withheld({WITHHELD!r}))"],
+        capture_output=True, text=True, env=env, check=True,
+    )
+    assert done.stdout.strip() == str(active)
 
 
 def test_a_completed_run_gets_no_arm(git_repo, tmp_path, monkeypatch, capsys):

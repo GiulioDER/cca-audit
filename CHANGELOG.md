@@ -21,10 +21,10 @@ holdout, `cca_checks/bugs/holdout.py`, picks a DIFF run when `int(sha256(run_id)
 and renders its brief in the empty no-match form, with `memory-arm.json` recorded in both arms;
 a `bugs brief` given no run directory (no `--out`) applies the same rule to the DIFF run open at
 its root.
-It runs while `holdout.ACTIVE` is True, for the pre-registered measurement
-`docs/preregistrations/2026-10-31-auditor-memory-holdout.md`. Codex runs also need the RE-call hook
-change on branch `claude/cca-holdout-skip` deployed, or their holdout auditors still receive
-memory from RE-call's SubagentStart hook. `benchmarks/harness/memory_gap.py` reports confirmed L1
+It is off unless the environment sets `CCA_MEMORY_HOLDOUT=1`; it exists for the pre-registered
+measurement `docs/preregistrations/2026-10-31-auditor-memory-holdout.md`. Codex runs that opt in
+also need RE-call's auditor-brief hook from GiulioDER/RE-call#1107 deployed, or their holdout
+auditors still receive memory from RE-call's SubagentStart hook. `benchmarks/harness/memory_gap.py` reports confirmed L1
 findings per run with and without a brief and by assigned holdout arm, with the Welch 95%
 interval of the arm gap, selecting runs by time (dispatch receipts), not by run-id text; `--root`
 is repeatable and `--rows` prints the included runs. The effect is pre-registered and unmeasured.

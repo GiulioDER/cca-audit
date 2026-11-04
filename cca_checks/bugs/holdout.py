@@ -21,11 +21,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
-#: The holdout runs while this is True; a follow-up turns it off after the pre-registered look.
-ACTIVE: bool = True
+#: Off unless the environment opts in: the holdout serves one pre-registered measurement on the
+#: maintainer's machine, and a released install must not withhold memory from anyone else.
+ENV = "CCA_MEMORY_HOLDOUT"
+ACTIVE: bool = os.environ.get(ENV) == "1"
 DENOM = 3
 RULE = "int(sha256(run_id), 16) % 3 == 0"
 ARM_FILE = "memory-arm.json"
