@@ -50,6 +50,10 @@ class BugRow:
     anchors: list[Anchor] = field(default_factory=list)
     # bug_ids of earlier CCA fixes whose lines this fix modified or removed (caused_by.py).
     caused_by: list[str] = field(default_factory=list)
+    # The fixed class (layer_outputs.DEFECT_CLASSES), from L2 or the backfill in
+    # defect_classes.jsonl (class_log.py); None for a finding that has none.
+    defect_class: str | None = None
+    defect_class_reason: str = ""
     kind: ClassVar[str] = "bug"
 
     @property
@@ -70,7 +74,7 @@ class BugRow:
         return "historical"
 
     def to_json(self) -> dict:
-        return {
+        out = {
             "bug_id": self.bug_id,
             "tier": self.tier,
             "date": self.date,
@@ -92,6 +96,12 @@ class BugRow:
             "caused_by": list(self.caused_by),
             "kind": self.kind,
         }
+        # Only when there is a class: a row without one stays byte-identical, and RE-call before
+        # #1182 refuses these keys (its memo loader then drops the record from the auditor brief).
+        if self.defect_class is not None:
+            out["defect_class"] = self.defect_class
+            out["defect_class_reason"] = self.defect_class_reason
+        return out
 
     @classmethod
     def from_json(cls, row: dict) -> BugRow:
@@ -109,6 +119,8 @@ class BugRow:
             anchors=[Anchor(a["file"], a["symbol"], a["code_sha"])
                      for a in row.get("anchors") or []],
             caused_by=list(row.get("caused_by") or []),
+            defect_class=row.get("defect_class"),
+            defect_class_reason=row.get("defect_class_reason") or "",
         )
 
 

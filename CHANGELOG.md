@@ -8,6 +8,15 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**Ledger rows carry the defect class.** A bug row records `defect_class` and
+`defect_class_reason` from L2 (a value outside the list is dropped), and a row recorded before
+classes existed takes one from `~/.claude/cca-bugs/defect_classes.jsonl`, projected at read time
+by `cca_checks/bugs/class_log.py` like recovered anchors; `bugs.jsonl` is never rewritten. A
+finding the file classes twice, differently, takes none. The keys are written only when a row has
+a class, so unclassed rows and their memos stay byte-identical. The RE-call contract copy moves to
+57e1d599 (RE-call #1182), whose `recall_record.v1` accepts the two keys as optional; on RE-call
+before #1182 the memo loader would skip every classed memo, so install #1182 before rerendering.
+
 **Every L2 finding names one of 20 fixed defect classes.** The free-text `category` (830 distinct
 values over 1,076 confirmed RE-call findings, measured 2026-11-04) could not be counted across
 runs. Findings now also carry `defect_class`, one of the list in `audit-fix.md` § Defect classes
@@ -17,7 +26,7 @@ scorecard key on. `record L2` refuses a finding without a valid class
 (`layer_outputs.l2_defect_classes`); re-reading an L2 stored before this does not, so a run in
 progress still finishes. The nine L1 agent files list the field, L2 consolidation keeps the
 earliest class in precedence order, scorecard rows carry it, and the deferred pass assigns one to
-a pool recorded without. Not yet in ledger rows: RE-call's `recall_record.v1` schema refuses
+a pool recorded without. (Ledger rows followed in the entry above.) Not yet in ledger rows: RE-call's `recall_record.v1` schema refused
 unknown fields.
 
 ## [0.14.0] - 2026-11-04
