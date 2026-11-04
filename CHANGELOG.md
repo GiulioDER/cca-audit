@@ -6,7 +6,13 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.15.0] - 2026-11-04
+
+**Upgrade note: install the package and the prompts together.** `record L2` now refuses a finding
+without a `defect_class`, and the prompts that ask auditors for one ship in this release. After
+upgrading, rerun `claude-code/install.sh` for Claude Code and `cca-audit install-codex` for Codex;
+a run whose prompts predate 0.15.0 is refused at L2. A run that recorded L2 before the upgrade
+still finishes.
 
 **Ledger rows carry the defect class.** A bug row records `defect_class` and
 `defect_class_reason` from L2 (a value outside the list is dropped), and a row recorded before
@@ -26,8 +32,7 @@ scorecard key on. `record L2` refuses a finding without a valid class
 (`layer_outputs.l2_defect_classes`); re-reading an L2 stored before this does not, so a run in
 progress still finishes. The nine L1 agent files list the field, L2 consolidation keeps the
 earliest class in precedence order, scorecard rows carry it, and the deferred pass assigns one to
-a pool recorded without. (Ledger rows followed in the entry above.) Not yet in ledger rows: RE-call's `recall_record.v1` schema refused
-unknown fields.
+a pool recorded without.
 
 ## [0.14.0] - 2026-11-04
 
