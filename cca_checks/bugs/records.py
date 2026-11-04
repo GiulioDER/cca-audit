@@ -24,10 +24,11 @@ from .model import ABSENT, CONDITIONS, NOT_REQUIRED, BugRow, _slug, memo_filenam
 
 #: The RE-call commit the schema and record goldens were copied from. Re-pin when RE-call
 #: changes them; `tests/test_bug_records_roundtrip.py` fails on a copy that drifted. This is
-#: the squash merge of RE-call PR #973; its files are byte-identical to the PR head c526ced82
-#: the copies were first taken from. Anchor regression vectors have a separate digest pin
+#: the squash merge of RE-call PR #1182, which added the optional `defect_class` to bug records;
+#: the copies were first taken from #973 (c526ced82, squashed as 20baf3a8), and only the schema
+#: has changed since. Anchor regression vectors have a separate digest pin
 #: in the contract-copy test, so extending them does not re-version the record schema.
-RECALL_CONTRACT_COMMIT = "20baf3a8b330d38887b7f8b3b75fd4ac5cd477c1"
+RECALL_CONTRACT_COMMIT = "57e1d59905910b3a1148ceac2d45fbf2bf77533b"
 VERSION = 1
 FP_REASON = "not_real"
 RETRACTION_KINDS = ("false_positive_retraction", "lesson_retraction")
@@ -118,6 +119,9 @@ FIELDS: dict[str, tuple[str, ...]] = {
                "accepted_at"),
     **{kind: (*_COMMON, "target_id", "reason", "retracted_by") for kind in RETRACTION_KINDS},
 }
+#: Fields a record of the kind may also hold. RE-call's recall_record.v1 accepts these on a bug
+#: from #1182; a bug row writes them only when it has a class (`BugRow.to_json`).
+OPTIONAL: dict[str, frozenset[str]] = {"bug": frozenset({"defect_class", "defect_class_reason"})}
 
 
 def _anchors(anchors: list[Anchor]) -> list[dict]:
@@ -156,9 +160,10 @@ def _fields(record: dict) -> str:
     if record.get("v") != VERSION:
         raise ValueError(f"record version {record.get('v')!r} is not {VERSION}")
     want, have = set(FIELDS[kind]), set(record)
-    if have != want:
+    unknown = have - want - OPTIONAL.get(kind, frozenset())
+    if want - have or unknown:
         raise ValueError(f"{kind} record: missing {sorted(want - have)}, "
-                         f"unknown {sorted(have - want)}")
+                         f"unknown {sorted(unknown)}")
     return kind
 
 
@@ -447,14 +452,16 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
     line separator inside a value written before `one_line` existed cannot split a row. A bug
     row carries its effective caused_by (`store.effective_caused_by`), so `to_record`, its memo
     and the round-trip check all see a back-filled edge. Recovered anchors from `anchors.jsonl`
-    are projected through `anchor_log.apply`; authored anchors always take precedence.
+    are projected through `anchor_log.apply`; authored anchors always take precedence. A row
+    with no class takes one from `defect_classes.jsonl` (`class_log.apply`).
     """
-    from . import anchor_log
+    from . import anchor_log, class_log
     from .store import LEDGER, caused_by_annotations, with_effective_caused_by
 
     ledger = root / LEDGER
     annotations = caused_by_annotations(root)
     recovered = anchor_log.read(root)
+    classes = class_log.read(root)
     lines = ledger.read_text(encoding="utf-8").split("\n") if ledger.exists() else []
     rows: dict[str, Row] = {}
     skipped: list[str] = []
@@ -468,7 +475,7 @@ def read_ledger(root: Path) -> tuple[dict[str, Row], list[str]]:
             skipped.append(f"line {number}: {type(exc).__name__}: {exc}")
             continue
         effective = with_effective_caused_by(row, annotations)
-        rows.setdefault(row_id, anchor_log.apply(effective, recovered))
+        rows.setdefault(row_id, class_log.apply(anchor_log.apply(effective, recovered), classes))
     return anchor_log.inherit_rows(rows), skipped
 
 

@@ -37,8 +37,10 @@ MODIFIED = "2026-10-21T00:00:00Z"
 #: RE-call (taken 2026-10-21 at c526ced82; compared byte for byte with 20baf3a8 on 2026-10-22,
 #: all equal). Anchor vectors additionally carry the coordinated handler-order regression;
 #: their independently updated digest pins that exact copy. All other contract bytes are unchanged.
+#: Moved 2026-11-04 to 57e1d599 (RE-call #1182, optional `defect_class` on bug records): only
+#: `recall_record.v1.json` differs there; every other file equals the RE-call copy byte for byte.
 PINNED = {
-    "recall_record.v1.json": "b820181d015a3aec249d8e4952a62cb78eea8cddad1f6f44f1286d9d79dabc92",
+    "recall_record.v1.json": "01e4c0074a35efaece8ba1a48b592cd3e1662ed3af0fa7f759d337b508ab8cee",
     "anchor_vectors.json": "01f392396688e2d44d20798fa5472f3036a552511525bdaae6797e5051d3db6d",
     "expected_records.json": "750961133631db9522eb4d489f1b568256b9de9208e974d6cefbb717fbc1bec5",
     "memos/RE-call__0123456789ab__BUG-001.md":
@@ -121,7 +123,7 @@ def test_contract_copies_match_pinned_recall_commit():
     `recall_record.v1.json`; failed at `assert got == PINNED`, the schema's digest differing
     (af2545e6... != b820181d...).
     """
-    assert records.RECALL_CONTRACT_COMMIT == "20baf3a8b330d38887b7f8b3b75fd4ac5cd477c1"
+    assert records.RECALL_CONTRACT_COMMIT == "57e1d59905910b3a1148ceac2d45fbf2bf77533b"
     got = {p.relative_to(FIXTURES).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
            for p in FIXTURES.rglob("*") if p.is_file()}
     assert got == PINNED
@@ -174,20 +176,25 @@ def test_row_record_row_identity(row):
 
 
 def test_record_fields_are_the_schema_fields():
-    """Each kind's record holds exactly the fields the schema requires, and no other.
+    """Each kind's record holds exactly the fields the schema requires, and no other; the
+    schema's optional fields are exactly `records.OPTIONAL`, and a classed bug adds just those.
 
     Red 2026-10-21: mutation adding `"tags": []` to the false-positive record; failed at
-    `assert set(record) == required[...]` for kind false_positive.
+    `assert set(record) == required[...]` for kind false_positive. Red 2026-11-04 on the remote
+    test host: `OPTIONAL` emptied in records.py; failed at the optional-fields assertion for bug.
     """
     required = {}
     for branch in SCHEMA["oneOf"]:
         kinds = branch["properties"]["kind"]
         for kind in kinds.get("enum", [kinds.get("const")]):
             required[kind] = set(branch["required"])
-            assert set(branch["properties"]) == set(branch["required"])
+            optional = set(branch["properties"]) - set(branch["required"])
+            assert optional == set(records.OPTIONAL.get(kind, ())), kind
     for row in _hard_rows():
         record = to_record(row)
         assert set(record) == required[record["kind"]], record["kind"]
+    classed = to_record(_bug(defect_class="race"))
+    assert set(classed) == required["bug"] | records.OPTIONAL["bug"]
 
 
 def test_supersedes_is_written():

@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..layer_outputs import l4_fixes
+from ..layer_outputs import DEFECT_CLASSES, l4_fixes
 from .anchors import Anchor, well_formed_file, well_formed_symbol
 from .caused_by import bugs_for_commits
 from .ledgers import fix_number
@@ -107,6 +107,12 @@ def _files(value) -> list[str]:
 def _text(value) -> str | None:
     """A field from L2 or L4 kept only when it is a non-empty string."""
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _defect_class(value) -> str | None:
+    """L2's class when it is one of the list; an L2 stored before classes existed has none,
+    and anything else would make RE-call refuse the whole record."""
+    return value if value in DEFECT_CLASSES else None
 
 
 def _result(rows: list[dict], fix_id: str) -> str | None:
@@ -212,6 +218,8 @@ def rows_and_skips(record: Path, merge: Merge, ledger: list[BugRow] | None = Non
             summary=(_text(found.get("claim")) or _text(entry.get("summary"))
                      or "(no description recorded)"),
             severity=severity, category=_text(found.get("category")),
+            defect_class=_defect_class(found.get("defect_class")),
+            defect_class_reason=_text(found.get("defect_class_reason")) or "",
             auditor=_text(found.get("auditor")), run_id=run_id,
             evidence={
                 "confirmed_l25": EVIDENCED if l25.get(finding) == "CONFIRMED" else ABSENT,
