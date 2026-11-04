@@ -111,7 +111,7 @@ def _run_through_l3(repo, *, rows, to_fix, tier="DEEP", filed_as=None):
     ps.record("L1", output=write_output(repo), root=repo)
     ids = [finding_id(i) for i in range(1, len(rows) + 1)]
     filed_as = filed_as or {}
-    findings = [{"id": i, "priority": filed_as.get(i, p)}
+    findings = [{"id": i, "defect_class": "logic-error", "priority": filed_as.get(i, p)}
                 for i, (p, _) in zip(ids, rows, strict=True)]
     ps.record("L2", counts={"unique": len(rows)}, output=write_output(repo, findings),
               root=repo)

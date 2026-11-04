@@ -87,7 +87,7 @@ def _complete(tree):
 # ids), so these helpers build files of that shape. Fixture support only: no assertion moved.
 def _findings(n, **priority):
     """L2 findings U01 to U<n>, each P2 unless `priority` (U01="P1", ...) says otherwise."""
-    return [{"id": f"U{i:02d}", "priority": priority.get(f"U{i:02d}", "P2")}
+    return [{"id": f"U{i:02d}", "defect_class": "logic-error", "priority": priority.get(f"U{i:02d}", "P2")}
             for i in range(1, n + 1)]
 
 

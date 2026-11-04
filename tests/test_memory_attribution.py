@@ -77,7 +77,7 @@ LESSON_ID = "RE-call:lesson:6a3ae35062b9"
 
 
 def _finding(fid, **extra) -> dict:
-    return {"id": fid, "auditor": "cca-bug-auditor", "category": "x", "priority": "P2",
+    return {"id": fid, "auditor": "cca-bug-auditor", "category": "x", "defect_class": "logic-error", "priority": "P2",
             "file": "app.py", "line": 1, "claim": f"claim {fid}", "high_stakes": False, **extra}
 
 

@@ -347,6 +347,8 @@ object:
   "severity": "Critical",          // Critical | High | Medium | Low
   "priority": "P1",                // P1 | P2 | P3  (auditor's proposed priority)
   "category": "sql-injection",     // short stable slug, used for dedup
+  "defect_class": "injection",     // one of § Defect classes: the class counted across runs
+  "defect_class_reason": "",       // why no class fits, when defect_class is "other"; "" otherwise
   "file": "src/orders/repo.py",
   "line": 142,                     // best single line; 0 if file-level
   "claim": "User-controlled id interpolated into a SQL string.",
@@ -360,6 +362,40 @@ object:
 ```
 
 Dedup key = `(file, line, category)`. This makes consolidation deterministic instead of eyeballed.
+
+## Defect classes
+
+Every finding names ONE `defect_class` from this list. It is the field that can be counted across
+runs and repositories; `category` stays the free-text slug that dedup, false-positive matching and
+the scorecard key on. `record L2` refuses a finding whose `defect_class` is not one of these, and
+an `other` without a `defect_class_reason`.
+
+Classify by the **mechanism the fix changes**, not by the consequence: a race that loses data is
+`race`, because the fix adds the lock. When a finding fits more than one class, take the **first**
+in this order.
+
+| # | `defect_class` | The defect |
+|---|---|---|
+| 1 | `secret-exposure` | credentials, personal data or private text reach a log, an error, a file or an outside service the user did not consent to |
+| 2 | `injection` | untrusted input is run or parsed as code, a shell command, a query or a pattern |
+| 3 | `access-control` | authorization, tenant or scope isolation, or a path or symlink that escapes its root |
+| 4 | `fail-open` | a guard, gate, budget or trust check passes when it cannot decide (an error, NaN, a missing input, an unknown key) |
+| 5 | `race` | check then act without the lock or version that made the check hold; concurrent writers; async ordering |
+| 6 | `identity-mismatch` | one entity has several spellings (path forms, case, aliases, connection strings) and a check compares only one |
+| 7 | `data-integrity` | stored data lost, corrupted, duplicated or revived; a non-atomic write; a migration; a cache serving stale data |
+| 8 | `numeric` | units, rounding, overflow, NaN or infinity propagating, a statistic or metric computed wrongly |
+| 9 | `logic-error` | a wrong result or wrong branch for valid input, not covered by a class above |
+| 10 | `input-validation` | invalid input accepted, or a crash where a clear refusal belongs (not a security gate: that is `fail-open`) |
+| 11 | `error-handling` | a failure swallowed, reported as success, given the wrong exit code, or shown as a traceback |
+| 12 | `resource-leak` | a connection, thread, process, file, lock, container or temporary file not released |
+| 13 | `performance` | avoidable work: repeated queries, quadratic loops, blocking the event loop, no bound or timeout |
+| 14 | `config-drift` | a setting, environment variable or flag ignored, undocumented, or defaulted differently in two places |
+| 15 | `packaging-deploy` | dependency pins and extras, wheel contents, migration order or grants, CI, platform-specific install |
+| 16 | `test-weakness` | a test that cannot fail, tests another layer than it claims, or overstates what it covers |
+| 17 | `doc-drift` | prose (docs, docstrings, comments, changelog, tool descriptions) states behaviour the code does not have |
+| 18 | `duplication` | one rule written in two places that can drift apart |
+| 19 | `maintainability` | dead code, magic values, complexity or naming, with no present defect |
+| 20 | `other` | none of the above; `defect_class_reason` says why in one line |
 
 ## Step 1: Layer 1 — Parallel Auditors
 
@@ -609,6 +645,8 @@ Collect every auditor's JSON return value. Deterministic dedup:
    another module/migration).
 
 In every merge above, the merged finding takes the union of its sources' `memory_ids` and keeps every non-empty `memory_how`.
+Its `defect_class` is the earliest of its sources' classes in § Defect classes order; it is `other` only when every source says `other`, and then it keeps their reasons.
+Set a `defect_class` yourself on any finding an auditor returned without one.
 
 Re-map each auditor `priority` to the canonical framework (auditors propose; orchestrator decides):
 - **P1 Critical** (fix before deploy): security vulns, data corruption, auth bypass, injection, unsafe
@@ -620,8 +658,8 @@ Re-map each auditor `priority` to the canonical framework (auditors propose; orc
 Output table: `| ID | Finding | Auditors | Severity | P | high-stakes? | File:line |`
 
 **The L2 file** is a JSON array of the consolidated finding objects (Findings Schema), one per
-unique finding, each with its `id` and a `priority`. `record` refuses a file whose length is not
-`--unique`. A later deferred pass reads findings back from this file by id.
+unique finding, each with its `id`, a `priority` and a `defect_class`. `record` refuses a file whose
+length is not `--unique`, and a finding whose `defect_class` is not in § Defect classes. A later deferred pass reads findings back from this file by id.
 
 **→ Record.**
 
@@ -786,6 +824,7 @@ Before proceeding — and **even on `no-fix`**, because a verdict is data whethe
 append one row per verified finding (a `DEFERRED` finding gets none: it received no verdict) to `.claude/audits/AUDITOR_SCORECARD.jsonl`:
 
     {"ts": <iso>, "run_id": <run_id>, "finding_id": <id>, "auditor": <name>, "category": <slug>,
+     "defect_class": <the finding's L2 defect_class>,
      "severity": <S>, "high_stakes": <bool>, "priority": "P1|P2|P3", "verify_source": "llm|tool",
      "verdict": "CONFIRMED|FALSE_POSITIVE|DUPLICATE|UNCERTAIN|STALE|PRIOR_FP",
      "fix_id": <FIX-id or null>}
@@ -1268,7 +1307,8 @@ An aborted deferred run takes nothing.
 (`git log -5 --format='%H %s'`) and parse its `Deferred:` section (`P3:` before 0.11) into
 `.claude/audits/out/L1.json` as Findings Schema objects. Each item carries
 `"source": "commit-message"`, a unique id `DEF-<n>`, `auditor` and `category` set to `"unknown"`
-when the line does not give them, and a `priority` (P3 unless the line says P2). Start with
+when the line does not give them, a `defect_class` chosen from the line by § Defect classes
+(`other`, with the reason, when the line cannot tell), and a `priority` (P3 unless the line says P2). Start with
 `--from commit:<sha>`. The scope check of D.4 cannot run then; say so in the report and in the
 commit message (the `Source:` line of D.8).
 
@@ -1281,7 +1321,8 @@ python -m cca_checks pipeline record L1 --detail "loaded <N> from <run_id>" \
 
 **D.3 Step 2 (L2).** Re-anchor each finding to its current file and line: the parent's own fixes,
 and anything committed since, may have moved it. Keep every finding under its own id with the
-parent's `priority`, and merge nothing: when two findings now share Step 2's dedup key, both stay,
+parent's `priority`, give it a `defect_class` (keep the parent's when it has one; a pool recorded
+before classes existed has none), and merge nothing: when two findings now share Step 2's dedup key, both stay,
 and D.4 gives the later one the verdict `DUPLICATE`. Record as Step 2 says. After a run id parent,
 `record` refuses an L2 whose ids are not exactly the parent's pool, or that changes a priority; a
 `commit:<sha>` parent left no stored pool, so nothing is compared.

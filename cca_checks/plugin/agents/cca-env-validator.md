@@ -120,7 +120,7 @@ log. Auditors run in parallel and the orchestrator reads only their replies.
    `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
    heading.
 2. Each object: `id` (`ENV-NNN`, or the prefix the invocation gave you), `auditor`
-   (`env-validator`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   (`env-validator`), `severity`, `priority`, `category`, `defect_class` (one class from "Defect classes" in `audit-fix.md`; `other` adds `defect_class_reason`), `file`, `line`, `claim`, `evidence`,
    `suggested_fix`, `confidence`, `high_stakes`. Name variables only: **never put a config value
    in `claim` or `evidence`.** When the line you quote holds a value, quote it with the value
    replaced by `<redacted>`.

@@ -51,6 +51,57 @@ def test_l2_refuses_a_file_that_is_not_an_array():
         lo.l2_findings({"F-1": {}}, 1)
 
 
+def test_l2_accepts_every_fixed_defect_class():
+    """Each class audit-fix.md lists is accepted, and `other` with a reason.
+
+    Red proof 2026-11-04 on the remote test host: mutation `not in DEFECT_CLASSES` became
+    `not in DEFECT_CLASSES[:-1]` (refusing `other`); failed at the ShapeError it raised."""
+    rows = [{**_f(i), "defect_class": c} for i, c in enumerate(lo.DEFECT_CLASSES)]
+    rows[-1]["defect_class_reason"] = "a font rendering defect fits no class"
+    assert lo.l2_defect_classes(rows) is None
+
+
+@pytest.mark.parametrize("value", [None, "", "dry", "Logic-Error", "sql-injection"])
+def test_l2_refuses_a_finding_whose_class_is_not_on_the_list(value):
+    """A missing class, a free-text category slug, or a wrong spelling is refused, so the
+    class can be counted across runs. Red proof 2026-11-04 on the remote test host: the
+    `not in DEFECT_CLASSES` check became `if False:`; every case failed at pytest.raises
+    (DID NOT RAISE)."""
+    row = {**_f(1), "defect_class": value}
+    with pytest.raises(lo.ShapeError, match='needs "defect_class"'):
+        lo.l2_defect_classes([row])
+
+
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_l2_refuses_other_without_a_reason(reason):
+    """`other` must say why no class fits. Red proof 2026-11-04 on the remote test host: the reason check became
+    `if False and not ...`; failed at pytest.raises (DID NOT RAISE)."""
+    row = {**_f(1), "defect_class": "other", "defect_class_reason": reason}
+    with pytest.raises(lo.ShapeError, match="defect_class_reason"):
+        lo.l2_defect_classes([row])
+
+
+def test_l2_findings_still_reads_a_stored_l2_without_classes():
+    """`l2_findings` also re-reads an L2 a run stored before classes existed; that run must be
+    able to finish, so only recording L2 checks the class. Red proof 2026-11-04 on the remote test host: l2_findings
+    calling l2_defect_classes; failed at the ShapeError it raised."""
+    assert lo.l2_findings([_f(1)], 1) == [_f(1)]
+
+
+def test_the_class_list_matches_audit_fix_md():
+    """The code's list and the table auditors read are one list, in one order: precedence
+    resolves overlaps, so a reordering is a behaviour change. Red proof 2026-11-04 on the remote test host: "race" and
+    "identity-mismatch" swapped in DEFECT_CLASSES; failed at the tuple assertion."""
+    import pathlib
+    import re
+
+    spec = (pathlib.Path(lo.__file__).parent / "plugin" / "commands" / "audit-fix.md").read_text(encoding="utf-8")
+    section = spec[spec.index("## Defect classes"):]
+    section = section[: section.index("\n## ", 1)]
+    listed = re.findall(r"^\| *\d+ *\| *`([a-z-]+)` *\|", section, flags=re.M)
+    assert tuple(listed) == lo.DEFECT_CLASSES
+
+
 def test_l2_5_maps_ids_to_verdicts_when_the_tally_matches():
     """Red 2026-10-11: mutation `return verdicts` became `return {}` in l25_verdicts; failed at
     the assert (`assert {} == {'F-1': 'CONFIRMED', 'F-2': 'DEFERRED'}`)."""

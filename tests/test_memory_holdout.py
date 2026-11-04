@@ -252,7 +252,7 @@ def test_summary_records_the_arm(git_repo, capsys):
     (run / ps.PRIOR_RECORDS).write_bytes((RESPONSES / "bug_answer.json").read_bytes())
     assert main(["prior", "--records", str(run / ps.PRIOR_RECORDS), "--repo-name", REPO]) == 0
     capsys.readouterr()
-    finding = {"id": "BUG-001", "auditor": "cca-bug-auditor", "category": "x", "priority": "P2",
+    finding = {"id": "BUG-001", "auditor": "cca-bug-auditor", "category": "x", "defect_class": "logic-error", "priority": "P2",
                "file": "app.py", "line": 1, "claim": "c", "high_stakes": False,
                "memory_ids": [BUG_ID]}
     ps.record("L1", output=write_output(git_repo), root=git_repo)

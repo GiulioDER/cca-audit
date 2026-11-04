@@ -9,6 +9,16 @@ so here the file and the counts are made to agree.
 from __future__ import annotations
 
 PRIORITIES = ("P1", "P2", "P3")
+#: The fixed classes a finding's `defect_class` names, in precedence order: a finding that fits
+#: several takes the first. Defined in audit-fix.md, "Defect classes". `category` stays the
+#: free-text slug that dedup, false-positive matching and the scorecard key on; this is the
+#: field that can be counted across runs. `other` needs a `defect_class_reason`.
+DEFECT_CLASSES = (
+    "secret-exposure", "injection", "access-control", "fail-open", "race", "identity-mismatch",
+    "data-integrity", "numeric", "logic-error", "input-validation", "error-handling",
+    "resource-leak", "performance", "config-drift", "packaging-deploy", "test-weakness",
+    "doc-drift", "duplication", "maintainability", "other",
+)
 #: Verdict in an L2.5 file, and the count flag that tallies it. A finding passed on unverified
 #: is written DEFERRED in the file and counted with `--unverified`.
 COUNT_OF = {
@@ -46,6 +56,27 @@ def l2_findings(data, unique: int) -> list:
     if len(data) != unique:
         raise ShapeError(f"L2's file holds {len(data)} findings but --unique is {unique}")
     return data
+
+
+def l2_defect_classes(data: list) -> None:
+    """Every L2 finding names one of DEFECT_CLASSES, and `other` says why.
+
+    Checked when L2 is recorded, not by `l2_findings`: that one also re-reads the L2 a run stored
+    earlier, and a run that recorded L2 before this rule existed must still be able to finish.
+    """
+    for row in data:
+        if row.get("defect_class") not in DEFECT_CLASSES:
+            raise ShapeError(
+                f'L2 finding {row["id"]} needs "defect_class" set to one of '
+                f'{", ".join(DEFECT_CLASSES)} (audit-fix.md, "Defect classes"); '
+                f'it has {row.get("defect_class")!r}'
+            )
+        reason = row.get("defect_class_reason")
+        if row["defect_class"] == "other" and not (isinstance(reason, str) and reason.strip()):
+            raise ShapeError(
+                f'L2 finding {row["id"]} is defect_class "other" and needs a non-empty '
+                '"defect_class_reason" saying why no class fits'
+            )
 
 
 def l25_verdicts(data, counts: dict, l2_ids) -> dict[str, str]:

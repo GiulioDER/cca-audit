@@ -210,7 +210,7 @@ log. Auditors run in parallel and the orchestrator reads only their replies.
    `audit-fix.md` command), `[]` when there are none. Nothing comes before it: no status block, no
    heading.
 2. Each object: `id` (`NUM-NNN`, or the prefix the invocation gave you), `auditor`
-   (`numeric-auditor`), `severity`, `priority`, `category`, `file`, `line`, `claim`, `evidence`,
+   (`numeric-auditor`), `severity`, `priority`, `category`, `defect_class` (one class from "Defect classes" in `audit-fix.md`; `other` adds `defect_class_reason`), `file`, `line`, `claim`, `evidence`,
    `suggested_fix`, `confidence`, `high_stakes`. `high_stakes` is always `true` on this auditor's paths.
    Each finding's `properties` block (see Properties above) travels in the reply, either as a
    `properties` key on the finding object or in the prose right after the array, keyed by

@@ -971,6 +971,7 @@ def _check_shape(layer: str, state: PipelineState, counts: dict, data: bytes, ro
     try:
         if layer == "L2":
             findings = layer_outputs.l2_findings(value, counts["unique"])
+            layer_outputs.l2_defect_classes(findings)
             if state.mode == "DEFERRED" and not (state.parent or "").startswith("commit:"):
                 _held_to_pool(state, findings, root)
         elif layer == "L2.5":

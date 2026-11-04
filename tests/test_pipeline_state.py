@@ -340,7 +340,7 @@ def test_record_l2_copies_a_valid_output_into_the_run_and_names_it(git_repo):
     state = ps.start("FAST", run_id="r42", root=git_repo)
     run = state.run_id
     ps.record("L1", output=write_output(git_repo, [[{"id": "BUG-1"}]]), root=git_repo)
-    findings = [{"id": "BUG-1", "priority": "P2", "file": "app.py", "line": 1}]
+    findings = [{"id": "BUG-1", "defect_class": "logic-error", "priority": "P2", "file": "app.py", "line": 1}]
     ps.record("L2", counts={"unique": 1}, output=write_output(git_repo, findings),
               root=git_repo)
     entry = ps.load(git_repo).layers["L2"]
@@ -808,6 +808,32 @@ def test_a_bom_prefixed_work_file_does_not_lock_out_the_next_layer(git_repo):
               output=_bom(verdicts_output(git_repo, confirmed=2)), root=git_repo)
     ps.record("L3", counts={"to_fix": 2}, output=plan_output(git_repo, to_fix=2), root=git_repo)
     assert "L3" in ps.load(git_repo).layers
+
+
+def test_recording_l2_refuses_a_finding_without_a_defect_class(git_repo):
+    """`record L2` is where a finding's fixed class is enforced (audit-fix.md, "Defect classes").
+
+    Red proof 2026-11-04 on the remote test host: the `layer_outputs.l2_defect_classes(findings)` call deleted from
+    `record`; failed at pytest.raises (DID NOT RAISE RecordRefused)."""
+    ps.start("FAST", run_id="r1", root=git_repo)
+    ps.record("L1", output=write_output(git_repo), root=git_repo)
+    rows = [{"id": "F-1", "auditor": "cca-bug-auditor", "category": "x", "priority": "P2",
+             "file": "app.py", "line": 1, "claim": "c", "high_stakes": False}]
+    with pytest.raises(ps.RecordRefused, match='needs "defect_class"'):
+        ps.record("L2", counts={"unique": 1}, output=write_output(git_repo, rows), root=git_repo)
+
+
+def test_a_run_whose_stored_l2_predates_classes_still_finishes(git_repo):
+    """A run that recorded L2 before classes existed records its later layers: only recording
+    L2 checks the class, not re-reading a stored one. Red proof 2026-11-04 on the remote test host: l2_findings calling
+    l2_defect_classes; the L2.5 record raised RecordRefused naming the stored L2."""
+    _to_l2(git_repo, "FAST", 2)
+    stored = _stored(git_repo, "L2")
+    rows = json.loads(stored.read_text(encoding="utf-8"))
+    stored.write_text(json.dumps([{k: v for k, v in r.items() if k != "defect_class"} for r in rows]),
+                      encoding="utf-8")
+    ps.record("L2.5", counts=_TWO_CONFIRMED, output=verdicts_output(git_repo, confirmed=2), root=git_repo)
+    assert "L2.5" in ps.load(git_repo).layers
 
 
 def test_an_old_shape_stored_l2_is_refused_naming_l2(git_repo):

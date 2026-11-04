@@ -178,6 +178,15 @@ def test_every_finding_carries_memory_fields(name):
 
 
 @pytest.mark.parametrize("name", L1)
+def test_every_finding_carries_a_defect_class(name):
+    """Every auditor returns the fixed class `record L2` requires, and names where the list is.
+    Red proof 2026-11-04 on the remote test host: the field removed from cca-perf-auditor.md; failed for that auditor."""
+    contract = section(text(name), "Return value")
+    assert "`defect_class`" in contract and '"Defect classes" in `audit-fix.md`' in contract
+    assert "`defect_class_reason`" in contract
+
+
+@pytest.mark.parametrize("name", L1)
 def test_memory_section_explains_the_brief(name):
     """The section says what the records are, what to do with each, and when to cite."""
     memory = " ".join(section(text(name), "Prior bugs and lessons").split())
