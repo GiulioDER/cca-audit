@@ -6,7 +6,7 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.14.0] - 2026-11-04
 
 **L1 findings say whether the prior-bugs brief led to them, and about one DIFF run in three runs
 without the brief.** Each L1 finding now carries `memory_ids`, the record ids from the brief that
@@ -21,13 +21,40 @@ holdout, `cca_checks/bugs/holdout.py`, picks a DIFF run when `int(sha256(run_id)
 and renders its brief in the empty no-match form, with `memory-arm.json` recorded in both arms;
 a `bugs brief` given no run directory (no `--out`) applies the same rule to the DIFF run open at
 its root.
-It runs while `holdout.ACTIVE` is True, for the pre-registered measurement
-`docs/preregistrations/2026-10-31-auditor-memory-holdout.md`. Codex runs also need the RE-call hook
-change on branch `claude/cca-holdout-skip` deployed, or their holdout auditors still receive
-memory from RE-call's SubagentStart hook. `benchmarks/harness/memory_gap.py` reports confirmed L1
+It is off unless the environment sets `CCA_MEMORY_HOLDOUT=1`; it exists for the pre-registered
+measurement `docs/preregistrations/2026-10-31-auditor-memory-holdout.md`. Codex runs that opt in
+also need RE-call's auditor-brief hook from GiulioDER/RE-call#1107 deployed, or their holdout
+auditors still receive memory from RE-call's SubagentStart hook. `benchmarks/harness/memory_gap.py` reports confirmed L1
 findings per run with and without a brief and by assigned holdout arm, with the Welch 95%
 interval of the arm gap, selecting runs by time (dispatch receipts), not by run-id text; `--root`
 is repeatable and `--rows` prints the included runs. The effect is pre-registered and unmeasured.
+
+**`bugs brief` builds the Step 1 brief locally, the same way in Claude Code and Codex.** It runs
+RE-call's shared auditor-brief reader, installed by the operator (`~/.claude/hooks/recall_hooks`,
+or `CCA_RECALL_ROOT`) and never imported from the audited checkout, and prints the bugs and
+owner-accepted lessons at the changed files. It writes `local-prior.json`, the receipt the L1
+gate checks, and says when the reader is unavailable, which is distinct from no matches. The
+Codex `auditor-memory` skill passes the same brief into Codex L1 dispatches.
+
+**Old ledger rows get code anchors from evidence on disk.** `python -m
+cca_checks.bugs.recover_anchors` recovers a row's place from its archived L2 and L4 files and
+local git objects, with the symbol taken from the archived input tree; `python -m
+cca_checks.bugs.recover_git_anchors` recovers it from the finding's own fix commit, when the
+original finding names the file, or a definition that alone changed in it. Neither infers a
+run, line, severity or proof, ambiguous names grant nothing, and only `anchors.jsonl` is
+appended, with `--write`.
+
+**The L5.5 differential reviewer checks a formatting-only claim syntactically.** For a hunk
+claimed to be formatting only, `cca-differential-review` runs `difft --check-only --exit-code` on
+each changed region, with the Step 4 snapshot as the pre-fix side. Exit 0 is evidence for SAFE;
+it is never a merge gate, and without `difft` installed the agent says so.
+
+**`python -m cca_checks qwen-tests` runs bounded remote tests and checks their signed
+receipts.** `prepare` writes a deterministic, size-bounded request, the operator's worker runs
+the tests, and `verify` accepts a result only with a valid Ed25519 signature over the current
+tree. The audited repository is never executed on the client, and the endpoint and public key
+come from the operator's configuration, never from repository text. Signature checking needs
+the new `remote-tests` extra; the base install stays dependency-free.
 
 **`recover_git_anchors --leading-stem` anchors multi-file fixes whose summary names the file.**
 On 2026-10-29, 557 unanchored rows came from fixes that changed two or more production files, so
@@ -85,9 +112,9 @@ file-level anchor labelled `git-single-production-file`, with the exclusion list
 Directory exclusions (`tests/`, `test/`, `fixtures/`, `docs/`, `.github/`) match only at the
 first path component. `ENV`, `DEP`, `DEPLOY` and `DOC` findings are refused. Writing is refused unless
 the brief ranking reader understands the new method; that reader change is RE-call PR #1063,
-not merged at the time of writing. The plan was sized on 213 unanchored rows on 2026-10-28,
-which fell to about 92 the same evening after other recoveries; the real count is unmeasured
-until the dry run.
+merged 2026-10-29. The plan was sized on 213 unanchored rows on 2026-10-28, which fell to about
+92 the same evening after other recoveries; on 2026-10-29, after this rule and `--leading-stem`,
+1,190 of 1,824 ledger rows were anchored.
 
 **`bugs record-unlinked` records the fixes no merge can be found for.** `resolve` writes a run's
 rows only once GitHub names the merged pull request holding the run's commit, and that link is
@@ -177,7 +204,7 @@ there), built against saved `recall_records` answers until the live server is de
 * **Expiry as RE-call reads it.** A date-only `valid_until` now holds through the end of that day
   in UTC, as RE-call's `validity_bounds` and the brief rendered through RE-call hold it; CCA had
   dropped the record on the day itself, by the host's local date. The brief, the lessons block and
-  PRIOR_FP read RE-call's computed `expired` flag (RE-call #1011 (draft)) when an answer carries one, and
+  PRIOR_FP read RE-call's computed `expired` flag (RE-call #1011) when an answer carries one, and
   fall back to that rule on `valid_until` when it does not.
 
 **The ledger as records RE-call can serve.** Sessions 2 and 3 of the same plan, the layer the
@@ -204,6 +231,21 @@ sections above read.
 
 ### Fixed
 
+* **`pipeline record L1` refuses a DIFF or HUNT run whose Step 1 brief was never built.** On
+  2026-10-27, 13 Claude Code runs in 48 hours had skipped the brief command. The run directory
+  must hold `local-prior.json` or `prior-records.json`; a deferred pass is exempt. `bugs brief
+  --skipped unresolved-root|own-checkout` writes that receipt for a hunt that must read no
+  memory.
+* **A Codex run records that each L1 prompt was checked before dispatch.** Codex has no launch
+  hook, so `pipeline check-dispatch --role ROLE --prompt-file FILE` writes a receipt binding the
+  prompt, the saved brief and the source tree, and `pipeline record L1` refuses a Codex run
+  without one for every declared role. The receipt shows the prompt was prepared, not that the
+  tool received it.
+* **A handler's code anchor keeps its identity when a later branch follows it.**
+* **A DIFF brief without RE-call shows the ledger's past fixes again.** The local reader path
+  needs RE-call's reader; without it `bugs brief` printed "Local memory unavailable" where
+  0.13.0 printed the fixes the user's own CCA ledger holds for the changed files. It now falls
+  back to that PRIOR FIXES block, with receipt status `ledger`.
 * **A correcting row keeps the place the row it replaces had.** Recovered anchors are keyed by
   bug id, so `bugs relink` (rows re-keyed to their squash merge) dropped them: on 2026-10-29
   RE-call:b27298bf4125:SEC-001 lost `recall/lite/refresh.py _refresh_locked`. A bug row with no
@@ -271,13 +313,15 @@ false positives were `out_of_scope`. The nine L1 agent files are rewritten:
   names why a path is hot**, and its speculative items are gone.
 
 The expected effect is pre-registered in `docs/preregistrations/2026-10-28-l1-auditor-instructions.md`
-and measured by `benchmarks/harness/l1_precision.py`; it is not measured yet. Missed bugs are not
-measured by it at all.
+and measured by `benchmarks/harness/l1_precision.py`. At the 30-run look (2026-10-31) precision
+was 0.880 (243 of 276, Wilson 95% 0.837 to 0.914). Missed bugs are not measured by it at all.
 
 ### Upgrading from 0.13.0
 
 * In a change audit the PRIOR BUGS block now comes from a `recall-cca` server that offers
-  `recall_records`. Without one, the block is empty; in 0.13.0 it was read from the local ledger.
+  `recall_records`. Without one, `bugs brief` uses RE-call's local reader when it is installed,
+  and otherwise prints the ledger's PRIOR FIXES for the changed files, as 0.13.0 did. RE-call
+  stays optional.
   Hunts still read the hunted repository's rows from the ledger.
 * `--similar`, `--cross-repo` and the `recall_search` queries of 0.13.0 are gone; a saved search
   response is no longer read.

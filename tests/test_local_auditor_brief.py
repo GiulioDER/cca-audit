@@ -175,3 +175,28 @@ def test_real_reader_preserves_spaced_unicode_scope_on_clean_checkout(tmp_path, 
     assert result["status"] == "ok", result
     assert bug.id in result["block"] and lesson.id in result["block"]
     assert file in result["block"]
+
+
+def test_no_reader_falls_back_to_the_ledger(tmp_path, monkeypatch, capsys):
+    """Invariant: without the RE-call reader, a brief for files the CCA ledger holds fixes for
+    prints them, as 0.13.0 did, and the receipt says it came from the ledger.
+
+    Red proof 2026-11-04: in `bugs.__main__._brief` the fallback guard became `if False and ...`;
+    failed at `assert "PRIOR FIXES IN THESE FILES" in output` (the unavailable form printed).
+    """
+    root = make_repo(tmp_path / "repo")
+    ledger = tmp_path / "cca-bugs"
+    ledger.mkdir()
+    monkeypatch.setenv("CCA_BUGS_DIR", str(ledger))
+    monkeypatch.setenv("CCA_RECALL_ROOT", str(tmp_path / "absent"))
+    row = {"bug_id": "acme/widgets:e3ee162:BUG-001", "finding_id": "BUG-001",
+           "repo": "acme/widgets", "tier": "proved", "sources": ["git:x"], "date": "2026-10-01",
+           "severity": "P2", "files": ["app.py"], "summary": "a race in run",
+           "fix_commit": "e3ee162" + "0" * 33, "supersedes": None}
+    (ledger / "bugs.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+    receipt = tmp_path / "run" / "local-prior.json"
+    assert main(["brief", "--root", str(root), "--files", "app.py", "--out", str(receipt)]) == 0
+    output = capsys.readouterr().out
+    assert "PRIOR FIXES IN THESE FILES" in output and "acme/widgets:e3ee162:BUG-001" in output
+    saved = json.loads(receipt.read_text())
+    assert saved["status"] == "ledger" and "BUG-001" in saved["block"]

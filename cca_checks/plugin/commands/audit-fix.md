@@ -431,7 +431,9 @@ python -P -m cca_checks bugs brief --root <target Git root> --out .claude/audits
 ```
 
 Paste the whole output as `{PRIOR_BUGS}`. The shared local RE-call reader admits, matches and
-renders both bugs and owner-accepted lessons. The status distinguishes no matches from an
+renders both bugs and owner-accepted lessons. When that reader is not installed (no RE-call),
+the command prints the CCA ledger's PRIOR FIXES block for `--files` instead, and the receipt
+says `ledger`. The status distinguishes no matches from an
 unavailable reader, and makes no hosted trust claim. Do not manufacture `prior-records.json`,
 combine local data with a hosted trust envelope, or hide a hosted refusal. If the command itself
 fails, paste `Local memory unavailable; this does not establish that memory is empty.` and
@@ -456,8 +458,8 @@ the PRIOR FIXES form quoted above.
 answer, for the measurement of both blocks; that is why the answer is saved under the run's own
 directory.
 
-**Memory holdout:** in a DIFF run, `bugs brief` and `bugs prior` may print the empty form by
-design. About one DIFF run in three is assigned, from its run id, to a holdout arm whose brief
+**Memory holdout:** only when the environment sets `CCA_MEMORY_HOLDOUT=1` (off by default), in a
+DIFF run `bugs brief` and `bugs prior` may print the empty form by design. About one DIFF run in three is assigned, from its run id, to a holdout arm whose brief
 renders as if the ledger held nothing for the change, so confirmed findings can be compared
 between runs with and without memory. The command records the arm in
 `.claude/audits/runs/<run_id>/memory-arm.json`. Build every auditor prompt from the printed output
