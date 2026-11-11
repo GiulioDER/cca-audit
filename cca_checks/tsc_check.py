@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 
+from .claim import Claim, Verdict, make_verdict
 from .config import TS_TIMEOUT_S
 from .toolpath import PROBE_TIMEOUT_S, _is_inside, resolve_tool
 
@@ -211,3 +212,105 @@ def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
     if done.returncode != 0:
         return None
     return _parse_response(done.stdout, target)
+
+
+# Diagnostic codes by role. Drift may cost a confirmation, never buy a refutation:
+# a code outside every set at the claimed line escalates.
+DEFINEDNESS_CODES = frozenset({2304, 2552, 2448, 2454})
+NULLABILITY_CODES = frozenset({2531, 2532, 2533, 18047, 18048, 18049, 2722})
+TYPE_CODES = frozenset({2322, 2345, 2339, 2741, 2769, 2353, 2551, 2362, 2363, 2365, 2367,
+                        2349, 2554, 2555})
+ENVIRONMENT_CODES = frozenset({2307, 7016, 2688, 2580, 2582, 2591, 2592, 2593})
+# The implicit any family and `unknown`: the compiler was blind, so silence proves nothing.
+BLINDNESS_CODES = frozenset({7005, 7006, 7008, 7010, 7011, 7015, 7019, 7031, 7034, 7053,
+                             18046})
+CODES_BY_CLAIM = {"definedness": DEFINEDNESS_CODES, "nullability": NULLABILITY_CODES,
+                  "type": TYPE_CODES}
+MISSING_TYPE_PACKAGE = 2688
+
+
+def is_environment(code: int) -> bool:
+    return code in ENVIRONMENT_CODES or 5000 <= code <= 5999
+
+
+def _covers(d: TscDiagnostic, line: int) -> bool:
+    return d.start_line is not None and d.end_line is not None and (
+        d.start_line <= line <= d.end_line)
+
+
+def _overlaps(d: TscDiagnostic, span: tuple[int, int]) -> bool:
+    return d.start_line is not None and d.end_line is not None and (
+        d.start_line <= span[1] and d.end_line >= span[0])
+
+
+def _in_span(lines: frozenset[int], span: tuple[int, int]) -> bool:
+    return any(span[0] <= n <= span[1] for n in lines)
+
+
+def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int],
+                    span: tuple[int, int] | None) -> Verdict:
+    """Settle a claim against the compiler's diagnostics. Three-way, never false-refutes."""
+    def tsc(verdict: str, evidence: str) -> Verdict:
+        return make_verdict(claim.finding_id, verdict, evidence, "tsc")
+
+    if result is None:
+        return make_verdict(claim.finding_id, "UNCERTAIN",
+                            "tsc unavailable or could not analyze; falling back to LLM", "llm")
+
+    where = f"{claim.file}:{claim.line}"
+    key = same_file_key(claim.file)
+    here = [d for d in result.diagnostics if d.file == key]
+    at_line = [d for d in here if _covers(d, claim.line)]
+
+    hit = next((d for d in at_line if d.code in codes), None)
+    if hit:
+        if claim.claim_type == "definedness" and any(
+                d.code == MISSING_TYPE_PACKAGE for d in result.diagnostics):
+            # A missing type package can remove globals it declares, so the name may exist.
+            return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but the program has a TS2688 "
+                                    f"(missing type definition file); escalated")
+        return tsc("CONFIRMED", f"tsc TS{hit.code} @ {where}: {hit.message}")
+
+    if at_line:
+        seen = ", ".join(f"TS{c}" for c in sorted({d.code for d in at_line}))
+        return tsc("UNCERTAIN", f"tsc reported {len(at_line)} diagnostic(s) @ {where} but none "
+                                f"in the expected code set (saw: {seen}); escalated")
+
+    # From here on the question is whether silence is believable.
+    if result.nocheck or (span is not None and _in_span(result.directive_targets, span)):
+        return tsc("UNCERTAIN", f"a @ts-nocheck or @ts-ignore / @ts-expect-error directive "
+                                f"covers the enclosing scope of {where}; escalated")
+
+    if span is None:
+        return tsc("UNCERTAIN", f"no enclosing span for {where}; a refutation needs one")
+
+    label = claim.claim_type
+    nearby = [d for d in here if d.code in codes and _overlaps(d, span)]
+    if nearby:
+        lines = ", ".join(sorted({str(d.start_line) for d in nearby}))
+        return tsc("UNCERTAIN", f"tsc reported no {label} diagnostic exactly at {where}, but did "
+                                f"report one in the enclosing scope (lines {span[0]}-{span[1]}, "
+                                f"at {lines}); the claim may be off by a line rather than "
+                                f"false; escalated")
+
+    if any(d.file is None or (d.file == key and is_environment(d.code))
+           for d in result.diagnostics):
+        # Includes unlocated diagnostics. An unresolved import makes its bindings any.
+        return tsc("UNCERTAIN", f"tsc reported an environment or configuration diagnostic "
+                                f"affecting {claim.file}; escalated")
+
+    if claim.claim_type == "nullability" and claim.line in result.subscript_lines:
+        # noUncheckedIndexedAccess is not forced, so an index access is never proven safe.
+        return tsc("UNCERTAIN", f"{where} is an element access, which tsc does not check "
+                                f"for undefined here; escalated")
+
+    if claim.claim_type in ("type", "nullability"):
+        blind = [d for d in here if d.code in BLINDNESS_CODES and _overlaps(d, span)]
+        if blind or _in_span(result.any_lines, span) or _in_span(result.assertion_lines, span):
+            return tsc("UNCERTAIN", f"tsc may not see the real types in the enclosing scope "
+                                    f"(lines {span[0]}-{span[1]}: any, assertion or implicit "
+                                    f"any) @ {where}; escalated")
+
+    return tsc("FALSE_POSITIVE", f"tsc: no {label} diagnostic (TS codes "
+                                 f"{', '.join(map(str, sorted(codes)))}) @ {where} or in lines "
+                                 f"{span[0]}-{span[1]}")
