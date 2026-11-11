@@ -42,6 +42,20 @@ jobs:
           toolchain: stable
           components: clippy
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Install the pinned TypeScript compiler
+        # The TypeScript backend's tests are NOT allowed to skip here. `node` and
+        # `tsc` gate them, and a job without either would run them as skips: no red,
+        # no signal, and the backend would get zero coverage forever. The pin is a
+        # single supported major (SUPPORTED_TS_MAJORS in cca_checks/tsc_check.py);
+        # any other major is UNCERTAIN, so an unpinned install could turn the tests
+        # into escalations without anything failing. The assertion that this step
+        # stays here lives in tests/test_ci_contract.py.
+        run: npm install -g typescript@6.0.3
+
       - name: Install the deterministic layer
         # pyright and semgrep are what the acceptance suite exercises. semgrep has
         # no Windows wheel, which is one reason this job is ubuntu-only.
@@ -106,6 +120,14 @@ jobs:
                   checked += 1
           assert checked, "no backend shipped a catalog; this check proved nothing"
           print(f"packaged rules OK ({checked} files)")
+          PY
+          # The TypeScript probe is a data file the Python import system never loads,
+          # so only a resource lookup against the installed wheel proves it shipped.
+          /tmp/wheeltest/bin/python - <<'PY'
+          from importlib.resources import files
+          assert files("cca_checks").joinpath("ts_probe.js").is_file(), \
+              "ts_probe.js missing from the wheel"
+          print("packaged ts_probe.js OK")
           PY
           # The tree-sitter grammar is an optional extra, so the wheel must import and
           # the CLI must run WITHOUT it -- and a Rust claim must escalate rather than
