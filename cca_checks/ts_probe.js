@@ -11,7 +11,11 @@
  *            "forced_options": {<tsconfig style JSON>}}
  * Response: {"protocol": 1, "version", "files", "diagnostics", "any_lines",
  *            "assertion_lines", "directives": {"lines", "targets", "nocheck"},
- *            "subscript_lines"}, exit 0.
+ *            "subscript_lines", "definite_assignment_lines"}, exit 0.
+ *           A line is an assertion, subscript or definite assignment line either for
+ *           what is written on it or for what a name on it resolves to: a name whose
+ *           declaration, in or outside the span, is initialized by an assertion or an
+ *           index read, or carries a definite assignment `!`.
  * Refusal:  exit 2, one line on stderr, nothing on stdout. The claimed file being a
  *           declaration file is a refusal too: skipLibCheck hides its errors.
  *
@@ -47,6 +51,18 @@
  *                                          'esModuleInterop=false' are deprecated
  *   2532   weak/index_access.ts:3          Object is possibly 'undefined', only if the
  *                                          repo's noUncheckedIndexedAccess were applied
+ *   18047  outside_span/outer_bang_ctl.ts:4 'app' is possibly 'null'; gone under the
+ *                                          module level `!` of outer_bang.ts
+ *   2454   outside_span/definite_ctl.ts:3  'n' is used before being assigned; gone
+ *                                          under `let n!` in definite.ts
+ *   2304   module_detection/b.ts:2         'helper' undefined only under the repo's
+ *                                          `moduleDetection: "force"`
+ *   5097   ts_extensions/main.ts:1         `./h.ts` import, only if the repo's
+ *                                          allowImportingTsExtensions were dropped
+ *   2305   import_member/use.ts:1          no exported member 'nope'; nothing at line 3
+ *   1192   import_member/use_default.ts:1  no default export; nothing at line 3
+ *   2580   install_types/uses_dirname.ts:4 'process', install @types/node; line 2
+ *                                          has a 2304 for '__dirname'
  *   1136   broken/tsconfig.json            JSON syntax error; the probe refuses
  *   5023   (scratch config)                Unknown compiler option; the probe refuses
  *
@@ -252,10 +268,108 @@ function namesNoValue(ts, node) {
 // `m["alice"]`: undefined at run time, never reported without noUncheckedIndexedAccess.
 function readsIndexSignature(ts, checker, node) {
   if (!ts.isPropertyAccessExpression(node)) return false;
-  const apparent = checker.getApparentType(
-    checker.getNonNullableType(checker.getTypeAtLocation(node.expression)));
-  return !checker.getPropertyOfType(apparent, node.name.text)
+  return indexSignatureOnly(checker, checker.getTypeAtLocation(node.expression), node.name.text);
+}
+
+function indexSignatureOnly(checker, type, name) {
+  const apparent = checker.getApparentType(checker.getNonNullableType(type));
+  return !checker.getPropertyOfType(apparent, name)
     && checker.getIndexInfosOfType(apparent).length > 0;
+}
+
+// The key a destructuring element reads, or null when it is computed (`{ [k]: v }`),
+// which is an index read whatever the type says.
+function literalKey(ts, name) {
+  return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)
+    || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : null;
+}
+
+// Destructuring reads by position or by key, so `const [u] = items`, `[u] = items` and
+// `const { alice } = m` on a Record are the same unchecked read as `items[0]` and
+// `m["alice"]`. A tuple position below the fixed length is a declared element and is
+// checked, which keeps `const [s, setS] = useState()` and the pairs of
+// `Object.entries` refutable; a position in a rest element (`[A, ...B[]]`) is not.
+// `index` is the element's position in an array pattern, `key` its key in an object
+// pattern (undefined for an array pattern, null when computed).
+function destructuringReadsByIndex(ts, checker, sourceType, index, key) {
+  if (key === undefined) {
+    return !(checker.isTupleType(sourceType) && index < sourceType.target.fixedLength);
+  }
+  return key === null || indexSignatureOnly(checker, sourceType, key);
+}
+
+// A binding element (`u` in `const [u] = items`, `alice` in `const { alice } = m`)
+// that reads through an index. Rest elements collect an array or object, never
+// undefined.
+function bindingReadsByIndex(ts, checker, element) {
+  if (!ts.isBindingElement(element) || element.dotDotDotToken) return false;
+  const pattern = element.parent;
+  const sourceType = checker.getTypeAtLocation(pattern);
+  if (ts.isArrayBindingPattern(pattern)) {
+    return destructuringReadsByIndex(ts, checker, sourceType, pattern.elements.indexOf(element));
+  }
+  return destructuringReadsByIndex(ts, checker, sourceType, -1,
+    literalKey(ts, element.propertyName || element.name));
+}
+
+// An array or object literal that is the target of a destructuring assignment, in
+// exactly the positions checker.getTypeOfAssignmentPattern accepts (it asserts on any
+// other parent).
+function isAssignmentPattern(ts, node) {
+  if (!ts.isArrayLiteralExpression(node) && !ts.isObjectLiteralExpression(node)) return false;
+  const parent = node.parent;
+  if (ts.isBinaryExpression(parent)) {
+    return parent.left === node && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+  }
+  if (ts.isForOfStatement(parent)) return parent.initializer === node;
+  if (ts.isArrayLiteralExpression(parent)) return isAssignmentPattern(ts, parent);
+  if (ts.isPropertyAssignment(parent)) {
+    return parent.initializer === node && isAssignmentPattern(ts, parent.parent);
+  }
+  return false;
+}
+
+// The targets of an assignment pattern that read through an index.
+function assignmentTargetsByIndex(ts, checker, pattern) {
+  const sourceType = checker.getTypeOfAssignmentPattern(pattern);
+  if (ts.isArrayLiteralExpression(pattern)) {
+    return pattern.elements.filter((e, i) => !ts.isOmittedExpression(e) && !ts.isSpreadElement(e)
+      && destructuringReadsByIndex(ts, checker, sourceType, i));
+  }
+  return pattern.properties.filter((p) => (ts.isShorthandPropertyAssignment(p)
+    || ts.isPropertyAssignment(p))
+    && destructuringReadsByIndex(ts, checker, sourceType, -1, literalKey(ts, p.name)));
+}
+
+function skipParentheses(ts, node) {
+  while (ts.isParenthesizedExpression(node)) node = node.expression;
+  return node;
+}
+
+// What the declaration a name resolves to tells the checker to believe, wherever that
+// declaration is: `const app = el!` at module level makes `app.x` inside a function
+// look safe, and `let n!: number` makes `n` look assigned. Null when it says nothing.
+function declarationOf(ts, checker, identifier) {
+  const parent = identifier.parent;
+  let symbol = ts.isShorthandPropertyAssignment(parent) && parent.name === identifier
+    ? checker.getShorthandAssignmentValueSymbol(parent)
+    : checker.getSymbolAtLocation(identifier);
+  if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+  return symbol ? symbol.valueDeclaration : undefined;
+}
+
+function declarationFacts(ts, checker, declaration) {
+  if (!declaration) return { asserted: false, definite: false, indexed: false };
+  const initializer = declaration.initializer && skipParentheses(ts, declaration.initializer);
+  const definite = declaration.exclamationToken !== undefined
+    && (ts.isVariableDeclaration(declaration) || ts.isPropertyDeclaration(declaration));
+  return {
+    asserted: definite || (initializer !== undefined && isAssertion(ts, initializer)),
+    definite,
+    indexed: bindingReadsByIndex(ts, checker, declaration) || (initializer !== undefined
+      && (ts.isElementAccessExpression(initializer)
+        || readsIndexSignature(ts, checker, initializer))),
+  };
 }
 
 function expressionLines(ts, checker, sourceFile, span) {
@@ -263,12 +377,29 @@ function expressionLines(ts, checker, sourceFile, span) {
   const anyLines = new Set();
   const assertionLines = new Set();
   const subscriptLines = new Set();
+  const definiteLines = new Set();
   function addLines(lines, start, end) {
     for (let l = Math.max(lo, lineOf(sourceFile, start)); l <= Math.min(hi, lineOf(sourceFile, end)); l++) {
       lines.add(l);
     }
   }
+  function addNode(lines, node) {
+    addLines(lines, node.getStart(sourceFile), node.getEnd());
+  }
   function visit(node) {
+    if (bindingReadsByIndex(ts, checker, node)) addNode(subscriptLines, node);
+    if (isAssignmentPattern(ts, node)) {
+      for (const target of assignmentTargetsByIndex(ts, checker, node)) addNode(subscriptLines, target);
+    }
+    if (ts.isIdentifier(node)) {
+      const line = lineOf(sourceFile, node.getStart(sourceFile));
+      if (line >= lo && line <= hi) {
+        const facts = declarationFacts(ts, checker, declarationOf(ts, checker, node));
+        if (facts.asserted) assertionLines.add(line);
+        if (facts.definite) definiteLines.add(line);
+        if (facts.indexed) subscriptLines.add(line);
+      }
+    }
     // Every expression, not a list of kinds: `f(u as any)` holds no access or call
     // whose own type is any, only the cast.
     if (ts.isExpression(node) && !namesNoValue(ts, node)) {
@@ -284,7 +415,7 @@ function expressionLines(ts, checker, sourceFile, span) {
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
-  return { anyLines, assertionLines, subscriptLines };
+  return { anyLines, assertionLines, subscriptLines, definiteLines };
 }
 
 function isJSDoc(ts, node) {
@@ -387,6 +518,7 @@ function main() {
     assertion_lines: sorted(lines.assertionLines),
     directives: commentDirectives(ts, sourceFile),
     subscript_lines: sorted(lines.subscriptLines),
+    definite_assignment_lines: sorted(lines.definiteLines),
   };
   process.stdout.write(JSON.stringify(response) + "\n");
 }
