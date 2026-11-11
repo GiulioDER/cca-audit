@@ -315,3 +315,27 @@ checkout with dependencies installed and, separately, without, since both are re
   property accesses, element accesses and calls are included.
 - Docs: `docs/v3-design.md` (the "TypeScript and Go are not shipped" line),
   `docs/limits.md`, `docs/configuration.md` install notes, `CHANGELOG.md`.
+
+## Amendments made during the build (2026-11-11)
+
+Recorded here because the sections above were written before the compiler was run. Each was a
+controller ruling during subagent-driven execution, made after a reviewer measured the case on
+TypeScript 6.0.3.
+
+- **Pinned major 6, installed 6.0.3.** TypeScript 7.0.2 (npm `latest`) ships no JavaScript compiler
+  API. The probe forces `ignoreDeprecations: "6.0"`.
+- **`types` defaults to `["*"]`** when the repo's config leaves it unset or there is no config, with
+  `typeRoots` from every `node_modules/@types` above the file in the no-config case. TypeScript 6
+  stopped auto-including `@types`; this restores TypeScript 5 behaviour, and it can make a name read
+  as defined that the repo's own TypeScript 6 build would flag.
+- **Allow-list additions:** `moduleDetection`, `allowImportingTsExtensions`,
+  `rewriteRelativeImportExtensions`, besides the 19 options listed in "Running the compiler".
+- **New probe fields:** `assertion_lines` (non-null and casts other than `as const`, in the span or
+  reached through a declaration), `definite_assignment_lines`, and `directives.targets` (the line
+  each directive actually suppresses). `subscript_lines` also covers destructuring and property
+  reads through an index signature, anywhere in the span.
+- **Definedness CONFIRMED is also withheld** when a declared `@types` package is not installed,
+  when the program reports an "install type definitions" code, or when the claimed file has an
+  import-member error. The probe refuses a declaration-file target.
+- **Known residual, not fixed:** a missing member re-exported through another file still refutes
+  definedness at the use site.
