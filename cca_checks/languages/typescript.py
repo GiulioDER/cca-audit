@@ -9,7 +9,13 @@ Grammar attributes in the installed tree-sitter-typescript 0.23 are
 from .. import treesitter as ts
 from ..claim import Claim, Verdict, make_verdict
 from ..toolpath import tool_unavailable_reason
-from ..tsc_check import CODES_BY_CLAIM, run_tsc, typescript_package, verdict_for_tsc
+from ..tsc_check import (
+    CODES_BY_CLAIM,
+    run_tsc,
+    typescript_package,
+    unsupported_typescript,
+    verdict_for_tsc,
+)
 
 #: Node types that open a function scope. Arrow functions and methods are included
 #: because most TypeScript is written with them, and a missing type would fall back
@@ -47,8 +53,10 @@ class TypeScriptBackend:
         without a span the verdict can still confirm but never refute.
         """
         reason = tool_unavailable_reason("node")
-        if reason is None and typescript_package() is None:
-            reason = "no trusted global typescript package"
+        if reason is None:
+            package = typescript_package()
+            reason = ("no trusted global typescript package" if package is None
+                      else unsupported_typescript(package))
         return dict.fromkeys(self.claim_types, reason) if reason else {}
 
     def settle(self, claim: Claim) -> Verdict:

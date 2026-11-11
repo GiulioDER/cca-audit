@@ -19,6 +19,11 @@ COPY_OPTIONS = (
     "customConditions", "jsx", "jsxImportSource", "lib", "target", "types", "typeRoots",
     "allowArbitraryExtensions", "resolveJsonModule", "esModuleInterop",
     "allowSyntheticDefaultImports", "experimentalDecorators", "useDefineForClassFields",
+    # Each decides whether the repo's own build is clean: without moduleDetection a
+    # forced module is checked as a global script, and without the import extension
+    # pair every `import "./h.ts"` is a TS5097 that blocks the whole file. noEmit is
+    # forced, which both extension options require.
+    "moduleDetection", "allowImportingTsExtensions", "rewriteRelativeImportExtensions",
 )
 FORCED_OPTIONS = {
     "strict": True,
@@ -63,6 +68,8 @@ class TscResult:
     directive_targets: frozenset[int]
     nocheck: bool
     subscript_lines: frozenset[int]
+    # Lines where a name's declaration carries a definite assignment `!`.
+    definite_assignment_lines: frozenset[int]
     # A declared @types package is not installed, so globals it declares may be missing.
     types_incomplete: bool
     missing_types: tuple[str, ...] = ()
@@ -118,20 +125,41 @@ def typescript_package() -> str | None:
     return package
 
 
+def unsupported_typescript(package: str) -> str | None:
+    """Why the package at `package` cannot run the probe, or None when its major is supported.
+
+    Read from its package.json before anything is launched: a TypeScript 7 install
+    has one but no JavaScript compiler API, so the probe would refuse every claim
+    while capabilities reported TypeScript available.
+    """
+    try:
+        with open(os.path.join(package, "package.json"), encoding="utf-8") as f:
+            version = json.load(f).get("version")
+    except (OSError, ValueError, AttributeError):
+        version = None
+    if not isinstance(version, str) or not version.split(".")[0].isdigit():
+        return f"the global typescript at {package} has no readable version"
+    if int(version.split(".")[0]) not in SUPPORTED_TS_MAJORS:
+        majors = ", ".join(map(str, sorted(SUPPORTED_TS_MAJORS)))
+        return f"global typescript {version} is not a supported major (supported: {majors})"
+    return None
+
+
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 
 
 def _missing_types(path: str, repo_root: str | None) -> tuple[bool, tuple[str, ...]]:
     """(incomplete, names): a declared `@types/<name>` that is not installed.
 
-    Walks from the file's directory to the .git root (or only that directory when there
-    is none). A package.json that does not parse counts as incomplete: its declarations
-    cannot be checked, and an absent global must not read as an undefined name.
+    Walks from the file's directory to the .git root, or to the filesystem root when
+    there is none: an unpacked tarball has no .git, and its package.json sits above
+    the source directory. A package.json that does not parse, or has a dependency
+    section that is not an object, counts as incomplete: its declarations cannot be
+    checked, and an absent global must not read as an undefined name.
     """
     start = os.path.dirname(os.path.abspath(path))
     chain = [start]
-    while repo_root is not None and chain[-1] != repo_root and (
-            os.path.dirname(chain[-1]) != chain[-1]):
+    while chain[-1] != repo_root and os.path.dirname(chain[-1]) != chain[-1]:
         chain.append(os.path.dirname(chain[-1]))
     missing: list[str] = []
     for directory in chain:
@@ -141,10 +169,13 @@ def _missing_types(path: str, repo_root: str | None) -> tuple[bool, tuple[str, .
         try:
             with open(manifest, encoding="utf-8") as f:
                 data = json.load(f)
-            declared = [name for section in _DEPENDENCY_SECTIONS
-                        for name in (data.get(section) or {})]
-        except (OSError, ValueError, AttributeError, TypeError):
+            sections = [data.get(section, {}) for section in _DEPENDENCY_SECTIONS]
+        except (OSError, ValueError, AttributeError):
             return True, ()
+        # JSON object keys are always strings, so an object section needs no key check.
+        if not all(isinstance(section, dict) for section in sections):
+            return True, ()
+        declared = [name for section in sections for name in section]
         reachable = chain[chain.index(directory):]
         for name in declared:
             if name.startswith("@types/") and not any(
@@ -211,14 +242,15 @@ def _parse_response(raw: str, claimed: str, missing: tuple[bool, tuple[str, ...]
     any_lines = _lines(data.get("any_lines"))
     assertion_lines = _lines(data.get("assertion_lines"))
     subscript_lines = _lines(data.get("subscript_lines"))
+    definite_lines = _lines(data.get("definite_assignment_lines"))
     directive_lines = _lines(directives.get("lines"))
     directive_targets = _lines(directives.get("targets"))
     if (any_lines is None or assertion_lines is None or subscript_lines is None
-            or directive_lines is None or directive_targets is None):
+            or definite_lines is None or directive_lines is None or directive_targets is None):
         return None
     return TscResult(version, keys, diagnostics, any_lines, assertion_lines,
                      directive_lines, directive_targets, directives["nocheck"],
-                     subscript_lines, *missing)
+                     subscript_lines, definite_lines, *missing)
 
 
 def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
@@ -229,7 +261,7 @@ def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
     """
     node = resolve_tool("node")
     package = typescript_package()
-    if node is None or package is None:
+    if node is None or package is None or unsupported_typescript(package) is not None:
         return None
     target = os.path.abspath(path)
     config, repo_root = _scan_up(target)
@@ -266,6 +298,17 @@ ENVIRONMENT_CODES = frozenset({2307, 7016, 2688, 2580, 2581, 2582, 2583, 2584, 2
 # The implicit any family and `unknown`: the compiler was blind, so silence proves nothing.
 BLINDNESS_CODES = frozenset({7005, 7006, 7008, 7010, 7011, 7015, 7019, 7031, 7034, 7053,
                              18046})
+# An import names a member its module does not export (or no default export). The
+# binding still resolves, as the error type, so its uses report no definedness code
+# anywhere. Its own set, not ENVIRONMENT_CODES: it may be a real defect at the import
+# line rather than a fact about the machine, and `type` and `nullability` claims
+# already see the binding as `any` through any_lines, so blocking them would only cost
+# refutations.
+IMPORT_MEMBER_CODES = frozenset({2305, 2724, 2459, 2460, 2614, 1192, 2613})
+# "Do you need to install type definitions for ...": a type package is missing, so a
+# global it declares may be what another line reports as undefined. 2581 is the jQuery
+# form of 2580.
+INSTALL_TYPES_CODES = frozenset({2580, 2581, 2582, 2591, 2592, 2593})
 CODES_BY_CLAIM = {"definedness": DEFINEDNESS_CODES, "nullability": NULLABILITY_CODES,
                   "type": TYPE_CODES}
 MISSING_TYPE_PACKAGE = 2688
@@ -311,6 +354,10 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
             if any(d.code == MISSING_TYPE_PACKAGE for d in result.diagnostics):
                 return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but the program has a TS2688 "
                                         f"(missing type definition file); escalated")
+            install = next((d for d in result.diagnostics if d.code in INSTALL_TYPES_CODES), None)
+            if install:
+                return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but the program has a "
+                                        f"TS{install.code} (install type definitions); escalated")
             if result.types_incomplete:
                 names = ", ".join(result.missing_types) or "an unreadable package.json"
                 return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but a declared type package is "
@@ -347,6 +394,15 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
         # bindings any.
         return tsc("UNCERTAIN", f"tsc reported an environment or configuration diagnostic "
                                 f"affecting {claim.file}; escalated")
+
+    if claim.claim_type == "definedness":
+        if any(d.code in IMPORT_MEMBER_CODES for d in here):
+            return tsc("UNCERTAIN", f"{claim.file} imports a member its module does not export, "
+                                    f"and uses of that name report nothing; escalated")
+        if _in_span(result.definite_assignment_lines, span):
+            # `let n!: number` tells the checker n is assigned, so TS2454 cannot fire.
+            return tsc("UNCERTAIN", f"the enclosing scope of {where} uses a name declared with "
+                                    f"a definite assignment `!`; escalated")
 
     if claim.claim_type == "nullability" and _in_span(result.subscript_lines, span):
         # noUncheckedIndexedAccess is not forced, so an index access is never proven safe;
