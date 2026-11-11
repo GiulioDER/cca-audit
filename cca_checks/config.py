@@ -17,6 +17,7 @@ import os
 
 _DEFAULT_TIMEOUT_S = 120
 _DEFAULT_RUST_TIMEOUT_S = 600
+_DEFAULT_TS_TIMEOUT_S = 600
 _DEFAULT_MAX_EXAMPLES = 200
 _DEFAULT_SUBSTRATE_TOL = 1e-9
 _DEFAULT_SUBSTRATE_DPS = 50
@@ -97,6 +98,9 @@ TIMEOUT_S = _positive_int("CCA_TIMEOUT_S", _DEFAULT_TIMEOUT_S)
 # does not fail loudly, it silently deletes deterministic coverage for exactly the
 # large crates where it is worth most.
 RUST_TIMEOUT_S = _positive_int("CCA_RUST_TIMEOUT_S", _DEFAULT_RUST_TIMEOUT_S)
+
+# Ceiling for one TypeScript probe run; a timeout maps to UNCERTAIN, not a loud failure.
+TS_TIMEOUT_S = _positive_int("CCA_TS_TIMEOUT_S", _DEFAULT_TS_TIMEOUT_S)
 
 # How many examples Hypothesis generates per property.
 MAX_EXAMPLES = _positive_int("CCA_MAX_EXAMPLES", _DEFAULT_MAX_EXAMPLES)

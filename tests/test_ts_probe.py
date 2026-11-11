@@ -21,38 +21,12 @@ import tempfile
 
 import pytest
 
+from cca_checks.tsc_check import COPY_OPTIONS, FORCED_OPTIONS
+
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "typescript"
 PROBE = pathlib.Path(__file__).resolve().parent.parent / "cca_checks" / "ts_probe.js"
 TS_MAJOR = "6"
 
-# Moved to cca_checks/tsc_check.py in Task 3; the probe takes both from the request.
-COPY_OPTIONS = (
-    "baseUrl", "paths", "rootDirs", "moduleResolution", "module", "moduleSuffixes",
-    "customConditions", "jsx", "jsxImportSource", "lib", "target", "types", "typeRoots",
-    "allowArbitraryExtensions", "resolveJsonModule", "esModuleInterop",
-    "allowSyntheticDefaultImports", "experimentalDecorators", "useDefineForClassFields",
-)
-FORCED_OPTIONS = {
-    "strict": True,
-    # Every option TypeScript 6.0.3 marks `strictFlag`, so no inherited false survives.
-    "noImplicitAny": True,
-    "strictNullChecks": True,
-    "strictFunctionTypes": True,
-    "strictBindCallApply": True,
-    "strictPropertyInitialization": True,
-    "strictBuiltinIteratorReturn": True,
-    "noImplicitThis": True,
-    "useUnknownInCatchVariables": True,
-    "noCheck": False,
-    "noEmit": True,
-    "skipLibCheck": True,
-    "allowJs": False,
-    "checkJs": False,
-    "incremental": False,
-    "composite": False,
-    # TypeScript 6 reports baseUrl, node10 and es5 as errors; this silences only those.
-    "ignoreDeprecations": "6.0",
-}
 NULLABILITY = {18047, 2531}
 
 pytestmark = pytest.mark.skipif(
@@ -322,6 +296,14 @@ def test_unset_types_includes_every_at_types_package():
     would be a 2304 that the repo's own TypeScript 5 build never reported. With no
     `types` in the repo config the probe asks for `["*"]`, the TypeScript 5 default."""
     assert probe("autotypes/uses_global.ts", 2)["diagnostics"] == []
+
+
+def test_no_repo_config_still_includes_vendored_types():
+    """With no tsconfig at all the probe has no `types` to copy, so TypeScript 6 would
+    default it to [] and read a vendored global as an undefined name. Same default as
+    for a config that leaves `types` unset."""
+    r = probe("noconfig/uses_global.ts", 2)
+    assert r["diagnostics"] == []
 
 
 def test_explicit_empty_types_is_honoured():

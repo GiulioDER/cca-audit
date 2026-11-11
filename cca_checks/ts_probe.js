@@ -147,7 +147,16 @@ function owningConfig(ts, configPath, target) {
   return owners[0];
 }
 
-function effectiveOptions(ts, request, repo, basePath) {
+function ancestorTypeRoots(file) {
+  const roots = [];
+  for (let dir = path.dirname(file); ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, "node_modules", "@types");
+    if (fs.existsSync(candidate)) roots.push(candidate);
+    if (path.dirname(dir) === dir) return roots;
+  }
+}
+
+function effectiveOptions(ts, request, repo, basePath, target) {
   const forced = ts.convertCompilerOptionsFromJson(request.forced_options, basePath);
   const error = firstError(ts, forced.errors);
   if (error) refuse("forced_options: " + error);
@@ -169,6 +178,12 @@ function effectiveOptions(ts, request, repo, basePath) {
     // globals would read as undefined names. "*" is the TypeScript 5 default. A
     // `types` the repo does set, [] included, is its own choice and is copied as is.
     if (repo.options.types === undefined) options.types = ["*"];
+  } else {
+    // No repo config at all: nothing to copy, so the same TypeScript 5 default.
+    options.types = ["*"];
+    // Without a config TypeScript looks for @types from the probe's working
+    // directory, which is outside the audited tree; look from the claimed file.
+    options.typeRoots = ancestorTypeRoots(target);
   }
   return Object.assign(options, forced.options);
 }
@@ -336,7 +351,7 @@ function main() {
     ? null
     : owningConfig(ts, path.resolve(request.tsconfig), target);
   const basePath = repo ? path.dirname(repo.options.configFilePath) : path.dirname(target);
-  const options = effectiveOptions(ts, request, repo, basePath);
+  const options = effectiveOptions(ts, request, repo, basePath, target);
   const rootNames = (repo ? repo.fileNames : []).concat([target]);
 
   const host = ts.createCompilerHost(options);
