@@ -123,7 +123,8 @@ git commit -m "Compute TypeScript function spans with tree-sitter"
 - Produces, request (JSON on stdin):
   `{"protocol": 1, "typescript": <abs dir of the typescript package>, "tsconfig": <abs path or null>, "file": <abs path>, "span": [lo, hi], "copy_options": [<names>], "forced_options": {<tsconfig-style JSON>}}`
 - Produces, response (one JSON object on stdout, exit 0):
-  `{"protocol": 1, "version": "<ts.version>", "files": [<abs paths>], "diagnostics": [{"code": int, "message": str, "file": str|null, "start_line": int|null, "end_line": int|null}], "any_lines": [int], "directives": {"lines": [int], "nocheck": bool}, "subscript_lines": [int]}`
+  `{"protocol": 1, "version": "<ts.version>", "files": [<abs paths>], "diagnostics": [{"code": int, "message": str, "file": str|null, "start_line": int|null, "end_line": int|null}], "any_lines": [int], "assertion_lines": [int], "directives": {"lines": [int], "targets": [int], "nocheck": bool}, "subscript_lines": [int]}`
+  (Rulings F and G, after the Task 2 review: `assertion_lines` are span lines holding a `NonNullExpression`, or an `AsExpression` or `TypeAssertion` other than `as const`; `directives.targets` are the lines each `@ts-ignore` / `@ts-expect-error` actually suppresses, found by walking forward over blank and comment-only lines the way tsc's `markPrecedingCommentDirectiveLine` walks back. `subscript_lines` covers every line from an element access's start to its end.)
   Lines are 1-indexed. Any refusal (config does not parse, solution config with zero or several owning references, `require` fails) is exit code 2 with one line on stderr and nothing on stdout.
 
 Fixture layout (each directory has its own `tsconfig.json`; line numbers asserted in tests are the line of the defect):
@@ -225,7 +226,7 @@ git commit -m "Ship a TypeScript type probe that reports diagnostics and any-typ
   - `COPY_OPTIONS: tuple[str, ...]` (the allow-list, in the spec's order) and `FORCED_OPTIONS: dict[str, object]`.
   - `SUPPORTED_TS_MAJORS: frozenset[int]` = `{<major of TS_PIN>}`.
   - `@dataclass(frozen=True) class TscDiagnostic: code: int; message: str; file: str | None; start_line: int | None; end_line: int | None`
-  - `@dataclass(frozen=True) class TscResult: version: str; files: frozenset[str]; diagnostics: tuple[TscDiagnostic, ...]; any_lines: frozenset[int]; directive_lines: frozenset[int]; nocheck: bool; subscript_lines: frozenset[int]` where `files` and each diagnostic `file` are already passed through `same_file_key`.
+  - `@dataclass(frozen=True) class TscResult: version: str; files: frozenset[str]; diagnostics: tuple[TscDiagnostic, ...]; any_lines: frozenset[int]; assertion_lines: frozenset[int]; directive_lines: frozenset[int]; directive_targets: frozenset[int]; nocheck: bool; subscript_lines: frozenset[int]` where `files` and each diagnostic `file` are already passed through `same_file_key`.
   - `same_file_key(path: str) -> str`: `os.path.normcase(os.path.realpath(path))`.
   - `find_tsconfig(path: str) -> str | None`: nearest `tsconfig.json` walking up from the file's directory; stops after the first directory that contains `.git`, or at the filesystem root.
   - `typescript_package() -> str | None`: `resolve_tool("npm")`, run `npm root -g` with `PROBE_TIMEOUT_S`, return `<root>/typescript` if it contains `package.json`, else None.
@@ -241,7 +242,7 @@ def test_typescript_package_inside_audited_tree_is_none(): package path under tm
 def test_timeout_is_none(): subprocess raises TimeoutExpired; assert None
 def test_nonzero_exit_is_none(): returncode 2; assert None
 def test_non_json_stdout_is_none(): stdout "Found 3 errors"; assert None
-@pytest.mark.parametrize("field", ["version", "files", "diagnostics", "any_lines", "directives", "subscript_lines"])
+@pytest.mark.parametrize("field", ["version", "files", "diagnostics", "any_lines", "assertion_lines", "directives", "subscript_lines"])
 def test_missing_field_is_none(field): assert None
 def test_mistyped_field_is_none(): "any_lines": "3"; assert None
 def test_unsupported_major_is_none(): "version": f"{max(SUPPORTED_TS_MAJORS) + 1}.0.0"; assert None
@@ -308,9 +309,14 @@ def test_in_set_diag_covering_line_confirms(): diag(18047, start 4, end 5); clai
 def test_clean_span_refutes(): res() with span (2, 8) -> FALSE_POSITIVE, source "tsc"
 @pytest.mark.parametrize("claim_type", ["definedness", "type", "nullability"])
 def test_nocheck_blocks_refutation(claim_type): res(nocheck=True) -> UNCERTAIN
-def test_directive_in_span_blocks_refutation(): res(directive_lines={4}) span (2, 8) -> UNCERTAIN
+def test_directive_in_span_blocks_refutation(): res(directive_lines={4}, directive_targets={5}) span (2, 8) -> UNCERTAIN
+def test_directive_above_span_targeting_it_blocks_refutation(): res(directive_lines={1}, directive_targets={3}) span (3, 8) -> UNCERTAIN (Ruling G: the walk-up)
+@pytest.mark.parametrize("claim_type", ["type", "nullability"])
+def test_assertion_line_in_span_blocks_refutation(claim_type): assertion_lines={span[0] + 1} -> UNCERTAIN (Ruling F)
+def test_assertion_line_does_not_block_definedness(): assertion_lines in span -> FALSE_POSITIVE
 def test_directive_does_not_block_confirmation(): directive and an in-set diag at the line -> CONFIRMED
-def test_directive_outside_span_does_not_block(): directive_lines={1}, span (5, 9) -> FALSE_POSITIVE
+def test_directive_outside_span_does_not_block(): directive_lines={1}, directive_targets={2}, span (5, 9) -> FALSE_POSITIVE
+(The directive check blocks refutation when any `directive_targets` line is in the span; `directive_lines` alone never decides it.)
 def test_definedness_confirm_blocked_by_2688(): diag(2304 at line) plus unlocated 2688 -> UNCERTAIN
 def test_definedness_confirm_survives_2307(): diag(2304 at line) plus diag(2307, 1) -> CONFIRMED
 def test_other_code_at_line_is_uncertain(): diag(9999 at line) -> UNCERTAIN naming 9999
@@ -352,6 +358,8 @@ Expected: all pass.
 | delete the environment check | `test_environment_diag_in_file_blocks_refutation` |
 | delete the subscript check | `test_subscript_line_blocks_nullability_refutation` |
 | delete the `any_lines` check | `test_any_line_in_span_blocks_refutation[nullability]` |
+| delete the `assertion_lines` check | `test_assertion_line_in_span_blocks_refutation[type]` |
+| test `directive_lines` instead of `directive_targets` | `test_directive_above_span_targeting_it_blocks_refutation` |
 | move 7006 out of `BLINDNESS_CODES` | `test_blindness_diag_in_span_blocks_refutation[type]` |
 
 - [ ] **Step 6: Commit**
