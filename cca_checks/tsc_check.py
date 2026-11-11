@@ -169,7 +169,7 @@ def _diagnostic(raw: object) -> TscDiagnostic | None:
         return None
     code, message, file = raw.get("code"), raw.get("message"), raw.get("file")
     start, end = raw.get("start_line"), raw.get("end_line")
-    if not _is_int(code) or not isinstance(message, str):
+    if not isinstance(code, int) or not _is_int(code) or not isinstance(message, str):
         return None
     if file is not None and not isinstance(file, str):
         return None
@@ -201,8 +201,9 @@ def _parse_response(raw: str, claimed: str, missing: tuple[bool, tuple[str, ...]
     raw_diagnostics = data.get("diagnostics")
     if not isinstance(raw_diagnostics, list):
         return None
-    diagnostics = tuple(_diagnostic(d) for d in raw_diagnostics)
-    if None in diagnostics:
+    parsed = [_diagnostic(d) for d in raw_diagnostics]
+    diagnostics = tuple(d for d in parsed if d is not None)
+    if len(diagnostics) != len(parsed):
         return None
     directives = data.get("directives")
     if not isinstance(directives, dict) or not isinstance(directives.get("nocheck"), bool):
@@ -212,7 +213,8 @@ def _parse_response(raw: str, claimed: str, missing: tuple[bool, tuple[str, ...]
     subscript_lines = _lines(data.get("subscript_lines"))
     directive_lines = _lines(directives.get("lines"))
     directive_targets = _lines(directives.get("targets"))
-    if None in (any_lines, assertion_lines, subscript_lines, directive_lines, directive_targets):
+    if (any_lines is None or assertion_lines is None or subscript_lines is None
+            or directive_lines is None or directive_targets is None):
         return None
     return TscResult(version, keys, diagnostics, any_lines, assertion_lines,
                      directive_lines, directive_targets, directives["nocheck"],
