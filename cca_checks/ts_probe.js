@@ -10,8 +10,10 @@
  *            "file": <path>, "span": [lo, hi], "copy_options": [<names>],
  *            "forced_options": {<tsconfig style JSON>}}
  * Response: {"protocol": 1, "version", "files", "diagnostics", "any_lines",
- *            "directives": {"lines", "nocheck"}, "subscript_lines"}, exit 0.
- * Refusal:  exit 2, one line on stderr, nothing on stdout.
+ *            "assertion_lines", "directives": {"lines", "targets", "nocheck"},
+ *            "subscript_lines"}, exit 0.
+ * Refusal:  exit 2, one line on stderr, nothing on stdout. The claimed file being a
+ *           declaration file is a refusal too: skipLibCheck hides its errors.
  *
  * Soundness rule: no repo option, suppression comment or `any` may make the compiler
  * look silent about code it could not see. Hence only `copy_options` keys survive from
@@ -36,7 +38,10 @@
  *   2591   types_node/uses_process.ts:2    Cannot find name 'process' (install @types/node)
  *   2304   autotypes/uses_global.ts:2      global from node_modules/@types not in scope:
  *                                          TypeScript 6 defaults `types` to [], so no
- *                                          @types package is included unless listed
+ *                                          @types package is included unless listed;
+ *                                          gone once the probe sets `types: ["*"]` for
+ *                                          a config without `types`
+ *   2304   types_empty/uses_global.ts:2    same, under the repo's explicit `types: []`
  *   5101   deprecated (unlocated)          'baseUrl' is deprecated
  *   5107   deprecated (unlocated)          'moduleResolution=node10', 'target=ES5' and
  *                                          'esModuleInterop=false' are deprecated
@@ -48,11 +53,15 @@
  * The 5101 and 5107 errors appear only when `ignoreDeprecations` is not forced; with
  * the forced `"6.0"` they are silenced, which silences no check.
  *
- * Directives. Comments are read from the parser's own tokens, so a string, template or
- * regular expression literal is never mistaken for a comment. A comment that merely
- * contains `@ts-ignore` or `@ts-expect-error` is reported, because TypeScript 6.0.3
- * honours `/// @ts-ignore`, `/* @ts-ignore *\/` and `// @ts-ignored` as well as the
- * plain form; over reporting costs a refutation, under reporting would buy one.
+ * Directives. Comments are read as the leading and trailing comment ranges of the
+ * parser's own tokens, so a string, template or regular expression literal is never
+ * mistaken for a comment, and a comment after code on the same line
+ * (`x = 1; // @ts-ignore`) is found as well as one on a line of its own. A comment that
+ * merely contains `@ts-ignore` or `@ts-expect-error` is reported, because TypeScript
+ * 6.0.3 honours `/// @ts-ignore`, `/* @ts-ignore *\/` and `// @ts-ignored` as well as
+ * the plain form; over reporting costs a refutation, under reporting would buy one.
+ * `targets` holds the line each one suppresses, found the way tsc finds it: the first
+ * line after the comment that is neither blank nor a `//` comment.
  */
 
 const fs = require("fs");
@@ -155,6 +164,11 @@ function effectiveOptions(ts, request, repo, basePath) {
     // resolve against the probe's working directory instead.
     if (options.paths !== undefined) options.pathsBasePath = repo.options.pathsBasePath;
     options.configFilePath = repo.options.configFilePath;
+    // TypeScript 6 defaults `types` to [], which drops every global an installed
+    // @types package declares: a repo built with TypeScript 5 never saw that, and its
+    // globals would read as undefined names. "*" is the TypeScript 5 default. A
+    // `types` the repo does set, [] included, is its own choice and is copied as is.
+    if (repo.options.types === undefined) options.types = ["*"];
   }
   return Object.assign(options, forced.options);
 }
@@ -184,52 +198,112 @@ function isIntrinsicTagName(ts, node) {
   return isTag && /^[a-z]|-/.test(node.text);
 }
 
+// `u!`, `u as T` and `<T>u` tell the checker what to believe, so its silence there is
+// the author's word, not a proof. `as const` only narrows a literal and is not one.
+function isAssertion(ts, node) {
+  if (ts.isNonNullExpression(node)) return true;
+  return (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node))
+    && !ts.isConstTypeReference(node.type);
+}
+
+// The member access, call or `!` chain an element access is the head of: in
+// `a[i]` followed by `.x` on the next line, the possibly undefined value is
+// dereferenced on that next line.
+function accessChainEnd(ts, node) {
+  let top = node;
+  for (let p = top.parent; p && p.expression === top
+    && (ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)
+      || ts.isCallExpression(p) || ts.isNonNullExpression(p)); p = top.parent) {
+    top = p;
+  }
+  return top.getEnd();
+}
+
+// Nodes the checker types as `any` although no value flows through them: a name in a
+// type (`const` in `as const`, `NS` in `NS.T`) and a module specifier string. A value
+// that does carry `any` is still caught at its own expression.
+function namesNoValue(ts, node) {
+  const parent = node.parent;
+  if (ts.isIdentifier(node)) {
+    return isIntrinsicTagName(ts, node)
+      || ts.isTypeReferenceNode(parent) || ts.isQualifiedName(parent);
+  }
+  return ts.isStringLiteral(node)
+    && (ts.isImportDeclaration(parent) || ts.isExportDeclaration(parent))
+    && parent.moduleSpecifier === node;
+}
+
 function expressionLines(ts, checker, sourceFile, span) {
   const [lo, hi] = span;
   const anyLines = new Set();
+  const assertionLines = new Set();
   const subscriptLines = new Set();
-  const typed = new Set([
-    ts.SyntaxKind.Identifier,
-    ts.SyntaxKind.PropertyAccessExpression,
-    ts.SyntaxKind.ElementAccessExpression,
-    ts.SyntaxKind.CallExpression,
-  ]);
+  function addLines(lines, start, end) {
+    for (let l = Math.max(lo, lineOf(sourceFile, start)); l <= Math.min(hi, lineOf(sourceFile, end)); l++) {
+      lines.add(l);
+    }
+  }
   function visit(node) {
-    if (typed.has(node.kind) && !(ts.isIdentifier(node) && isIntrinsicTagName(ts, node))) {
-      const line = lineOf(sourceFile, node.getStart(sourceFile));
-      if (line >= lo && line <= hi) {
-        if (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any) anyLines.add(line);
-        if (node.kind === ts.SyntaxKind.ElementAccessExpression) subscriptLines.add(line);
+    // Every expression, not a list of kinds: `f(u as any)` holds no access or call
+    // whose own type is any, only the cast.
+    if (ts.isExpression(node) && !namesNoValue(ts, node)) {
+      const start = node.getStart(sourceFile);
+      const line = lineOf(sourceFile, start);
+      if (line >= lo && line <= hi
+        && (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any)) anyLines.add(line);
+      if (isAssertion(ts, node)) addLines(assertionLines, start, node.getEnd());
+      if (ts.isElementAccessExpression(node)) {
+        addLines(subscriptLines, start, accessChainEnd(ts, node));
       }
     }
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
-  return { anyLines, subscriptLines };
+  return { anyLines, assertionLines, subscriptLines };
 }
 
 function isJSDoc(ts, node) {
   return node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode;
 }
 
-// Every comment is leading trivia of exactly one token, so collecting the leading
-// comment ranges of each token the parser produced finds every comment and nothing
-// inside a literal. A bare scanner over the text cannot do this: it does not know
-// that `/`...`/` is a regular expression, and loses track after a backtick inside one.
+// The line a directive ending on `line` suppresses: tsc walks up from a diagnostic
+// over blank lines and `//` comment lines until it meets a directive
+// (markPrecedingCommentDirectiveLine), so this walks down the same way. Null when
+// only blank and comment lines follow.
+function directiveTarget(sourceFile, line) {
+  const starts = sourceFile.getLineStarts();
+  const text = sourceFile.text;
+  for (let i = line; i < starts.length; i++) {
+    const lineText = text.slice(starts[i], i + 1 < starts.length ? starts[i + 1] : text.length).trim();
+    if (lineText !== "" && !/^\s*\/\/.*$/.test(lineText)) return i + 1;
+  }
+  return null;
+}
+
+// Every comment is trivia of a token the parser produced: leading trivia when it
+// starts after a line break, trailing trivia when it shares the line with the token
+// before it (`x = 1; // @ts-ignore`). Collecting both for every token finds every
+// comment and nothing inside a literal. A bare scanner over the text cannot do this:
+// it does not know that `/`...`/` is a regular expression, and loses track after a
+// backtick inside one.
 function commentDirectives(ts, sourceFile) {
   const text = sourceFile.text;
   const seen = new Set();
   const lines = new Set();
+  const targets = new Set();
   let nocheck = false;
   function token(node) {
-    for (const range of ts.getLeadingCommentRanges(text, node.pos) || []) {
+    const ranges = (ts.getLeadingCommentRanges(text, node.pos) || [])
+      .concat(ts.getTrailingCommentRanges(text, node.end) || []);
+    for (const range of ranges) {
       if (seen.has(range.pos)) continue;
       seen.add(range.pos);
       const comment = text.slice(range.pos, range.end);
       if (/@ts-(ignore|expect-error)/.test(comment)) {
-        for (let l = lineOf(sourceFile, range.pos); l <= lineOf(sourceFile, range.end); l++) {
-          lines.add(l);
-        }
+        const last = lineOf(sourceFile, range.end);
+        for (let l = lineOf(sourceFile, range.pos); l <= last; l++) lines.add(l);
+        const target = directiveTarget(sourceFile, last);
+        if (target !== null) targets.add(target);
       }
       if (/@ts-nocheck/.test(comment)) nocheck = true;
     }
@@ -241,7 +315,8 @@ function commentDirectives(ts, sourceFile) {
     else children.forEach(walk);
   }
   walk(sourceFile);
-  return { lines: [...lines].sort((a, b) => a - b), nocheck };
+  const sorted = (set) => [...set].sort((a, b) => a - b);
+  return { lines: sorted(lines), targets: sorted(targets), nocheck };
 }
 
 function main() {
@@ -268,21 +343,25 @@ function main() {
   const program = ts.createProgram({ rootNames, options, host });
   const sourceFile = program.getSourceFile(target);
   if (!sourceFile) refuse(target + " is not in the program");
+  // skipLibCheck is forced, so a declaration file's own errors are never reported.
+  if (sourceFile.isDeclarationFile) refuse(target + " is a declaration file");
 
   // Diagnostics first: a type query on a name the checker never resolved during the
   // check (a JSX tag, for one) adds a "Cannot find name" of its own, which would read
   // as a defect in the audited code.
   const diagnostics = ts.getPreEmitDiagnostics(program).map((d) => serializeDiagnostic(ts, d));
   const checker = program.getTypeChecker();
-  const { anyLines, subscriptLines } = expressionLines(ts, checker, sourceFile, request.span);
+  const lines = expressionLines(ts, checker, sourceFile, request.span);
+  const sorted = (set) => [...set].sort((a, b) => a - b);
   const response = {
     protocol: PROTOCOL,
     version: ts.version,
     files: program.getSourceFiles().map((f) => path.resolve(f.fileName)),
     diagnostics,
-    any_lines: [...anyLines].sort((a, b) => a - b),
+    any_lines: sorted(lines.anyLines),
+    assertion_lines: sorted(lines.assertionLines),
     directives: commentDirectives(ts, sourceFile),
-    subscript_lines: [...subscriptLines].sort((a, b) => a - b),
+    subscript_lines: sorted(lines.subscriptLines),
   };
   process.stdout.write(JSON.stringify(response) + "\n");
 }

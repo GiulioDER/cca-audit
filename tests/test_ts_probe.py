@@ -227,9 +227,26 @@ def test_typed_access_has_no_any_line():
 
 
 def test_directives_are_reported():
-    assert probe("basic/suppressed_ignore.ts", 4)["directives"] == {"lines": [3], "nocheck": False}
-    assert probe("basic/suppressed_expect.ts", 4)["directives"] == {"lines": [3], "nocheck": False}
+    want = {"lines": [3], "targets": [4], "nocheck": False}
+    assert probe("basic/suppressed_ignore.ts", 4)["directives"] == want
+    assert probe("basic/suppressed_expect.ts", 4)["directives"] == want
     assert probe("basic/suppressed_nocheck.ts", 4)["directives"]["nocheck"] is True
+
+
+def test_trailing_directive_is_reported():
+    """`const k = ""; // @ts-ignore` suppresses the next line (tsc 6.0.3 exits 0 on
+    this fixture), and the comment is trailing trivia of `;`, not leading trivia."""
+    directives = probe("basic/directive_trailing.ts", 4)["directives"]
+    assert directives["lines"] == [3, 7]
+    assert directives["targets"] == [4, 8]
+
+
+def test_directive_target_walks_over_blank_and_comment_lines():
+    """tsc looks for a directive above a diagnostic across blank and `//` lines, so
+    the `// @ts-ignore` on line 3 suppresses `u.name` on line 6 (tsc exits 0)."""
+    directives = probe("basic/directive_walkup.ts", 6)["directives"]
+    assert directives["lines"] == [3]
+    assert directives["targets"] == [6]
 
 
 def test_directive_inside_a_string_is_not_reported():
@@ -252,6 +269,43 @@ def test_index_access_line_is_reported():
     assert 3 in probe("basic/index_access.ts", 3)["subscript_lines"]
 
 
+def test_index_access_spread_over_lines_reports_every_line():
+    """`a[i]` on line 3 is dereferenced by `.x` on line 4; a claim may cite either."""
+    assert probe("basic/index_multiline.ts", 4, span=(2, 5))["subscript_lines"] == [3, 4]
+
+
+def test_cast_inside_a_call_argument_is_an_any_line():
+    """`takesNumber(u as any)` reports nothing; only the cast itself is `any`."""
+    r = probe("basic/as_any_arg.ts", 5)
+    assert codes_at(r, "basic/as_any_arg.ts", 5) == set()
+    assert 5 in r["any_lines"]
+
+
+def test_type_names_and_module_specifiers_are_not_any_lines():
+    """The checker gives `const` in `as const` and the string in `from "./helper"`
+    the error type; neither carries a value, so neither marks its line blind."""
+    assert probe("basic/double_cast.ts", 5, span=(1, 7))["any_lines"] == []
+    assert probe("basic/any_helper.ts", 3, span=(1, 4))["any_lines"] == [3]
+
+
+def test_non_null_assertion_is_an_assertion_line():
+    assert 3 in probe("basic/non_null.ts", 3)["assertion_lines"]
+
+
+def test_double_cast_is_an_assertion_line_and_as_const_is_not():
+    r = probe("basic/double_cast.ts", 5, span=(1, 7))
+    assert 5 in r["assertion_lines"]
+    assert 7 not in r["assertion_lines"]
+
+
+def test_declaration_file_target_exits_2():
+    """skipLibCheck is forced, so a .d.ts would report nothing whatever it holds."""
+    done = run_probe(request_for("basic/decl_target.d.ts", (1, 1)))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert "declaration file" in done.stderr
+
+
 def test_unlocated_diagnostic_has_null_file():
     r = probe("types_node/uses_process.ts", 2)
     assert any(d["code"] == 2688 and d["file"] is None for d in r["diagnostics"])
@@ -263,11 +317,17 @@ def test_deprecated_repo_options_add_no_diagnostic():
     assert probe("deprecated/clean.ts", 2)["diagnostics"] == []
 
 
-def test_types_default_does_not_auto_include_at_types_packages():
-    """Pins TypeScript 6.0.3: with no `types` in the config, a global declared by a
-    package under node_modules/@types is not in scope, so its use is a 2304."""
-    r = probe("autotypes/uses_global.ts", 2)
-    assert 2304 in codes_at(r, "autotypes/uses_global.ts", 2)
+def test_unset_types_includes_every_at_types_package():
+    """TypeScript 6.0.3 defaults `types` to [], so a global from node_modules/@types
+    would be a 2304 that the repo's own TypeScript 5 build never reported. With no
+    `types` in the repo config the probe asks for `["*"]`, the TypeScript 5 default."""
+    assert probe("autotypes/uses_global.ts", 2)["diagnostics"] == []
+
+
+def test_explicit_empty_types_is_honoured():
+    """`types: []` is the repo's own choice: the vendored global stays out of scope."""
+    r = probe("types_empty/uses_global.ts", 2)
+    assert 2304 in codes_at(r, "types_empty/uses_global.ts", 2)
 
 
 def test_listed_types_resolve_from_the_config_directory():
