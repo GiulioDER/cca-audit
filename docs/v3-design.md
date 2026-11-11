@@ -178,12 +178,14 @@ Promote the `bps-sizing` demo (real 100× bug + 3 planted traps) into a **regres
 
   The TypeScript backend (`cca_checks/languages/typescript.py`, `cca_checks/tsc_check.py`,
   `cca_checks/ts_probe.js`) settles those three claim types from the compiler's own diagnostics,
-  run by a trusted global `typescript` and never by anything in the audited tree. TypeScript 6.0.3
-  is pinned; any other major gives `UNCERTAIN` (TypeScript 7 has no JavaScript compiler API).
-  `taint` and `clock_leak` still escalate. Refutation is blocked by suppression directives
-  (`@ts-ignore`, `@ts-expect-error` on a span line, `@ts-nocheck`), `any` in the span, type
-  assertions other than `as const`, implicit-any and environment diagnostics, unlocated
-  diagnostics, and, for nullability, any element access or index-signature read in the span.
+  run by a trusted global `typescript` and never by anything in the audited tree. TypeScript major 6
+  is supported (6.0.3 is the install and CI pin); any other major gives `UNCERTAIN` (TypeScript 7
+  has no JavaScript compiler API). `taint` and `clock_leak` still escalate. Refutation is blocked
+  by suppression directives (`@ts-ignore`, `@ts-expect-error` on a span line, `@ts-nocheck`),
+  environment diagnostics in the claimed file and unlocated diagnostics; for `type` and
+  `nullability` claims also by `any` in the span, type assertions other than `as const` and
+  implicit-any diagnostics; and for nullability by any element access or index-signature read in
+  the span.
   Design: `docs/superpowers/specs/2026-11-11-typescript-tsc-backend-design.md`.
 - **v3.4 (shipped)** — `numeric` claims via auditor-declared metamorphic properties, run
   under `hypothesis` (`assert_bounded`, `assert_monotonic_in`, `assert_limit`,
