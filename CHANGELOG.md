@@ -6,6 +6,18 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**TypeScript backend for `definedness`, `type` and `nullability`.** `.ts`, `.tsx`, `.mts` and
+`.cts` files are now settled from the compiler's own diagnostics (`cca_checks/languages/typescript.py`,
+`cca_checks/tsc_check.py`, `cca_checks/ts_probe.js`). TypeScript 6.0.3 is pinned and any other
+major gives `UNCERTAIN`. Install with `npm install -g typescript@6.0.3` and the `typescript` pip
+extra; `CCA_TS_TIMEOUT_S` (default 600) bounds each run. `taint` and `clock_leak` still escalate.
+Refutation is blocked by suppression directives, `any`, type assertions, implicit-any and
+environment diagnostics, and, for nullability, index access. `.d.ts` claims never refute, and a
+repository without installed dependencies can confirm but rarely refute; see
+[limits](docs/limits.md).
+
 ## [0.15.0] - 2026-11-04
 
 **Upgrade note: install the package and the prompts together.** `record L2` now refuses a finding

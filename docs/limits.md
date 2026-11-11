@@ -25,6 +25,7 @@ Where CCA-Audit is blind. Most of these limits are asserted by tests.
   |---|---|---|
   | **Python** | `definedness` · `nullability` · `type` · `taint` · `clock_leak` | `ast` + `pyright` + `semgrep` |
   | **Rust** | `clock_leak` · `panic_path` · `overflow` · `error_swallow` · `unsafe_op` · `taint` | tree-sitter + `clippy` + `semgrep` |
+  | **TypeScript** | `definedness` · `type` · `nullability` | tree-sitter + `tsc` (pinned 6.0.3) |
   | **everything else** | nothing; every claim escalates to LLM adjudication | no tool |
 
   A claim about a file no backend covers, or a claim type the covering backend does not declare,
@@ -35,6 +36,22 @@ Where CCA-Audit is blind. Most of these limits are asserted by tests.
   survive to review in code that compiled: the name resolved, the types checked, and `Option` is not
   a nullable pointer. Porting them would have doubled the claim vocabulary while refuting almost
   everything by construction.
+- **TypeScript settles only what the compiler could see.** TypeScript 6.0.3 is the one supported
+  major; any other gives `UNCERTAIN`. A `FALSE_POSITIVE` is withheld when the span has a
+  suppression directive (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`), `any`, or a type
+  assertion other than `as const`, and when the compiler reports an implicit-any, a missing module
+  or type package, or a diagnostic it cannot place in a file.
+- **TypeScript `.d.ts` claims never refute.** `skipLibCheck` leaves declaration files unchecked, so
+  the compiler's silence about one proves nothing.
+- **TypeScript nullability claims never refute on index access.** Any element access or
+  index-signature property read in the span blocks refutation, because `noUncheckedIndexedAccess`
+  is not forced and the compiler is silent about exactly those reads.
+- **TypeScript `definedness` is not confirmed when the environment is incomplete.** A TS2688 (a
+  type package that cannot be found), or a `package.json` that declares an `@types` package that is
+  not installed, withholds `CONFIRMED`. With no tsconfig, or one that leaves `types` unset, the
+  probe includes every `@types` package it can find, because TypeScript 6 stopped doing that.
+- **A TypeScript repository without installed dependencies can confirm but rarely refute.**
+  Unresolved modules are environment diagnostics, and those block refutation.
 - **The Rust clock check reads syntax, not semantics.** tree-sitter does not expand macros, so it
   cannot see a clock read inside a `macro_rules!` body or one reaching the file through a glob `use`.
   Both block refutation instead of being ignored: a file must not earn a `FALSE_POSITIVE` with an
