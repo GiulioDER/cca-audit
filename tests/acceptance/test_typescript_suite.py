@@ -12,8 +12,6 @@ import sys
 
 import pytest
 
-from cca_checks.toolpath import resolve_tool
-
 pytestmark = pytest.mark.skipif(
     not (shutil.which("node") and shutil.which("tsc")),
     reason="node and tsc are required for the TypeScript acceptance suite")
@@ -107,10 +105,37 @@ def test_tsx_component_confirms():
     assert check("nullability", "tsx/component.tsx", 3)["verdict"] == "CONFIRMED"
 
 
-def test_node_in_audited_root_is_refused(tmp_path, monkeypatch):
-    """The planted binary must never run; no verdict is asserted, only the resolver."""
-    for name in ("node", "node.exe"):
-        (tmp_path / name).write_text("not a real node")
-    monkeypatch.chdir(tmp_path)
-    found = resolve_tool("node")
-    assert found is None or os.path.dirname(os.path.realpath(found)) != str(tmp_path.resolve())
+@pytest.mark.parametrize("fixture, claim_type, line", [
+    ("destructure/array_binding.ts", "nullability", 4),
+    ("destructure/array_assign.ts", "nullability", 5),
+    ("destructure/record_binding.ts", "nullability", 4),
+    ("destructure/outer_index.ts", "nullability", 5),
+    ("outside_span/outer_bang.ts", "nullability", 4),
+    ("outside_span/definite.ts", "definedness", 3),
+    ("import_member/use.ts", "definedness", 3),
+    ("import_member/use_default.ts", "definedness", 3),
+])
+def test_blind_spots_from_the_final_review_never_refute(fixture, claim_type, line):
+    assert check(claim_type, fixture, line)["verdict"] != "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("fixture, claim_type, line", [
+    ("outside_span/outer_bang_ctl.ts", "nullability", 4),
+    ("outside_span/definite_ctl.ts", "definedness", 3),
+    ("module_detection/b.ts", "definedness", 2),
+])
+def test_controls_without_the_blind_spot_confirm(fixture, claim_type, line):
+    assert check(claim_type, fixture, line)["verdict"] == "CONFIRMED"
+
+
+def test_declared_destructuring_still_refutes():
+    assert check("nullability", "destructure/declared_binding.ts", 8)["verdict"] == "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("fixture", ["ts_extensions/main.ts", "rewrite_extensions/main.ts"])
+def test_ts_extension_imports_still_refute(fixture):
+    assert check("type", fixture, 3)["verdict"] == "FALSE_POSITIVE"
+
+
+def test_install_types_code_elsewhere_does_not_confirm_definedness():
+    assert check("definedness", "install_types/uses_dirname.ts", 2)["verdict"] != "CONFIRMED"

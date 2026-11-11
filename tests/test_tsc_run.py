@@ -35,7 +35,7 @@ class World:
         self.file.write_text("export const x = 1;\n")
         self.global_root = tmp_path / "global"
         (self.global_root / "typescript").mkdir(parents=True)
-        (self.global_root / "typescript" / "package.json").write_text("{}")
+        (self.global_root / "typescript" / "package.json").write_text('{"version": "6.0.3"}')
         self.stdout = json.dumps(self.response())
         self.returncode = 0
         self.raises = None
@@ -50,7 +50,7 @@ class World:
             "protocol": 1, "version": "6.0.3", "files": [str(self.file)],
             "diagnostics": [], "any_lines": [3], "assertion_lines": [],
             "directives": {"lines": [], "targets": [], "nocheck": False},
-            "subscript_lines": [],
+            "subscript_lines": [], "definite_assignment_lines": [],
         }
         data.update(override)
         return data
@@ -112,7 +112,7 @@ def test_package_inside_the_files_repo_but_outside_cwd_is_none(world, tmp_path):
     claimed.write_text("")
     world.global_root = other / "node_modules"
     (world.global_root / "typescript").mkdir(parents=True)
-    (world.global_root / "typescript" / "package.json").write_text("{}")
+    (world.global_root / "typescript" / "package.json").write_text('{"version": "6.0.3"}')
     world.set_response(files=[str(claimed)])
     assert typescript_package() is not None
     assert run_tsc(str(claimed), (1, 3)) is None
@@ -134,7 +134,8 @@ def test_non_json_stdout_is_none(world):
 
 
 @pytest.mark.parametrize("field", ["version", "files", "diagnostics", "any_lines",
-                                   "assertion_lines", "directives", "subscript_lines"])
+                                   "assertion_lines", "directives", "subscript_lines",
+                                   "definite_assignment_lines"])
 def test_missing_field_is_none(world, field):
     data = world.response()
     del data[field]
@@ -228,4 +229,33 @@ def test_no_package_json_is_complete(world):
 
 def test_unparseable_package_json_is_incomplete(world):
     (world.repo / "package.json").write_text("{not json")
+    assert run_tsc(str(world.file), (1, 3)).types_incomplete is True
+
+
+@pytest.mark.parametrize("package_json", ['{"version": "7.0.0"}', "{}", "not json"],
+                         ids=["major_7", "no_version", "unreadable"])
+def test_unsupported_typescript_package_is_none_without_running_the_probe(world, package_json):
+    """TypeScript 7 has a package.json but no createProgram: refuse before launching."""
+    (world.global_root / "typescript" / "package.json").write_text(package_json)
+    assert run_tsc(str(world.file), (1, 3)) is None
+    assert not any(c[0][0] == "node" for c in world.calls)
+
+
+def test_types_check_walks_to_the_filesystem_root_without_git(world, tmp_path):
+    """An unpacked tarball has no .git; its package.json sits above src/."""
+    tree = tmp_path / "tarball"
+    (tree / "src").mkdir(parents=True)
+    claimed = tree / "src" / "a.ts"
+    claimed.write_text("")
+    _manifest(tree, devDependencies={"@types/node": "1"})
+    world.set_response(files=[str(claimed)])
+    r = run_tsc(str(claimed), (1, 3))
+    assert r.types_incomplete and r.missing_types == ("@types/node",)
+
+
+@pytest.mark.parametrize("section", [[1], "@types/node", None],
+                         ids=["list", "string", "null"])
+def test_dependency_section_that_is_not_an_object_is_incomplete(world, section):
+    """npm would reject such a manifest; its declarations cannot be checked."""
+    _manifest(world.repo, devDependencies=section)
     assert run_tsc(str(world.file), (1, 3)).types_incomplete is True

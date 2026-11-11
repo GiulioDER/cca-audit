@@ -8,7 +8,8 @@ text search that a string literal can fool.
 
 Red proof for every behaviour test, per the owner's 2026-09-08 rule, is recorded in
 `.superpowers/sdd/2026-11-11-typescript-tsc-backend/task-2-report.md` (node ID,
-mutation of `ts_probe.js`, failure reason).
+mutation of `ts_probe.js`, failure reason), and for the tests added by the final
+review's fixes in `final-fix-report.md` beside it.
 """
 
 import functools
@@ -279,6 +280,74 @@ def test_double_cast_is_an_assertion_line_and_as_const_is_not():
     r = probe("basic/double_cast.ts", 5, span=(1, 7))
     assert 5 in r["assertion_lines"]
     assert 7 not in r["assertion_lines"]
+
+
+@pytest.mark.parametrize("fixture_rel, span, line", [
+    ("destructure/array_binding.ts", (2, 5), 3),
+    ("destructure/array_assign.ts", (2, 6), 4),
+    ("destructure/record_binding.ts", (2, 5), 3),
+    ("destructure/object_assign.ts", (2, 6), 4),
+    ("destructure/rest_tuple.ts", (2, 5), 3),
+], ids=["array_binding", "array_assign", "record_binding", "object_assign", "rest_tuple"])
+def test_destructuring_by_index_is_a_subscript_line(fixture_rel, span, line):
+    """`const [u] = items`, `[u] = items`, `const { alice } = m` on a Record and a
+    position in a tuple's rest element read like `items[0]` and `m["alice"]`; under
+    noUncheckedIndexedAccess tsc reports each use as possibly undefined."""
+    assert line in probe(fixture_rel, line, span=span)["subscript_lines"]
+
+
+def test_tuple_and_declared_destructuring_is_not_a_subscript_line():
+    """A `useState` pair, the pairs of `Object.entries` and a declared property are
+    checked members; marking them would block refutation in most React code."""
+    assert probe("destructure/declared_binding.ts", 8, span=(3, 10))["subscript_lines"] == []
+
+
+def test_index_read_outside_the_span_marks_the_use():
+    """`const first = items[0]` at module level; `first.name` in the function."""
+    assert probe("destructure/outer_index.ts", 5, span=(4, 6))["subscript_lines"] == [5]
+
+
+@pytest.mark.parametrize("fixture_rel", ["outside_span/outer_bang.ts",
+                                         "outside_span/outer_cast.ts"])
+def test_assertion_outside_the_span_marks_the_use(fixture_rel):
+    """`const app = find("app")!` at module level makes `app.text` in the function
+    look safe; without the `!` tsc reports 18047 there (the control below)."""
+    assert probe(fixture_rel, 4, span=(3, 5))["assertion_lines"] == [4]
+
+
+def test_unasserted_declaration_outside_the_span_is_checked():
+    r = probe("outside_span/outer_bang_ctl.ts", 4, span=(3, 5))
+    assert codes_at(r, "outside_span/outer_bang_ctl.ts", 4) == {18047}
+    assert r["assertion_lines"] == []
+
+
+def test_definite_assignment_is_reported():
+    """`let n!: number` silences TS2454 at `n + 1`; the control without `!` has it."""
+    assert probe("outside_span/definite.ts", 3, span=(1, 4))["definite_assignment_lines"] == [2, 3]
+    r = probe("outside_span/definite_ctl.ts", 3, span=(1, 4))
+    assert codes_at(r, "outside_span/definite_ctl.ts", 3) == {2454}
+    assert r["definite_assignment_lines"] == []
+
+
+def test_module_detection_is_copied():
+    """Under the repo's `moduleDetection: "force"` a.ts is a module, so `helper` is
+    undefined in b.ts; dropped, both files are global scripts and it resolves."""
+    assert 2304 in codes_at(probe("module_detection/b.ts", 2), "module_detection/b.ts", 2)
+
+
+@pytest.mark.parametrize("fixture_rel", ["ts_extensions/main.ts", "rewrite_extensions/main.ts"])
+def test_ts_extension_imports_are_copied(fixture_rel):
+    """`import { h } from "./h.ts"` is a TS5097 in the claimed file unless the repo's
+    allowImportingTsExtensions or rewriteRelativeImportExtensions is applied."""
+    assert probe(fixture_rel, 3, span=(2, 4))["diagnostics"] == []
+
+
+def test_import_member_codes_sit_on_the_import_line():
+    """Observation for IMPORT_MEMBER_CODES, not a guard: the use sites report nothing."""
+    r = probe("import_member/use.ts", 3, span=(2, 4))
+    assert codes_at(r, "import_member/use.ts", 1) == {2305}
+    assert codes_at(r, "import_member/use_default.ts", 1) == {1192}
+    assert codes_at(r, "import_member/use.ts", 3) == set()
 
 
 def test_declaration_file_target_exits_2():

@@ -8,6 +8,8 @@ from cca_checks.tsc_check import (
     CODES_BY_CLAIM,
     DEFINEDNESS_CODES,
     ENVIRONMENT_CODES,
+    IMPORT_MEMBER_CODES,
+    INSTALL_TYPES_CODES,
     NULLABILITY_CODES,
     TYPE_CODES,
     TscDiagnostic,
@@ -33,7 +35,8 @@ def res(**overrides):
     fields = dict(version="6.0.3", files=frozenset({CLAIMED}), diagnostics=(),
                   any_lines=frozenset(), assertion_lines=frozenset(),
                   directive_lines=frozenset(), directive_targets=frozenset(),
-                  nocheck=False, subscript_lines=frozenset(), types_incomplete=False)
+                  nocheck=False, subscript_lines=frozenset(),
+                  definite_assignment_lines=frozenset(), types_incomplete=False)
     fields.update(overrides)
     return TscResult(**fields)
 
@@ -44,13 +47,14 @@ def claim(claim_type="nullability", line=LINE):
 
 def test_code_sets_are_pairwise_disjoint():
     sets = [DEFINEDNESS_CODES, NULLABILITY_CODES, TYPE_CODES, ENVIRONMENT_CODES,
-            BLINDNESS_CODES]
+            BLINDNESS_CODES, IMPORT_MEMBER_CODES]
     for i, a in enumerate(sets):
         for b in sets[i + 1:]:
             assert not a & b
         assert not any(5000 <= c <= 5999 for c in a)
     assert is_environment(5101) and is_environment(2307) and not is_environment(18047)
     assert set(CODES_BY_CLAIM) == {"definedness", "type", "nullability"}
+    assert INSTALL_TYPES_CODES <= ENVIRONMENT_CODES
 
 
 def test_none_result_is_uncertain_llm():
@@ -228,3 +232,40 @@ def test_environment_global_codes_elsewhere_in_file_block_refutation(code):
     r = res(diagnostics=(diag(code, 1),))
     v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
     assert v.verdict == "UNCERTAIN"
+
+
+@pytest.mark.parametrize("code", sorted(IMPORT_MEMBER_CODES))
+def test_import_member_code_blocks_definedness_refutation(code):
+    """`import { nope } from "./h"` is a TS2305 on line 1; `nope + 1` inside the
+    function reports nothing, because the binding resolves as the error type."""
+    r = res(diagnostics=(diag(code, 1),))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "UNCERTAIN" and "does not export" in v.evidence
+
+
+def test_import_member_code_in_another_file_does_not_block():
+    r = res(diagnostics=(diag(2305, 1, file=OTHER),))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "FALSE_POSITIVE"
+
+
+def test_definite_assignment_blocks_definedness_refutation():
+    """`let n!: number; return n + 1;` reports no TS2454; without the `!` it does."""
+    r = res(definite_assignment_lines=frozenset({LINE}))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "UNCERTAIN" and "definite assignment" in v.evidence
+
+
+def test_definite_assignment_outside_span_does_not_block():
+    r = res(definite_assignment_lines=frozenset({SPAN[1] + 1}))
+    assert verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN).verdict == (
+        "FALSE_POSITIVE")
+
+
+@pytest.mark.parametrize("code", sorted(INSTALL_TYPES_CODES))
+def test_definedness_confirm_blocked_by_install_types_code_anywhere(code):
+    """`__dirname` is a 2304 while `process.env` elsewhere is a 2580: the same
+    missing @types/node removes both, so the 2304 is an environment fact."""
+    r = res(diagnostics=(diag(2304, LINE), diag(code, 1, file=OTHER)))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "UNCERTAIN" and f"TS{code}" in v.evidence
