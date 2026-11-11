@@ -113,7 +113,7 @@ def test_a_tool_that_is_present_but_cannot_run_is_reported(capsys, files, monkey
 def test_a_missing_grammar_is_reported_against_clock_leak(capsys, files, monkeypatch):
     from cca_checks import treesitter as ts
     ts._parser.cache_clear()
-    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", "tree_sitter_no_such_grammar")
+    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", ("tree_sitter_no_such_grammar", "language"))
     out = run(capsys, ["capabilities", "--file", "main.rs"])
     ts._parser.cache_clear()
     assert "not installed" in out["unavailable"]["clock_leak"]

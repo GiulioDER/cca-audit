@@ -27,13 +27,19 @@ from __future__ import annotations
 
 from functools import cache
 
-#: Grammar module per language name. Kept as a table rather than an import so a
-#: missing wheel surfaces as our own message at parse time rather than an
+#: (module, language attribute) per language name. Kept as a table rather than an
+#: import so a missing wheel surfaces as our own message at parse time rather than an
 #: ImportError at `cca_checks` import time, which would take the Python layer down
-#: with it.
+#: with it. The attribute is per language because one wheel can ship two grammars
+#: (tree_sitter_typescript has `language_typescript` and `language_tsx`).
 _GRAMMAR_MODULES = {
-    "rust": "tree_sitter_rust",
+    "rust": ("tree_sitter_rust", "language"),
+    "typescript": ("tree_sitter_typescript", "language_typescript"),
+    "tsx": ("tree_sitter_typescript", "language_tsx"),
 }
+
+#: The pip extra that provides each grammar, for the install hint.
+_EXTRA_FOR = {"rust": "rust", "typescript": "typescript", "tsx": "typescript"}
 
 
 class GrammarUnavailable(RuntimeError):
@@ -48,9 +54,10 @@ def _parser(language: str):
     construction is the expensive part; parsers are not shared across threads here
     (the CLI settles one claim per process).
     """
-    module_name = _GRAMMAR_MODULES.get(language)
-    if module_name is None:
+    entry = _GRAMMAR_MODULES.get(language)
+    if entry is None:
         raise GrammarUnavailable(f"no tree-sitter grammar is registered for {language!r}")
+    module_name, attribute = entry
     try:
         import importlib
 
@@ -59,8 +66,8 @@ def _parser(language: str):
     except ImportError as exc:
         raise GrammarUnavailable(
             f"the tree-sitter grammar for {language} is not installed "
-            f"(pip install 'cca_checks[{language}]'): {exc}") from exc
-    return Parser(Language(grammar.language()))
+            f"(pip install 'cca_checks[{_EXTRA_FOR[language]}]'): {exc}") from exc
+    return Parser(Language(getattr(grammar, attribute)()))
 
 
 def parse(path: str, language: str):
