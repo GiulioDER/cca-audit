@@ -105,7 +105,7 @@ dev = ["hypothesis>=6.165.10", "pytest>=9.1.1", "ruff>=0.16.5", "mpmath>=1.3", "
 include = ["cca_checks*"]
 
 [tool.setuptools.package-data]
-cca_checks = ["rules/*.yaml"]
+cca_checks = ["rules/*.yaml", "ts_probe.js"]
 # The agent and command markdown IS the product -- a wheel without it installs
 # cleanly and produces an empty .claude/, which no import smoke-test can see.
 # tests/test_plugin_install.py asserts every file on disk is reachable as a

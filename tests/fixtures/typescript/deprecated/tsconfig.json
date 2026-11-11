@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "moduleResolution": "node10",
+    "module": "commonjs",
+    "target": "es5"
+  },
+  "include": ["*.ts"]
+}
