@@ -46,7 +46,7 @@ DECISIVE = ("CONFIRMED", "FALSE_POSITIVE")
 # has moved to `test_a_covered_language_still_escalates_an_undeclared_claim_type`
 # below -- which is the half of the guard that keeps the NEXT language safe.
 UNCOVERED = [
-    ("app.ts", "function main() {\n  const a = 1;\n\n\n  console.log(a);\n}\n"),
+    ("app.kt", "function main() {\n  const a = 1;\n\n\n  console.log(a);\n}\n"),
     ("main.go", "package main\n\nfunc main() {\n\ta := 1\n\t_ = a\n}\n"),
     ("lib.rb", "def main\n  a = 1\n\n\n  puts a\nend\n"),
 ]
@@ -54,6 +54,10 @@ UNCOVERED = [
 # A file in a language a backend DOES cover. Its backend settles `clock_leak` and
 # nothing else, so every other claim type must still escalate here.
 COVERED_RUST = ("main.rs", 'fn main() {\n    let a = 1;\n\n\n    println!("{}", a);\n}\n')
+
+# The TypeScript backend settles definedness, type and nullability from tsc; taint and
+# clock_leak have no TypeScript checker and must keep escalating.
+COVERED_TS = ("app.ts", "function main() {\n  const a = 1;\n\n\n  console.log(a);\n}\n")
 
 
 @pytest.fixture
@@ -71,7 +75,7 @@ def silent_tools(monkeypatch):
 def in_tmp(tmp_path, monkeypatch):
     """The CLI refuses a claim file outside the audit root, so cwd must be the root."""
     monkeypatch.chdir(tmp_path)
-    for name, body in [*UNCOVERED, COVERED_RUST]:
+    for name, body in [*UNCOVERED, COVERED_RUST, COVERED_TS]:
         (tmp_path / name).write_text(body, encoding="utf-8")
     return tmp_path
 
@@ -113,9 +117,18 @@ def _undeclared_by(filename):
     return sorted(set(cli.CLAIM_TYPES) - set(backend.claim_types))
 
 
-@pytest.mark.parametrize("claim_type", _undeclared_by(COVERED_RUST[0]))
+@pytest.mark.parametrize("filename, claim_type", [
+    (covered[0], claim_type)
+    for covered in (COVERED_RUST, COVERED_TS)
+    for claim_type in _undeclared_by(covered[0])
+] + [
+    # Pinned by name: the derived list above shrinks silently if a backend starts
+    # declaring a claim type it has no checker for.
+    (COVERED_TS[0], "taint"),
+    (COVERED_TS[0], "clock_leak"),
+])
 def test_a_covered_language_still_escalates_an_undeclared_claim_type(
-    claim_type, capsys, in_tmp, silent_tools
+    filename, claim_type, capsys, in_tmp, silent_tools
 ):
     """The second half of the guard, and the half that protects the NEXT language.
 
@@ -126,7 +139,7 @@ def test_a_covered_language_still_escalates_an_undeclared_claim_type(
     """
     out = _verdict(capsys, [
         "check", "--claim-type", claim_type, "--sink-class", "sql",
-        "--finding-id", "GUARD-4", "--file", COVERED_RUST[0], "--line", "3",
+        "--finding-id", "GUARD-4", "--file", filename, "--line", "3",
     ])
     assert out["verdict"] == "UNCERTAIN", out["evidence"]
     assert "does not settle" in out["evidence"]

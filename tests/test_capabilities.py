@@ -29,7 +29,7 @@ def files(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "svc.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
-    (tmp_path / "app.ts").write_text("const a = 1;\n", encoding="utf-8")
+    (tmp_path / "app.kt").write_text("const a = 1;\n", encoding="utf-8")
     return tmp_path
 
 
@@ -52,7 +52,7 @@ def test_rust_reports_its_own_vocabulary(capsys, files):
 
 
 def test_an_uncovered_language_reports_nothing_and_says_why(capsys, files):
-    out = run(capsys, ["capabilities", "--file", "app.ts"])
+    out = run(capsys, ["capabilities", "--file", "app.kt"])
     assert out["language"] is None
     assert out["claim_types"] == []
     assert "no deterministic backend" in out["reason"]
