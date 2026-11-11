@@ -248,6 +248,16 @@ function namesNoValue(ts, node) {
     && parent.moduleSpecifier === node;
 }
 
+// `m.alice` on a `Record<string, T>` reads through an index signature exactly like
+// `m["alice"]`: undefined at run time, never reported without noUncheckedIndexedAccess.
+function readsIndexSignature(ts, checker, node) {
+  if (!ts.isPropertyAccessExpression(node)) return false;
+  const apparent = checker.getApparentType(
+    checker.getNonNullableType(checker.getTypeAtLocation(node.expression)));
+  return !checker.getPropertyOfType(apparent, node.name.text)
+    && checker.getIndexInfosOfType(apparent).length > 0;
+}
+
 function expressionLines(ts, checker, sourceFile, span) {
   const [lo, hi] = span;
   const anyLines = new Set();
@@ -267,7 +277,7 @@ function expressionLines(ts, checker, sourceFile, span) {
       if (line >= lo && line <= hi
         && (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any)) anyLines.add(line);
       if (isAssertion(ts, node)) addLines(assertionLines, start, node.getEnd());
-      if (ts.isElementAccessExpression(node)) {
+      if (ts.isElementAccessExpression(node) || readsIndexSignature(ts, checker, node)) {
         addLines(subscriptLines, start, accessChainEnd(ts, node));
       }
     }

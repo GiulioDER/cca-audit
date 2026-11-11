@@ -198,3 +198,34 @@ def test_find_tsconfig_stops_at_git_boundary(tmp_path):
     assert find_tsconfig(str(repo / "a.ts")) is None
     (repo / "tsconfig.json").write_text("{}")
     assert find_tsconfig(str(repo / "a.ts")) == str(repo / "tsconfig.json")
+
+
+def _manifest(directory, **sections):
+    (directory / "package.json").write_text(json.dumps(sections))
+
+
+def test_declared_types_package_not_installed_is_incomplete(world):
+    _manifest(world.repo, devDependencies={"@types/node": "1"})
+    r = run_tsc(str(world.file), (1, 3))
+    assert r.types_incomplete and r.missing_types == ("@types/node",)
+
+
+def test_declared_types_package_installed_is_complete(world):
+    _manifest(world.repo, devDependencies={"@types/node": "1"}, dependencies={"left": "1"})
+    (world.repo / "node_modules" / "@types" / "node").mkdir(parents=True)
+    assert run_tsc(str(world.file), (1, 3)).types_incomplete is False
+
+
+def test_types_package_installed_in_an_ancestor_is_complete(world):
+    _manifest(world.repo / "src", peerDependencies={"@types/node": "1"})
+    (world.repo / "node_modules" / "@types" / "node").mkdir(parents=True)
+    assert run_tsc(str(world.file), (1, 3)).types_incomplete is False
+
+
+def test_no_package_json_is_complete(world):
+    assert run_tsc(str(world.file), (1, 3)).types_incomplete is False
+
+
+def test_unparseable_package_json_is_incomplete(world):
+    (world.repo / "package.json").write_text("{not json")
+    assert run_tsc(str(world.file), (1, 3)).types_incomplete is True

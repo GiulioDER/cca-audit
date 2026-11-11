@@ -243,6 +243,15 @@ def test_index_access_line_is_reported():
     assert 3 in probe("basic/index_access.ts", 3)["subscript_lines"]
 
 
+def test_index_signature_property_read_is_a_subscript_line():
+    """`m.alice` on a Record reads undefined like `m["alice"]`."""
+    assert 3 in probe("basic/index_signature.ts", 3)["subscript_lines"]
+
+
+def test_declared_property_is_not_a_subscript_line():
+    assert probe("basic/declared_property.ts", 3)["subscript_lines"] == []
+
+
 def test_index_access_spread_over_lines_reports_every_line():
     """`a[i]` on line 3 is dereferenced by `.x` on line 4; a claim may cite either."""
     assert probe("basic/index_multiline.ts", 4, span=(2, 5))["subscript_lines"] == [3, 4]

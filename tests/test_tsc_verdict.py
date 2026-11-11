@@ -33,7 +33,7 @@ def res(**overrides):
     fields = dict(version="6.0.3", files=frozenset({CLAIMED}), diagnostics=(),
                   any_lines=frozenset(), assertion_lines=frozenset(),
                   directive_lines=frozenset(), directive_targets=frozenset(),
-                  nocheck=False, subscript_lines=frozenset())
+                  nocheck=False, subscript_lines=frozenset(), types_incomplete=False)
     fields.update(overrides)
     return TscResult(**fields)
 
@@ -186,3 +186,45 @@ def test_blindness_diag_in_span_blocks_refutation(claim_type):
 def test_diag_in_another_file_at_same_line_is_ignored():
     r = res(diagnostics=(diag(18047, LINE, file=OTHER),))
     assert verdict_for_tsc(claim(), r, NULLABILITY_CODES, SPAN).verdict == "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("claim_type", ["definedness", "type", "nullability"])
+def test_in_set_diag_without_lines_in_claimed_file_blocks_refutation(claim_type):
+    code = sorted(CODES_BY_CLAIM[claim_type])[0]
+    r = res(diagnostics=(diag(code, file=CLAIMED),))
+    assert verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN).verdict == "UNCERTAIN"
+
+
+@pytest.mark.parametrize("code", [18003, 9999])
+def test_unlocated_non_environment_diag_blocks_refutation(code):
+    r = res(diagnostics=(diag(code, file=None),))
+    assert verdict_for_tsc(claim(), r, NULLABILITY_CODES, SPAN).verdict == "UNCERTAIN"
+
+
+def test_blindness_diag_without_lines_in_claimed_file_blocks_refutation():
+    r = res(diagnostics=(diag(7006, file=CLAIMED),))
+    assert verdict_for_tsc(claim("type"), r, TYPE_CODES, SPAN).verdict == "UNCERTAIN"
+
+
+def test_definedness_confirm_blocked_by_incomplete_types():
+    r = res(diagnostics=(diag(2304, LINE),), types_incomplete=True,
+            missing_types=("@types/node",))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "UNCERTAIN" and "@types/node" in v.evidence
+
+
+def test_definedness_confirm_with_complete_types():
+    r = res(diagnostics=(diag(2304, LINE),), types_incomplete=False)
+    assert verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN).verdict == "CONFIRMED"
+
+
+def test_subscript_line_elsewhere_in_span_blocks_nullability_refutation():
+    r = res(subscript_lines=frozenset({SPAN[0]}))
+    assert verdict_for_tsc(claim(line=LINE), r, NULLABILITY_CODES, SPAN).verdict == "UNCERTAIN"
+
+
+@pytest.mark.parametrize("code", [2581, 2583, 2584])
+def test_environment_global_codes_elsewhere_in_file_block_refutation(code):
+    r = res(diagnostics=(diag(code, 1),))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "UNCERTAIN"

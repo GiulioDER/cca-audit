@@ -63,6 +63,9 @@ class TscResult:
     directive_targets: frozenset[int]
     nocheck: bool
     subscript_lines: frozenset[int]
+    # A declared @types package is not installed, so globals it declares may be missing.
+    types_incomplete: bool
+    missing_types: tuple[str, ...] = ()
 
 
 def same_file_key(path: str) -> str:
@@ -115,6 +118,41 @@ def typescript_package() -> str | None:
     return package
 
 
+_DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
+
+
+def _missing_types(path: str, repo_root: str | None) -> tuple[bool, tuple[str, ...]]:
+    """(incomplete, names): a declared `@types/<name>` that is not installed.
+
+    Walks from the file's directory to the .git root (or only that directory when there
+    is none). A package.json that does not parse counts as incomplete: its declarations
+    cannot be checked, and an absent global must not read as an undefined name.
+    """
+    start = os.path.dirname(os.path.abspath(path))
+    chain = [start]
+    while repo_root is not None and chain[-1] != repo_root and (
+            os.path.dirname(chain[-1]) != chain[-1]):
+        chain.append(os.path.dirname(chain[-1]))
+    missing: list[str] = []
+    for directory in chain:
+        manifest = os.path.join(directory, "package.json")
+        if not os.path.isfile(manifest):
+            continue
+        try:
+            with open(manifest, encoding="utf-8") as f:
+                data = json.load(f)
+            declared = [name for section in _DEPENDENCY_SECTIONS
+                        for name in (data.get(section) or {})]
+        except (OSError, ValueError, AttributeError, TypeError):
+            return True, ()
+        reachable = chain[chain.index(directory):]
+        for name in declared:
+            if name.startswith("@types/") and not any(
+                    os.path.isdir(os.path.join(d, "node_modules", name)) for d in reachable):
+                missing.append(name)
+    return bool(missing), tuple(sorted(set(missing)))
+
+
 def _is_int(value: object) -> bool:
     # bool is an int subclass; a JSON `true` is malformed, not 1.
     return isinstance(value, int) and not isinstance(value, bool)
@@ -141,7 +179,8 @@ def _diagnostic(raw: object) -> TscDiagnostic | None:
                          start, end)
 
 
-def _parse_response(raw: str, claimed: str) -> TscResult | None:
+def _parse_response(raw: str, claimed: str, missing: tuple[bool, tuple[str, ...]]
+                    ) -> TscResult | None:
     """Everything the probe said, or None if any part of it cannot be vouched for."""
     try:
         data = json.loads(raw)
@@ -177,7 +216,7 @@ def _parse_response(raw: str, claimed: str) -> TscResult | None:
         return None
     return TscResult(version, keys, diagnostics, any_lines, assertion_lines,
                      directive_lines, directive_targets, directives["nocheck"],
-                     subscript_lines)
+                     subscript_lines, *missing)
 
 
 def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
@@ -211,7 +250,7 @@ def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
         return None
     if done.returncode != 0:
         return None
-    return _parse_response(done.stdout, target)
+    return _parse_response(done.stdout, target, _missing_types(target, repo_root))
 
 
 # Diagnostic codes by role. Drift may cost a confirmation, never buy a refutation:
@@ -220,7 +259,8 @@ DEFINEDNESS_CODES = frozenset({2304, 2552, 2448, 2454})
 NULLABILITY_CODES = frozenset({2531, 2532, 2533, 18047, 18048, 18049, 2722})
 TYPE_CODES = frozenset({2322, 2345, 2339, 2741, 2769, 2353, 2551, 2362, 2363, 2365, 2367,
                         2349, 2554, 2555})
-ENVIRONMENT_CODES = frozenset({2307, 7016, 2688, 2580, 2582, 2591, 2592, 2593})
+ENVIRONMENT_CODES = frozenset({2307, 7016, 2688, 2580, 2581, 2582, 2583, 2584, 2591, 2592,
+                               2593})
 # The implicit any family and `unknown`: the compiler was blind, so silence proves nothing.
 BLINDNESS_CODES = frozenset({7005, 7006, 7008, 7010, 7011, 7015, 7019, 7031, 7034, 7053,
                              18046})
@@ -264,11 +304,15 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
 
     hit = next((d for d in at_line if d.code in codes), None)
     if hit:
-        if claim.claim_type == "definedness" and any(
-                d.code == MISSING_TYPE_PACKAGE for d in result.diagnostics):
+        if claim.claim_type == "definedness":
             # A missing type package can remove globals it declares, so the name may exist.
-            return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but the program has a TS2688 "
-                                    f"(missing type definition file); escalated")
+            if any(d.code == MISSING_TYPE_PACKAGE for d in result.diagnostics):
+                return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but the program has a TS2688 "
+                                        f"(missing type definition file); escalated")
+            if result.types_incomplete:
+                names = ", ".join(result.missing_types) or "an unreadable package.json"
+                return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but a declared type package is "
+                                        f"not installed ({names}); escalated")
         return tsc("CONFIRMED", f"tsc TS{hit.code} @ {where}: {hit.message}")
 
     if at_line:
@@ -293,16 +337,21 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
                                 f"at {lines}); the claim may be off by a line rather than "
                                 f"false; escalated")
 
-    if any(d.file is None or (d.file == key and is_environment(d.code))
+    if any(d.file is None or (d.file == key and (
+            is_environment(d.code) or d.start_line is None or d.end_line is None))
            for d in result.diagnostics):
-        # Includes unlocated diagnostics. An unresolved import makes its bindings any.
+        # Includes diagnostics with no file, or no line in the claimed file: they cannot
+        # be placed, so silence at the claim is not proof. An unresolved import makes its
+        # bindings any.
         return tsc("UNCERTAIN", f"tsc reported an environment or configuration diagnostic "
                                 f"affecting {claim.file}; escalated")
 
-    if claim.claim_type == "nullability" and claim.line in result.subscript_lines:
-        # noUncheckedIndexedAccess is not forced, so an index access is never proven safe.
-        return tsc("UNCERTAIN", f"{where} is an element access, which tsc does not check "
-                                f"for undefined here; escalated")
+    if claim.claim_type == "nullability" and _in_span(result.subscript_lines, span):
+        # noUncheckedIndexedAccess is not forced, so an index access is never proven safe;
+        # the dereference may sit on another line of the scope than the one cited.
+        return tsc("UNCERTAIN", f"the enclosing scope of {where} holds an element access or "
+                                f"index signature read, which tsc does not check for "
+                                f"undefined here; escalated")
 
     if claim.claim_type in ("type", "nullability"):
         blind = [d for d in here if d.code in BLINDNESS_CODES and _overlaps(d, span)]
