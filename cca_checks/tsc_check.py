@@ -99,7 +99,8 @@ def typescript_package() -> str | None:
         return None
     try:
         done = subprocess.run([npm, "root", "-g"], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=PROBE_TIMEOUT_S)
+                              encoding="utf-8", errors="replace", timeout=PROBE_TIMEOUT_S,
+                              cwd=tempfile.gettempdir())
     except (subprocess.TimeoutExpired, OSError):
         return None
     root = done.stdout.strip()

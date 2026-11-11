@@ -98,6 +98,26 @@ def test_typescript_package_inside_audited_tree_is_none(world):
     assert typescript_package() is None
 
 
+def test_npm_runs_outside_the_audited_tree(world):
+    """A project .npmrc in cwd could redirect `npm root -g` to any prefix."""
+    typescript_package()
+    cwd = next(c for c in world.calls if c[0][0] == "npm")[1]["cwd"]
+    assert not _is_inside(cwd, str(world.repo))
+
+
+def test_package_inside_the_files_repo_but_outside_cwd_is_none(world, tmp_path):
+    other = tmp_path / "other"
+    (other / ".git").mkdir(parents=True)
+    claimed = other / "app.ts"
+    claimed.write_text("")
+    world.global_root = other / "node_modules"
+    (world.global_root / "typescript").mkdir(parents=True)
+    (world.global_root / "typescript" / "package.json").write_text("{}")
+    world.set_response(files=[str(claimed)])
+    assert typescript_package() is not None
+    assert run_tsc(str(claimed), (1, 3)) is None
+
+
 def test_timeout_is_none(world):
     world.raises = subprocess.TimeoutExpired("node", 1)
     assert run_tsc(str(world.file), (1, 3)) is None
@@ -143,7 +163,8 @@ def test_same_file_normalizes_case_and_separators():
 
 
 def test_run_tsc_accepts_a_relative_path(world):
-    world.set_response(files=[str(world.file)])
+    # A `..` segment folds under realpath on every OS; the raw strings differ.
+    world.set_response(files=[str(world.repo / "src" / ".." / "src" / "app.ts")])
     r = run_tsc("src/app.ts", (1, 3))
     assert r is not None
     sent = json.loads(world.probe_call()[1]["input"])
