@@ -348,7 +348,8 @@ function skipParentheses(ts, node) {
 
 // What the declaration a name resolves to tells the checker to believe, wherever that
 // declaration is: `const app = el!` at module level makes `app.x` inside a function
-// look safe, and `let n!: number` makes `n` look assigned. Null when it says nothing.
+// look safe, and `let n!: number` makes `n` look assigned. This finds the declaration
+// (undefined when the name has none); declarationFacts reads it.
 function declarationOf(ts, checker, identifier) {
   const parent = identifier.parent;
   let symbol = ts.isShorthandPropertyAssignment(parent) && parent.name === identifier

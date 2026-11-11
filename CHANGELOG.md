@@ -9,15 +9,29 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 ## [Unreleased]
 
 **TypeScript backend for `definedness`, `type` and `nullability`.** `.ts`, `.tsx`, `.mts` and
-`.cts` files are now settled from the compiler's own diagnostics (`cca_checks/languages/typescript.py`,
-`cca_checks/tsc_check.py`, `cca_checks/ts_probe.js`). TypeScript major 6 is supported (6.0.3 is
-the install and CI pin) and any other major gives `UNCERTAIN`. Install with `npm install -g typescript@6.0.3` and the `typescript` pip
-extra; `CCA_TS_TIMEOUT_S` (default 600) bounds each run. `taint` and `clock_leak` still escalate.
-Refutation is blocked by suppression directives and environment diagnostics, for `type` and
-`nullability` claims also by `any`, type assertions and implicit-any, and for nullability by index
-access. `.d.ts` claims never refute, and a
-repository without installed dependencies can confirm but rarely refute; see
+`.cts` files are now settled from the compiler's own diagnostics
+(`cca_checks/languages/typescript.py`, `cca_checks/tsc_check.py`, `cca_checks/ts_probe.js`).
+TypeScript major 6 is supported (6.0.3 is the install and CI pin) and any other major gives
+`UNCERTAIN`; the major is read from the global package's `package.json` before anything runs, so
+`capabilities` reports a TypeScript 7 install as unavailable. Install with
+`npm install -g typescript@6.0.3` and the `typescript` pip extra; `CCA_TS_TIMEOUT_S` (default 600)
+bounds each run. `taint` and `clock_leak` still escalate. Refutation is blocked by suppression
+directives and environment diagnostics, for `type` and `nullability` claims also by `any`, type
+assertions and implicit-any, and for nullability by index access. `.d.ts` claims never refute, and
+a repository without installed dependencies can confirm but rarely refute; see
 [limits](docs/limits.md).
+
+**Blind spots closed before release.** Destructuring that reads by position or key
+(`const [u] = items`, `[u] = items`, `const { alice } = m` on a `Record`) counts as index access,
+except a position inside a tuple's fixed length, so `useState` pairs stay refutable. A name whose
+declaration outside the span is an assertion (`const app = el!`) or an index read blocks
+refutation where it is used, and a definite assignment (`let n!: number`) also blocks
+`definedness`. A `definedness` refutation is withheld when the file imports a member its module
+does not export (TS2305 and its family), and a `definedness` confirmation when the program has an
+"install type definitions" diagnostic (the TS2580 family). `moduleDetection`,
+`allowImportingTsExtensions` and `rewriteRelativeImportExtensions` are now copied from the repo
+config. The `@types` check walks to the filesystem root when there is no `.git`, and a dependency
+section that is not an object counts as unreadable instead of crashing the CLI.
 
 ## [0.15.0] - 2026-11-04
 
