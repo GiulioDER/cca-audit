@@ -6,7 +6,13 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
-## [Unreleased]
+## [0.16.0] - 2026-11-12
+
+**Upgrade note: the TypeScript backend needs its own toolchain.** Nothing changes for Python or
+Rust, and no prompt file changed since 0.15.0. To have `.ts` findings settled rather than
+escalated, install Node, `npm install -g typescript@6.0.3` and `pip install 'cca-audit[typescript]'`;
+`npm` must be on PATH, because the global package is found with `npm root -g`. Without them every
+TypeScript claim escalates to `UNCERTAIN`, as before this release, and `capabilities` says why.
 
 **TypeScript backend for `definedness`, `type` and `nullability`.** `.ts`, `.tsx`, `.mts` and
 `.cts` files are now settled from the compiler's own diagnostics
@@ -30,7 +36,10 @@ refutation where it is used, and a definite assignment (`let n!: number`) also b
 does not export (TS2305 and its family), and a `definedness` confirmation when the program has an
 "install type definitions" diagnostic (the TS2580 family). Not closed: a missing member re-exported
 through another file reports its error in that file, so a `definedness` claim at the use site can
-still be refuted. An unresolved side-effect import withholds a `type` or `definedness`
+still be refuted. Also not closed, both listed in [limits](docs/limits.md): nullability refutation
+trusts the compiler's narrowing of a property across an `await`, a mutating call or a getter read
+twice; and a name whose declaration the compiler rejected (a TS2322 on `const user: User = find()`),
+or an import whose missing member a `@ts-ignore` hides, is trusted where it is used. An unresolved side-effect import withholds a `type` or `definedness`
 confirmation, in the claimed file for any specifier and program-wide for a package specifier.
 `moduleDetection`,
 `allowImportingTsExtensions` and `rewriteRelativeImportExtensions` are now copied from the repo
