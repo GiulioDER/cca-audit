@@ -339,3 +339,13 @@ TypeScript 6.0.3.
   import-member error. The probe refuses a declaration-file target.
 - **Known residual, not fixed:** a missing member re-exported through another file still refutes
   definedness at the use site.
+- **Correction (2026-11-12, L4 audit, DOC-001) to the "Definedness CONFIRMED is also withheld"
+  item above:** an import-member error in the claimed file withholds a definedness
+  `FALSE_POSITIVE`, not a `CONFIRMED`. The code returns `CONFIRMED` before it reads
+  `IMPORT_MEMBER_CODES`; the other two conditions in that item (an uninstalled `@types` package,
+  an "install type definitions" code) do withhold the `CONFIRMED`.
+- **Amendment (2026-11-12, L4 audit, FIX-015) narrowing the owner's decision recorded in step 3 of
+  "Verdict":** an unresolved side-effect import (`import "x";`) withholds a `type` or
+  `definedness` confirmation: in the claimed file for any specifier, and program-wide for a package
+  (non-relative) specifier, because such an import has no bindings and only augments globals. An
+  unresolved ordinary import still lets confirmation work, as decided.

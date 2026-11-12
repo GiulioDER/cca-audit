@@ -1,3 +1,6 @@
+import pathlib
+import re
+
 import pytest
 
 from cca_checks import treesitter as ts
@@ -43,3 +46,22 @@ def test_missing_grammar_raises(monkeypatch, tmp_path):
             typescript_enclosing_span(str(p), 1)
     finally:
         ts._parser.cache_clear()
+
+
+def test_missing_grammar_hint_names_the_distribution(monkeypatch, tmp_path):
+    """FIX-018 (DEPLOY-001): the hint must install this project, not `cca_checks`, a
+    name nobody owns on PyPI. Red: the hint said `cca_checks[typescript]`."""
+    pyproject = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
+    # A text read, not tomllib: CI runs 3.10, where tomllib is not stdlib.
+    name = re.search(r'(?m)^name\s*=\s*"([^"]+)"', pyproject.read_text(encoding="utf-8"))
+    assert name is not None
+    p = tmp_path / "a.ts"
+    p.write_text("const a = 1;\n")
+    ts._parser.cache_clear()
+    monkeypatch.setitem(ts._GRAMMAR_MODULES, "typescript", ("tree_sitter_no_such_grammar", "language"))
+    try:
+        with pytest.raises(GrammarUnavailable) as raised:
+            typescript_enclosing_span(str(p), 1)
+    finally:
+        ts._parser.cache_clear()
+    assert f"pip install '{name.group(1)}[typescript]'" in str(raised.value)

@@ -66,7 +66,7 @@ def _parser(language: str):
     except ImportError as exc:
         raise GrammarUnavailable(
             f"the tree-sitter grammar for {language} is not installed "
-            f"(pip install 'cca_checks[{_EXTRA_FOR[language]}]'): {exc}") from exc
+            f"(pip install 'cca-audit[{_EXTRA_FOR[language]}]'): {exc}") from exc
     return Parser(Language(getattr(grammar, attribute)()))
 
 
@@ -140,13 +140,21 @@ def enclosing_span(path: str, line_1based: int, language: str,
     fails toward over-refuting, which is the direction that costs findings.
     """
     root = parse(path, language)
-    best: tuple[int, int] | None = None
+    best = innermost(root, line_1based, function_types)
+    return line_span(best if best is not None else root)
+
+
+def innermost(root, line_1based: int, function_types: frozenset[str]):
+    """The function-like node `enclosing_span` measures, or None outside every one.
+
+    Split out so a caller that already parsed the file (to check `has_error`) can take
+    the span, and the node's parents, from the same tree.
+    """
+    best = None
     for node in walk(root):
         if node.type not in function_types:
             continue
         lo, hi = line_span(node)
-        if lo <= line_1based <= hi and (best is None or lo > best[0]):
-            best = (lo, hi)
-    if best is not None:
-        return best
-    return line_span(root)
+        if lo <= line_1based <= hi and (best is None or lo > line_span(best)[0]):
+            best = node
+    return best

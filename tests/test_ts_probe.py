@@ -16,6 +16,7 @@ import functools
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -418,3 +419,304 @@ def test_bad_request_exits_2(request_body, tmp_path):
     assert done.returncode == 2
     assert done.stdout == ""
     assert done.stderr.count("\n") == 1
+
+
+# L4 fixes, settled end to end: the real probe and compiler, through
+# TypeScriptBackend.settle, on files written to tmp_path. Each proof test was run red
+# against the pre-fix production files and failed on its verdict assertion before the
+# fix. The controls beside them show each guard leaves ordinary code refutable or
+# confirmable.
+
+
+def settle_text(tmp_path, text, line, claim_type="nullability", files=None):
+    pytest.importorskip("tree_sitter_typescript")
+    from cca_checks.claim import Claim
+    from cca_checks.languages.typescript import TypeScriptBackend
+
+    # A .git stops the config and @types walks at tmp_path, away from the machine's own.
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    for name, body in (files or {}).items():
+        (tmp_path / name).write_text(body, encoding="utf-8")
+    p = tmp_path / "a.ts"
+    p.write_bytes(text.encode("utf-8"))
+    return TypeScriptBackend().settle(Claim("F1", str(p), line, claim_type)).verdict
+
+
+GUARDLESS = "type U = { name: string };\nfunction f(u: U | null) {\n  return u.name;\n}\n"
+
+
+@pytest.mark.parametrize("text, line", [
+    ("type U = { name: string };\nconst s = `abc\nfunction f(u: U | null) {\n"
+     "  return u.name;\n}\n", 4),
+    ("type U = { name: string };\n/* unterminated\nfunction f(u: U | null) {\n"
+     "  return u.name;\n}\n", 4),
+    ("type U = { name: string };\n<<<<<<< HEAD\nfunction f(u: U) {\n  return u.name;\n}\n"
+     "=======\nfunction f(u: U | null) {\n  return u.name;\n}\n>>>>>>> b\n", 8),
+], ids=["template_before", "comment_before", "conflict_theirs"])
+def test_syntax_error_never_refutes(tmp_path, text, line):
+    """FIX-001 (BUG-001): the defect is real, but the parser did not read the file as
+    written (TS1160, TS1010, TS1185). Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, text, line) == "UNCERTAIN"
+
+
+def test_syntax_control_confirms(tmp_path):
+    assert settle_text(tmp_path, GUARDLESS, 3) == "CONFIRMED"
+
+
+LINE_BREAKS = [
+    "/* comment \u2028 here */\nconst f = (u: U | null) => u.name;\ntype U = { name: string };\n",
+    "// a\rconst g = 1;\nconst f = (u: U | null) => u.name;\ntype U = { name: string };\n",
+    "// a\r\r\nconst f = (u: U | null) => u.name;\r\ntype U = { name: string };\r\n",
+]
+
+
+@pytest.mark.parametrize("text", LINE_BREAKS, ids=["u2028", "lone_cr", "cr_crlf"])
+def test_line_break_only_tsc_counts_never_refutes(tmp_path, text):
+    """FIX-002 (BUG-002): TypeScript counts a lone CR and U+2028 as line breaks, so its
+    TS18047 lands on line 3 while the claim and the span say line 2. Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, text, 2) == "UNCERTAIN"
+
+
+@pytest.mark.parametrize("text", LINE_BREAKS, ids=["u2028", "lone_cr", "cr_crlf"])
+def test_probe_refuses_a_line_break_it_would_miscount(tmp_path, text):
+    p = tmp_path / "a.ts"
+    p.write_bytes(text.encode("utf-8"))
+    done = run_probe(dict(request_for("basic/null_access.ts", (2, 2)), file=str(p),
+                          tsconfig=None))
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr.count("\n") == 1
+
+
+def test_line_break_control_confirms(tmp_path):
+    text = "// comment here\nconst f = (u: U | null) => u.name;\ntype U = { name: string };\n"
+    assert settle_text(tmp_path, text, 2) == "CONFIRMED"
+
+
+@pytest.mark.parametrize("text, line, claim_type", [
+    ("type P = { a: string; b: string; c: string };\nfunction f() {\n"
+     "  const p: P = { a: 'x' };\n  return p;\n}\n", 4, "type"),
+    ("function f(g: (() => void) | null) {\n  const h = 1;\n  g();\n}\n", 2, "nullability"),
+], ids=["ts2739", "ts2721"])
+def test_sibling_code_a_line_away_never_refutes(tmp_path, text, line, claim_type):
+    """FIX-003 (STAKES-001): TS2739 and TS2721 are the claimed defect under a code the
+    sets did not list, one line from the claim. Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, text, line, claim_type) == "UNCERTAIN"
+
+
+FIELD = "type U = { name: string };\nclass C {\n  {field}\n  get() {\n    return this.u.name;\n  }\n}\n"
+
+
+@pytest.mark.parametrize("field", ["u: U;", "declare u: U;"], ids=["uninitialized", "declare"])
+def test_field_without_initializer_never_refutes(tmp_path, field):
+    """FIX-004 (STAKES-004): `u: U;` and `declare u: U;` leave `this.u` undefined at run
+    time while tsc types it U, as `u!: U` does. Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, FIELD.replace("{field}", field), 5) == "UNCERTAIN"
+
+
+def test_initialized_field_still_refutes(tmp_path):
+    text = FIELD.replace("{field}", "u: U = { name: 'x' };")
+    assert settle_text(tmp_path, text, 5) == "FALSE_POSITIVE"
+
+
+def test_property_initialization_code_in_another_file_blocks_refutation(tmp_path):
+    """FIX-004, repair cycles 2 and 3: the never-assigned field is declared in another
+    program file than the function that reads it; its TS2564 sits on the field's name
+    there. Red: FALSE_POSITIVE."""
+    files = {"model.ts": "export type U = { name: string };\nexport class M {\n  u: U;\n}\n",
+             "tsconfig.json": '{ "include": ["*.ts"] }\n'}
+    text = 'import { M } from "./model";\nexport function f(m: M) {\n  return m.u.name;\n}\n'
+    assert settle_text(tmp_path, text, 3, files=files) == "UNCERTAIN"
+
+
+def test_assigned_field_beside_a_never_assigned_one_still_refutes(tmp_path):
+    """Negative control (repair cycle 3): `a: A;` is never assigned, but the claim reads
+    `this.b`, which the constructor assigns; only the reads of `a` are marked."""
+    text = ("type A = { x: number };\ntype B = { x: number };\nclass C {\n  a: A;\n  b: B;\n"
+            "  constructor() { this.b = { x: 1 }; }\n  get() {\n    return this.b.x;\n  }\n}\n")
+    assert settle_text(tmp_path, text, 8) == "FALSE_POSITIVE"
+
+
+CTOR_FIELD = ("type U = { name: string };\nclass C {\n  u: U;\n"
+              "  constructor() { this.u = { name: 'x' }; }\n  get() {\n"
+              "    return this.u.name;\n  }\n}\n")
+
+
+@pytest.mark.parametrize("claim_type", ["nullability", "type", "definedness"])
+def test_constructor_assigned_field_still_refutes(tmp_path, claim_type):
+    """Negative control (repair cycle 2): strictPropertyInitialization is forced, so tsc
+    proves a field assigned in the constructor; marking it cost correct refutations."""
+    assert settle_text(tmp_path, CTOR_FIELD, 6, claim_type) == "FALSE_POSITIVE"
+
+
+def test_field_typed_with_undefined_still_refutes(tmp_path):
+    """Negative control: `n: number | undefined` is checked at every read."""
+    text = ("class C {\n  n: number | undefined;\n  get() {\n"
+            "    return this.n === undefined ? 0 : this.n + 1;\n  }\n}\n")
+    assert settle_text(tmp_path, text, 4) == "FALSE_POSITIVE"
+
+
+def test_declaration_file_class_field_still_refutes(tmp_path):
+    """Negative control: a field of a class in a .d.ts is the environment's word."""
+    files = {"req.d.ts": "declare class Req { url: string }\n",
+             "tsconfig.json": '{ "include": ["*.ts"] }\n'}
+    text = "export function f(r: Req) {\n  return r.url.length;\n}\n"
+    assert settle_text(tmp_path, text, 2, files=files) == "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("text, line", [
+    ("interface State { user: { name: string } }\ndeclare function load(): unknown;\n"
+     "const { user } = load() as State;\nexport function g() {\n  return user.name;\n}\n", 5),
+    ("declare const m: { [k: string]: { a: { name: string } } };\nconst { a } = m[\"k\"];\n"
+     "export function g() {\n  return a.name;\n}\n", 4),
+], ids=["asserted", "indexed"])
+def test_destructured_from_an_assertion_or_index_never_refutes(tmp_path, text, line):
+    """FIX-005 (BUG-004): the binding element's own initializer is empty; the cast or
+    index read sits on the variable declaration above it. Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, text, line) == "UNCERTAIN"
+
+
+def test_destructured_from_a_typed_value_still_refutes(tmp_path):
+    text = ("interface State { user: { name: string } }\ndeclare function load(): State;\n"
+            "const { user } = load();\nexport function g() {\n  return user.name;\n}\n")
+    assert settle_text(tmp_path, text, 5) == "FALSE_POSITIVE"
+
+
+OVERLOADED = ('declare function on(e: "a", cb: (x: string) => number): void;\n'
+              'declare function on(e: "b", cb: (x: number) => number): void;\n'
+              "export function f() {\n"
+              "{directive}"
+              '  on("a",\n'
+              "    (x) => {\n"
+              "      return {ret};\n"
+              "    });\n"
+              "}\n")
+
+
+@pytest.mark.parametrize("directive, line", [("", 6), ("  // @ts-ignore\n", 7)],
+                         ids=["ts2769_on_call", "ts_ignore_above_call"])
+def test_overloaded_callback_error_never_refutes(tmp_path, directive, line):
+    """FIX-012 (STAKES-003): the callback returns a string where a number is due; tsc
+    reports TS2769 on the call line, and a @ts-ignore above the call hides it, both
+    outside the callback's span. Red: FALSE_POSITIVE."""
+    text = OVERLOADED.replace("{directive}", directive).replace("{ret}", "x")
+    assert settle_text(tmp_path, text, line, "type") == "UNCERTAIN"
+
+
+def test_overloaded_callback_control_refutes(tmp_path):
+    text = OVERLOADED.replace("{directive}", "").replace("{ret}", "x.length")
+    assert settle_text(tmp_path, text, 6, "type") == "FALSE_POSITIVE"
+
+
+OUTER_LET = ("interface Cfg { port: number }\nlet cfg: Cfg{init};\nexport function init() {\n"
+             "  cfg = { port: 1 };\n}\nexport function get() {\n  return cfg.port;\n}\n")
+TDZ = "{before}export function start() {\n  return limit * 2;\n}\nstart();\n{after}"
+
+
+@pytest.mark.parametrize("text, line, claim_type", [
+    (OUTER_LET.replace("{init}", ""), 7, "definedness"),
+    (OUTER_LET.replace("{init}", ""), 7, "nullability"),
+    (TDZ.replace("{before}", "").replace("{after}", "const limit = 10;\n"), 2, "definedness"),
+], ids=["outer_let_definedness", "outer_let_nullability", "tdz_const"])
+def test_outer_unassigned_or_later_declaration_never_refutes(tmp_path, text, line, claim_type):
+    """FIX-013 (STAKES-005): tsc does not follow assignment across functions, so a
+    module `let cfg: Cfg;` read in get(), or a `const` declared after the function that
+    is called before it, reports nothing. Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, text, line, claim_type) == "UNCERTAIN"
+
+
+@pytest.mark.parametrize("text, line, claim_type", [
+    (OUTER_LET.replace("{init}", " = { port: 0 }"), 7, "definedness"),
+    (OUTER_LET.replace("{init}", " = { port: 0 }"), 7, "nullability"),
+    (TDZ.replace("{before}", "const limit = 10;\n").replace("{after}", ""), 3, "definedness"),
+], ids=["initialized_let_definedness", "initialized_let_nullability", "const_before"])
+def test_outer_initialized_or_earlier_declaration_still_refutes(tmp_path, text, line,
+                                                                 claim_type):
+    assert settle_text(tmp_path, text, line, claim_type) == "FALSE_POSITIVE"
+
+
+def test_outer_let_typed_with_undefined_still_refutes(tmp_path):
+    """Negative control (repair cycle 2): `let cur: N | undefined;` is checked for
+    nullability at every read, so only the `let cfg: Cfg;` shape is marked."""
+    text = ("interface N { v: number }\nlet cur: N | undefined;\n"
+            "export function set(n: N) { cur = n; }\nexport function get() {\n"
+            "  if (cur) return cur.v;\n}\n")
+    assert settle_text(tmp_path, text, 5) == "FALSE_POSITIVE"
+
+
+def test_every_install_type_definitions_code_is_listed():
+    """FIX-014 (STAKES-006): every "Do you need to install type definitions" message in
+    the installed TypeScript is in INSTALL_TYPES_CODES, so a new one cannot let a
+    missing type package confirm an undefined name. Red: 2867 and 2868 were missing."""
+    from cca_checks.tsc_check import INSTALL_TYPES_CODES
+
+    lib = pathlib.Path(_typescript_dir()) / "lib" / "typescript.js"
+    found = {int(code) for code in re.findall(
+        r'diag\((\d+), \d+ /\* Error \*/, "[^"]*", "[^"]*Do you need to install type '
+        r'definitions', lib.read_text(encoding="utf-8"))}
+    # A scan that finds nothing would pass vacuously; 2580 is the node form.
+    assert 2580 in found
+    assert found <= INSTALL_TYPES_CODES, sorted(found - INSTALL_TYPES_CODES)
+
+
+REFLECT = 'export function meta(t: object) {\n  return Reflect.getMetadata("k", t);\n}\n'
+
+
+def test_unresolved_side_effect_import_withholds_type_confirm(tmp_path):
+    """FIX-015 (STAKES-007): `import "./missing"` is a TS2882, and the global it would
+    augment reads as a TS2339 on `Reflect.getMetadata`. Red: CONFIRMED."""
+    assert settle_text(tmp_path, 'import "./missing";\n' + REFLECT, 3, "type") == "UNCERTAIN"
+
+
+def test_module_error_on_a_side_effect_import_line_withholds_type_confirm(tmp_path):
+    """FIX-015: a TS2307 on a line holding a side-effect import withholds the confirm,
+    through the probe's side_effect_import_lines. Red: CONFIRMED."""
+    text = 'import "./ok"; import { x } from "missing-pkg";\n' + REFLECT
+    assert settle_text(tmp_path, text, 3, "type", files={"ok.ts": "export {};\n"}) == "UNCERTAIN"
+
+
+MAIN_CONFIG = ('{"compilerOptions": {"target": "es2022", "module": "esnext", '
+               '"moduleResolution": "bundler", "strict": true}, "include": ["*.ts"]}')
+USES_REFLECT = 'export function m(t: object) {\n  return Reflect.getMetadata("k", t);\n}\n'
+
+
+def test_unresolved_package_side_effect_import_in_another_file_withholds_confirm(tmp_path):
+    """FIX-015, L6 REVISE: main.ts holds `import "reflect-metadata";` (a TS2882 there),
+    which would augment the global `Reflect` that a.ts reads, so a.ts's TS2339 may be
+    the machine's. Red: CONFIRMED."""
+    files = {"main.ts": 'import "reflect-metadata";\nimport "./a";\n',
+             "tsconfig.json": MAIN_CONFIG}
+    assert settle_text(tmp_path, USES_REFLECT, 2, "type", files=files) == "UNCERTAIN"
+
+
+def test_unresolved_relative_side_effect_import_in_another_file_still_confirms(tmp_path):
+    """Control: `import "./app.css";` unresolved in main.ts augments no global, so it does
+    not withhold confirmations in other files."""
+    files = {"main.ts": 'import "./app.css";\nimport "./a";\n', "tsconfig.json": MAIN_CONFIG}
+    assert settle_text(tmp_path, USES_REFLECT, 2, "type", files=files) == "CONFIRMED"
+
+
+def test_ordinary_unresolved_import_still_confirms(tmp_path):
+    """Control, the owner's settled decision: an unresolved ordinary import does not
+    withhold a type confirm elsewhere in the file."""
+    text = 'import { x } from "missing-pkg";\n' + REFLECT
+    assert settle_text(tmp_path, text, 3, "type") == "CONFIRMED"
+
+
+PREDICATE = ("interface User { name: string }\n"
+             "function isUser(u: unknown): u is User { return true; }\n"
+             "function assertUser(u: unknown): asserts u is User {}\n"
+             "export function f(u: User | null) {\n  if (isUser(u)) return u.name;\n}\n"
+             "export function g(u: User | null) {\n  assertUser(u);\n  return u.name;\n}\n"
+             "export function h(u: User | null) {\n  if (u) return u.name;\n}\n")
+
+
+@pytest.mark.parametrize("line", [5, 9], ids=["type_guard", "assertion_function"])
+def test_user_type_predicate_never_refutes(tmp_path, line):
+    """FIX-017 (STAKES-010): `u is User` and `asserts u is User` narrow on the author's
+    word, which here is wrong. Red: FALSE_POSITIVE."""
+    assert settle_text(tmp_path, PREDICATE, line) == "UNCERTAIN"
+
+
+def test_plain_guard_still_refutes(tmp_path):
+    assert settle_text(tmp_path, PREDICATE, 12) == "FALSE_POSITIVE"

@@ -11,13 +11,28 @@
  *            "forced_options": {<tsconfig style JSON>}}
  * Response: {"protocol": 1, "version", "files", "diagnostics", "any_lines",
  *            "assertion_lines", "directives": {"lines", "targets", "nocheck"},
- *            "subscript_lines", "definite_assignment_lines"}, exit 0.
+ *            "subscript_lines", "definite_assignment_lines",
+ *            "side_effect_import_lines", "unresolved_package_side_effect_import"},
+ *           exit 0.
  *           A line is an assertion, subscript or definite assignment line either for
  *           what is written on it or for what a name on it resolves to: a name whose
  *           declaration, in or outside the span, is initialized by an assertion or an
- *           index read, or carries a definite assignment `!`.
+ *           index read (directly or through the pattern it is destructured from),
+ *           carries a definite assignment `!`, is a `declare` field, or is a field
+ *           whose name carries a TS2564 or TS2565.
+ *           A name read inside a function is also an assertion and definite
+ *           assignment line when it resolves to a `let` or `var` with no initializer
+ *           outside that function, or to a `const`, `let` or `class` declared after
+ *           that function ends: tsc does not follow assignment across functions. A
+ *           call to a user written type predicate (`x is T`, `asserts x is T`) is an
+ *           assertion line. side_effect_import_lines holds the lines of every
+ *           `import "x";` in the file; unresolved_package_side_effect_import is true
+ *           when any program file has a TS2882, TS2307 or TS2792 on a side-effect
+ *           import of a non-relative specifier (`import "reflect-metadata";`).
  * Refusal:  exit 2, one line on stderr, nothing on stdout. The claimed file being a
- *           declaration file is a refusal too: skipLibCheck hides its errors.
+ *           declaration file is a refusal too: skipLibCheck hides its errors, and so
+ *           is a claimed file holding a lone CR, U+2028 or U+2029, which TypeScript
+ *           counts as a line break and the claim and the span do not.
  *
  * Soundness rule: no repo option, suppression comment or `any` may make the compiler
  * look silent about code it could not see. Hence only `copy_options` keys survive from
@@ -359,21 +374,111 @@ function declarationOf(ts, checker, identifier) {
   return symbol ? symbol.valueDeclaration : undefined;
 }
 
+// `const { user } = load() as State`: the cast or index read sits on the declaration
+// holding the pattern; the binding element's own initializer is only its default.
+function patternInitializer(ts, declaration) {
+  let node = declaration;
+  while (ts.isBindingElement(node)) node = node.parent.parent;
+  if (node === declaration || !(ts.isVariableDeclaration(node) || ts.isParameter(node))) {
+    return undefined;
+  }
+  return node.initializer && skipParentheses(ts, node.initializer);
+}
+
 function declarationFacts(ts, checker, declaration) {
   if (!declaration) return { asserted: false, definite: false, indexed: false };
-  const initializer = declaration.initializer && skipParentheses(ts, declaration.initializer);
-  const definite = declaration.exclamationToken !== undefined
-    && (ts.isVariableDeclaration(declaration) || ts.isPropertyDeclaration(declaration));
+  const initializers = [declaration.initializer, patternInitializer(ts, declaration)]
+    .filter((i) => i !== undefined).map((i) => skipParentheses(ts, i));
+  // `declare u: U;` is the author's word that something assigns u, as `u!: U` is, and
+  // strictPropertyInitialization does not check it. A field with no initializer and
+  // no `declare` is checked (a TS2564 on its name if never assigned, which
+  // unassignedField reads), and a field of an ambient class or a declaration file is
+  // the environment's word.
+  const declaredField = ts.isPropertyDeclaration(declaration)
+    && (ts.getModifiers(declaration) || []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)
+    && !declaration.getSourceFile().isDeclarationFile
+    && !(declaration.parent.flags & ts.NodeFlags.Ambient);
+  const definite = declaredField || (declaration.exclamationToken !== undefined
+    && (ts.isVariableDeclaration(declaration) || ts.isPropertyDeclaration(declaration)));
   return {
-    asserted: definite || (initializer !== undefined && isAssertion(ts, initializer)),
+    asserted: definite || initializers.some((i) => isAssertion(ts, i)),
     definite,
-    indexed: bindingReadsByIndex(ts, checker, declaration) || (initializer !== undefined
-      && (ts.isElementAccessExpression(initializer)
-        || readsIndexSignature(ts, checker, initializer))),
+    indexed: bindingReadsByIndex(ts, checker, declaration) || initializers.some((i) =>
+      ts.isElementAccessExpression(i) || readsIndexSignature(ts, checker, i)),
   };
 }
 
-function expressionLines(ts, checker, sourceFile, span) {
+// TS2564 (no initializer, reported on the field's name) and TS2565 (used before
+// assigned, reported at the read).
+const PROPERTY_INIT_CODES = new Set([2564, 2565]);
+
+function fieldKey(file, start) {
+  return samePathKey(file.fileName) + ":" + start;
+}
+
+// The fields tsc reports as never assigned, keyed by where their name starts (TS2564
+// is reported on the name; TS2565 is reported at the read, so it rarely matches one).
+// A read of one in a method reports nothing although it is undefined there. Only these:
+// a repository not built with strictPropertyInitialization reports TS2564 on many,
+// and blocking on the code anywhere would stop every refutation there.
+function unassignedFieldKeys(diagnostics) {
+  return new Set(diagnostics
+    .filter((d) => PROPERTY_INIT_CODES.has(d.code) && d.file && d.start !== undefined)
+    .map((d) => fieldKey(d.file, d.start)));
+}
+
+function unassignedField(ts, declaration, unassigned) {
+  if (!declaration || !ts.isPropertyDeclaration(declaration)) return false;
+  const file = declaration.getSourceFile();
+  return unassigned.has(fieldKey(file, declaration.name.getStart(file)));
+}
+
+function containingFunction(ts, node) {
+  for (let p = node.parent; p; p = p.parent) if (ts.isFunctionLike(p)) return p;
+  return undefined;
+}
+
+// tsc follows assignment only within one function: a module `let cfg: Cfg;` set in
+// init() reads as assigned in get(), and a `const` declared after the function that
+// reads it is in its temporal dead zone if the function runs first. Ambient and
+// declaration file names are the environment's word, not a flow the file controls.
+function outOfFlow(ts, checker, sourceFile, use, declaration) {
+  const fn = containingFunction(ts, use);
+  if (!declaration || !fn || ts.isPartOfTypeNode(use)) return false;
+  if (declaration.pos >= fn.pos && declaration.end <= fn.end) return false;
+  const file = declaration.getSourceFile();
+  if (file.isDeclarationFile || (declaration.flags & ts.NodeFlags.Ambient)) return false;
+  const list = ts.isVariableDeclaration(declaration) ? declaration.parent : undefined;
+  const scoped = list && ts.isVariableDeclarationList(list)
+    ? list.flags & ts.NodeFlags.BlockScoped : undefined;
+  const loopVariable = list && (ts.isForInStatement(list.parent) || ts.isForOfStatement(list.parent));
+  // A declared type that includes undefined (`let cur: N | undefined;`) is checked at
+  // every read; only a type without it (`let cfg: Cfg;`) reads as assigned.
+  if (!loopVariable && declaration.initializer === undefined
+    && (scoped === 0 || scoped === ts.NodeFlags.Let)) {
+    const symbol = checker.getSymbolAtLocation(declaration.name);
+    return !symbol || !isNullish(ts, checker.getTypeOfSymbol(symbol));
+  }
+  const blockScoped = ts.isClassDeclaration(declaration) || (scoped !== undefined && scoped !== 0);
+  return blockScoped && file === sourceFile && declaration.getStart(file) >= fn.end;
+}
+
+function isNullish(ts, type) {
+  const has = (t) => (t.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)) !== 0;
+  return has(type) || (type.isUnion() && type.types.some(has));
+}
+
+// `isUser(u)` declared `u is User`, or `assertUser(u)` declared `asserts u is User`,
+// narrows on the author's word like a cast. The lib's own guards are excluded.
+function callsUserPredicate(ts, checker, node) {
+  if (!ts.isCallExpression(node)) return false;
+  const signature = checker.getResolvedSignature(node);
+  const declaration = signature && signature.declaration;
+  return declaration !== undefined && !declaration.getSourceFile().isDeclarationFile
+    && checker.getTypePredicateOfSignature(signature) !== undefined;
+}
+
+function expressionLines(ts, checker, sourceFile, span, unassigned) {
   const [lo, hi] = span;
   const anyLines = new Set();
   const assertionLines = new Set();
@@ -387,17 +492,26 @@ function expressionLines(ts, checker, sourceFile, span) {
   function addNode(lines, node) {
     addLines(lines, node.getStart(sourceFile), node.getEnd());
   }
+  // Whether addLines would add anything for [start, end]: checker queries on a node
+  // that cannot reach the span are skipped, which on a large file is most of the time.
+  function reaches(start, end) {
+    return lineOf(sourceFile, start) <= hi && lineOf(sourceFile, end) >= lo;
+  }
   function visit(node) {
-    if (bindingReadsByIndex(ts, checker, node)) addNode(subscriptLines, node);
-    if (isAssignmentPattern(ts, node)) {
+    const inReach = reaches(node.getStart(sourceFile), node.getEnd());
+    if (inReach && bindingReadsByIndex(ts, checker, node)) addNode(subscriptLines, node);
+    if (inReach && isAssignmentPattern(ts, node)) {
       for (const target of assignmentTargetsByIndex(ts, checker, node)) addNode(subscriptLines, target);
     }
     if (ts.isIdentifier(node)) {
       const line = lineOf(sourceFile, node.getStart(sourceFile));
       if (line >= lo && line <= hi) {
-        const facts = declarationFacts(ts, checker, declarationOf(ts, checker, node));
-        if (facts.asserted) assertionLines.add(line);
-        if (facts.definite) definiteLines.add(line);
+        const declaration = declarationOf(ts, checker, node);
+        const facts = declarationFacts(ts, checker, declaration);
+        const unflowed = outOfFlow(ts, checker, sourceFile, node, declaration);
+        const never = unassignedField(ts, declaration, unassigned);
+        if (facts.asserted || unflowed || never) assertionLines.add(line);
+        if (facts.definite || unflowed || never) definiteLines.add(line);
         if (facts.indexed) subscriptLines.add(line);
       }
     }
@@ -408,8 +522,10 @@ function expressionLines(ts, checker, sourceFile, span) {
       const line = lineOf(sourceFile, start);
       if (line >= lo && line <= hi
         && (checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any)) anyLines.add(line);
-      if (isAssertion(ts, node)) addLines(assertionLines, start, node.getEnd());
-      if (ts.isElementAccessExpression(node) || readsIndexSignature(ts, checker, node)) {
+      if (isAssertion(ts, node)
+        || (inReach && callsUserPredicate(ts, checker, node))) addLines(assertionLines, start, node.getEnd());
+      if (ts.isElementAccessExpression(node) || (reaches(start, accessChainEnd(ts, node))
+        && readsIndexSignature(ts, checker, node))) {
         addLines(subscriptLines, start, accessChainEnd(ts, node));
       }
     }
@@ -417,6 +533,30 @@ function expressionLines(ts, checker, sourceFile, span) {
   }
   visit(sourceFile);
   return { anyLines, assertionLines, subscriptLines, definiteLines };
+}
+
+// An unresolved side-effect import of a package, in any program file: it has no
+// bindings and can only augment globals, which any file may read. A relative one
+// (`import "./app.css"`) is checked in the claimed file only, through the lines below.
+const UNRESOLVED_IMPORT_CODES = new Set([2882, 2307, 2792]);
+
+function unresolvedPackageSideEffectImport(ts, diagnostics) {
+  return diagnostics.some((d) => UNRESOLVED_IMPORT_CODES.has(d.code) && d.file
+    && d.start !== undefined && d.file.statements.some((s) => ts.isImportDeclaration(s)
+      && !s.importClause && ts.isStringLiteral(s.moduleSpecifier)
+      && !ts.isExternalModuleNameRelative(s.moduleSpecifier.text)
+      && d.start >= s.getStart(d.file) && d.start < s.getEnd()));
+}
+
+// `import "x";` lines: an unresolved one may be what declares or augments a global.
+function sideEffectImportLines(ts, sourceFile) {
+  const lines = [];
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || statement.importClause) continue;
+    const last = lineOf(sourceFile, statement.getEnd());
+    for (let l = lineOf(sourceFile, statement.getStart(sourceFile)); l <= last; l++) lines.push(l);
+  }
+  return lines;
 }
 
 function isJSDoc(ts, node) {
@@ -502,13 +642,20 @@ function main() {
   if (!sourceFile) refuse(target + " is not in the program");
   // skipLibCheck is forced, so a declaration file's own errors are never reported.
   if (sourceFile.isDeclarationFile) refuse(target + " is a declaration file");
+  // TypeScript counts a lone CR, U+2028 and U+2029 as line breaks; tree-sitter and the
+  // claim count only LF, so every compiler line after one would be shifted.
+  if (/\r(?!\n)|[\u2028\u2029]/.test(sourceFile.text)) {
+    refuse(target + " holds a lone CR, U+2028 or U+2029, which shifts tsc's line numbers");
+  }
 
   // Diagnostics first: a type query on a name the checker never resolved during the
   // check (a JSX tag, for one) adds a "Cannot find name" of its own, which would read
   // as a defect in the audited code.
-  const diagnostics = ts.getPreEmitDiagnostics(program).map((d) => serializeDiagnostic(ts, d));
+  const raw = ts.getPreEmitDiagnostics(program);
+  const diagnostics = raw.map((d) => serializeDiagnostic(ts, d));
   const checker = program.getTypeChecker();
-  const lines = expressionLines(ts, checker, sourceFile, request.span);
+  const lines = expressionLines(ts, checker, sourceFile, request.span,
+    unassignedFieldKeys(raw));
   const sorted = (set) => [...set].sort((a, b) => a - b);
   const response = {
     protocol: PROTOCOL,
@@ -520,6 +667,8 @@ function main() {
     directives: commentDirectives(ts, sourceFile),
     subscript_lines: sorted(lines.subscriptLines),
     definite_assignment_lines: sorted(lines.definiteLines),
+    side_effect_import_lines: sideEffectImportLines(ts, sourceFile),
+    unresolved_package_side_effect_import: unresolvedPackageSideEffectImport(ts, raw),
   };
   process.stdout.write(JSON.stringify(response) + "\n");
 }

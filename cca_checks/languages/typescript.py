@@ -35,6 +35,37 @@ def typescript_enclosing_span(path: str, line_1based: int) -> tuple[int, int]:
     return ts.enclosing_span(path, line_1based, grammar_for(path), FUNCTION_TYPES)
 
 
+#: Node type suffixes that end the walk up to the statement holding a function. A
+#: `_definition` is a class member (a method, or a field holding an arrow); stopping
+#: there keeps a method's wide span to the method rather than its whole class.
+_STATEMENT_SUFFIXES = ("_statement", "_declaration", "_definition")
+
+
+def _enclosing_statement(node):
+    while not (node.type.endswith(_STATEMENT_SUFFIXES) or node.parent is None
+               or node.parent.type == "program"):
+        node = node.parent
+    return node
+
+
+def typescript_spans(path: str, line_1based: int
+                     ) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """(span, wide span) for the claim, or None when the file does not parse cleanly.
+
+    tree-sitter recovers from a syntax error with a guess, so a span from such a tree
+    may cover code the compiler read differently; None means never refute. The wide
+    span is the statement holding the innermost function: tsc reports a callback's
+    error, and honours a directive, on the call that passes it.
+    """
+    root = ts.parse(path, grammar_for(path))
+    if ts.has_error(root):
+        return None
+    node = ts.innermost(root, line_1based, FUNCTION_TYPES)
+    if node is None:
+        return ts.line_span(root), ts.line_span(root)
+    return ts.line_span(node), ts.line_span(_enclosing_statement(node))
+
+
 _DECLARATION_SUFFIXES = (".d.ts", ".d.mts", ".d.cts")
 
 
@@ -67,8 +98,10 @@ class TypeScriptBackend:
                                 f"{claim.file} is a declaration file, which skipLibCheck "
                                 f"leaves unchecked; escalated", "llm")
         try:
-            span = typescript_enclosing_span(claim.file, claim.line)
+            spans = typescript_spans(claim.file, claim.line)
         except Exception:
-            span = None
+            spans = None
+        span, wide = spans if spans is not None else (None, None)
         result = run_tsc(claim.file, span or (claim.line, claim.line))
-        return verdict_for_tsc(claim, result, CODES_BY_CLAIM[claim.claim_type], span)
+        return verdict_for_tsc(claim, result, CODES_BY_CLAIM[claim.claim_type], span,
+                               wide_span=wide)

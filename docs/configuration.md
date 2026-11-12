@@ -75,8 +75,9 @@ shipping it inside `verify` let an audit install rewrite packages unrelated to a
 isolates it and still puts the binary on PATH, which is all `resolve_tool` needs. The `taint` extra
 remains for anyone who wants it in-environment with those pins accepted knowingly.
 
-The TypeScript compiler is installed globally with npm, not with pip, and only that pinned version
-is trusted: `typescript` from the audited tree's `node_modules` is never run. Without `node` or the
+The TypeScript compiler is installed globally with npm, not with pip. Any TypeScript of major 6
+is trusted, and 6.0.3 is the version to install and the one CI pins; another major escalates.
+`typescript` from the audited tree's `node_modules` is never run. Without `node` or the
 global package, all three TypeScript claim types escalate. Without the `typescript` extra the
 verdict can still confirm but never refute, since there is no span to scope a refutation to.
 

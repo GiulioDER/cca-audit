@@ -28,7 +28,11 @@ declaration outside the span is an assertion (`const app = el!`) or an index rea
 refutation where it is used, and a definite assignment (`let n!: number`) also blocks
 `definedness`. A `definedness` refutation is withheld when the file imports a member its module
 does not export (TS2305 and its family), and a `definedness` confirmation when the program has an
-"install type definitions" diagnostic (the TS2580 family). `moduleDetection`,
+"install type definitions" diagnostic (the TS2580 family). Not closed: a missing member re-exported
+through another file reports its error in that file, so a `definedness` claim at the use site can
+still be refuted. An unresolved side-effect import withholds a `type` or `definedness`
+confirmation, in the claimed file for any specifier and program-wide for a package specifier.
+`moduleDetection`,
 `allowImportingTsExtensions` and `rewriteRelativeImportExtensions` are now copied from the repo
 config. The `@types` check walks to the filesystem root when there is no `.git`, and a dependency
 section that is not an object counts as unreadable instead of crashing the CLI.

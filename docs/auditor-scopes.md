@@ -116,6 +116,7 @@ wherever one exists:
 | Claim type | Language | Settled by | Evidence produced |
 |---|---|---|---|
 | `definedness`, `nullability`, `type` | Python | `pyright` | the diagnostic, at a resolved `file:line` |
+| `definedness`, `nullability`, `type` | TypeScript | `tsc` (major 6, a global npm install) | the diagnostic, at a resolved `file:line` |
 | `clock_leak` | Python | `ast` | a dead injected-time parameter beside a wall-clock read |
 | `clock_leak` | Rust | tree-sitter | the same, resolved through `use` aliases |
 | `panic_path`, `overflow`, `error_swallow`, `unsafe_op` | Rust | `clippy` | the diagnostic, with the lint force-enabled over the crate's own config |

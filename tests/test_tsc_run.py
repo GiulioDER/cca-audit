@@ -51,6 +51,7 @@ class World:
             "diagnostics": [], "any_lines": [3], "assertion_lines": [],
             "directives": {"lines": [], "targets": [], "nocheck": False},
             "subscript_lines": [], "definite_assignment_lines": [],
+            "side_effect_import_lines": [], "unresolved_package_side_effect_import": False,
         }
         data.update(override)
         return data
@@ -135,7 +136,8 @@ def test_non_json_stdout_is_none(world):
 
 @pytest.mark.parametrize("field", ["version", "files", "diagnostics", "any_lines",
                                    "assertion_lines", "directives", "subscript_lines",
-                                   "definite_assignment_lines"])
+                                   "definite_assignment_lines", "side_effect_import_lines",
+                                   "unresolved_package_side_effect_import"])
 def test_missing_field_is_none(world, field):
     data = world.response()
     del data[field]
@@ -146,6 +148,26 @@ def test_missing_field_is_none(world, field):
 def test_mistyped_field_is_none(world):
     world.set_response(any_lines="3")
     assert run_tsc(str(world.file), (1, 3)) is None
+
+
+def test_mistyped_side_effect_import_lines_is_none(world):
+    """FIX-015: a field the verdict blocks on is validated like the others."""
+    world.set_response(side_effect_import_lines=[True])
+    assert run_tsc(str(world.file), (1, 3)) is None
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_mistyped_unresolved_package_side_effect_import_is_none(world, value):
+    """FIX-015, L6 REVISE: the flag withholds a confirmation, so only a JSON boolean counts."""
+    world.set_response(unresolved_package_side_effect_import=value)
+    assert run_tsc(str(world.file), (1, 3)) is None
+
+
+def test_side_effect_import_lines_are_read(world):
+    world.set_response(side_effect_import_lines=[1])
+    r = run_tsc(str(world.file), (1, 3))
+    assert r is not None
+    assert r.side_effect_import_lines == {1}
 
 
 def test_unsupported_major_is_none(world):

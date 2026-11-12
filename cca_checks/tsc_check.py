@@ -1,3 +1,4 @@
+import functools
 import json
 import os
 import subprocess
@@ -73,9 +74,21 @@ class TscResult:
     # A declared @types package is not installed, so globals it declares may be missing.
     types_incomplete: bool
     missing_types: tuple[str, ...] = ()
+    # Lines of `import "x";` (no import clause) in the claimed file.
+    side_effect_import_lines: frozenset[int] = frozenset()
+    # Some program file has an unresolved `import "pkg";` (a non-relative specifier).
+    unresolved_package_side_effect_import: bool = False
 
 
 def same_file_key(path: str) -> str:
+    # Absolute first: a cached relative path would outlive a change of directory.
+    return _absolute_file_key(os.path.abspath(path))
+
+
+# realpath costs a millisecond or two per call on Windows and _parse_response makes
+# one per program file; one claim per process bounds the cache.
+@functools.cache
+def _absolute_file_key(path: str) -> str:
     return os.path.normcase(os.path.realpath(path))
 
 
@@ -245,12 +258,17 @@ def _parse_response(raw: str, claimed: str, missing: tuple[bool, tuple[str, ...]
     definite_lines = _lines(data.get("definite_assignment_lines"))
     directive_lines = _lines(directives.get("lines"))
     directive_targets = _lines(directives.get("targets"))
+    side_effect_lines = _lines(data.get("side_effect_import_lines"))
+    package_import = data.get("unresolved_package_side_effect_import")
     if (any_lines is None or assertion_lines is None or subscript_lines is None
-            or definite_lines is None or directive_lines is None or directive_targets is None):
+            or definite_lines is None or directive_lines is None or directive_targets is None
+            or side_effect_lines is None or not isinstance(package_import, bool)):
         return None
     return TscResult(version, keys, diagnostics, any_lines, assertion_lines,
                      directive_lines, directive_targets, directives["nocheck"],
-                     subscript_lines, definite_lines, *missing)
+                     subscript_lines, definite_lines, *missing,
+                     side_effect_import_lines=side_effect_lines,
+                     unresolved_package_side_effect_import=package_import)
 
 
 def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
@@ -290,11 +308,17 @@ def run_tsc(path: str, span: tuple[int, int]) -> TscResult | None:
 # Diagnostic codes by role. Drift may cost a confirmation, never buy a refutation:
 # a code outside every set at the claimed line escalates.
 DEFINEDNESS_CODES = frozenset({2304, 2552, 2448, 2454})
-NULLABILITY_CODES = frozenset({2531, 2532, 2533, 18047, 18048, 18049, 2722})
+NULLABILITY_CODES = frozenset({2531, 2532, 2533, 18047, 18048, 18049, 2721, 2722, 2723})
+# 2739 and 2740 missing properties, 2559 no properties in common, 2352 a conversion that
+# may be a mistake, 2416 a member not assignable to the base's, 2420 a class that does
+# not implement its interface: assignability siblings of 2322 (messages read from the
+# 6.0.3 lib).
 TYPE_CODES = frozenset({2322, 2345, 2339, 2741, 2769, 2353, 2551, 2362, 2363, 2365, 2367,
-                        2349, 2554, 2555})
+                        2349, 2554, 2555, 2739, 2740, 2559, 2352, 2416, 2420})
+# 2882 is an unresolved side-effect import, 2875 a JSX runtime module that cannot be
+# found, 2792 the moduleResolution form of 2307: each a module the machine lacks.
 ENVIRONMENT_CODES = frozenset({2307, 7016, 2688, 2580, 2581, 2582, 2583, 2584, 2591, 2592,
-                               2593})
+                               2593, 2867, 2868, 2882, 2875, 2792})
 # The implicit any family and `unknown`: the compiler was blind, so silence proves nothing.
 BLINDNESS_CODES = frozenset({7005, 7006, 7008, 7010, 7011, 7015, 7019, 7031, 7034, 7053,
                              18046})
@@ -307,15 +331,30 @@ BLINDNESS_CODES = frozenset({7005, 7006, 7008, 7010, 7011, 7015, 7019, 7031, 703
 IMPORT_MEMBER_CODES = frozenset({2305, 2724, 2459, 2460, 2614, 1192, 2613})
 # "Do you need to install type definitions for ...": a type package is missing, so a
 # global it declares may be what another line reports as undefined. 2581 is the jQuery
-# form of 2580.
-INSTALL_TYPES_CODES = frozenset({2580, 2581, 2582, 2591, 2592, 2593})
+# form of 2580; 2867 and 2868 are the Bun forms.
+INSTALL_TYPES_CODES = frozenset({2580, 2581, 2582, 2591, 2592, 2593, 2867, 2868})
 CODES_BY_CLAIM = {"definedness": DEFINEDNESS_CODES, "nullability": NULLABILITY_CODES,
                   "type": TYPE_CODES}
 MISSING_TYPE_PACKAGE = 2688
+UNRESOLVED_SIDE_EFFECT_IMPORT = 2882
+UNRESOLVED_MODULE_CODES = frozenset({2307, 2792})
 
 
 def is_environment(code: int) -> bool:
     return code in ENVIRONMENT_CODES or 5000 <= code <= 5999
+
+
+def is_syntactic(code: int) -> bool:
+    return 1000 <= code <= 1999
+
+
+_LISTED_CODES = (DEFINEDNESS_CODES | NULLABILITY_CODES | TYPE_CODES | BLINDNESS_CODES
+                 | IMPORT_MEMBER_CODES)
+
+
+def _unlisted(code: int) -> bool:
+    """A code no set names: possibly a sibling of the claimed defect nobody catalogued."""
+    return code not in _LISTED_CODES and not is_syntactic(code) and not is_environment(code)
 
 
 def _covers(d: TscDiagnostic, line: int) -> bool:
@@ -333,8 +372,16 @@ def _in_span(lines: frozenset[int], span: tuple[int, int]) -> bool:
 
 
 def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int],
-                    span: tuple[int, int] | None) -> Verdict:
-    """Settle a claim against the compiler's diagnostics. Three-way, never false-refutes."""
+                    span: tuple[int, int] | None, *,
+                    wide_span: tuple[int, int] | None = None) -> Verdict:
+    """Settle a claim against the compiler's diagnostics. Three-way, never false-refutes.
+
+    `wide_span`, the statement enclosing the claim's function, is read only by the off
+    by a line and directive checks: tsc places a callback's error on the call, and a
+    directive goes above the call, both outside the callback. It defaults to `span`.
+    """
+    if wide_span is None:
+        wide_span = span
     def tsc(verdict: str, evidence: str) -> Verdict:
         return make_verdict(claim.finding_id, verdict, evidence, "tsc")
 
@@ -362,6 +409,20 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
                 names = ", ".join(result.missing_types) or "an unreadable package.json"
                 return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but a declared type package is "
                                         f"not installed ({names}); escalated")
+        if claim.claim_type in ("type", "definedness"):
+            # An unresolved side-effect import may be what declares or augments the
+            # global this line reports on, so the error may be the machine's.
+            unresolved = next((d for d in here if d.code == UNRESOLVED_SIDE_EFFECT_IMPORT or (
+                d.code in UNRESOLVED_MODULE_CODES
+                and d.start_line in result.side_effect_import_lines)), None)
+            if unresolved:
+                return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but {claim.file} has an "
+                                        f"unresolved side-effect import (TS{unresolved.code} at "
+                                        f"line {unresolved.start_line}); escalated")
+            if result.unresolved_package_side_effect_import:
+                return tsc("UNCERTAIN", f"TS{hit.code} @ {where} but the program has an "
+                                        f"unresolved side-effect import of a package, which may "
+                                        f"augment the global this line reports on; escalated")
         return tsc("CONFIRMED", f"tsc TS{hit.code} @ {where}: {hit.message}")
 
     if at_line:
@@ -370,21 +431,24 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
                                 f"in the expected code set (saw: {seen}); escalated")
 
     # From here on the question is whether silence is believable.
-    if result.nocheck or (span is not None and _in_span(result.directive_targets, span)):
+    if result.nocheck or (wide_span is not None
+                          and _in_span(result.directive_targets, wide_span)):
         return tsc("UNCERTAIN", f"a @ts-nocheck or @ts-ignore / @ts-expect-error directive "
                                 f"covers the enclosing scope of {where}; escalated")
 
-    if span is None:
+    if span is None or wide_span is None:
         return tsc("UNCERTAIN", f"no enclosing span for {where}; a refutation needs one")
 
     label = claim.claim_type
-    nearby = [d for d in here if d.code in codes and _overlaps(d, span)]
+    # An unlisted code counts too, so a sibling of the claimed defect escalates.
+    nearby = [d for d in here if (d.code in codes or _unlisted(d.code))
+              and _overlaps(d, wide_span)]
     if nearby:
         lines = ", ".join(sorted({str(d.start_line) for d in nearby}))
         return tsc("UNCERTAIN", f"tsc reported no {label} diagnostic exactly at {where}, but did "
-                                f"report one in the enclosing scope (lines {span[0]}-{span[1]}, "
-                                f"at {lines}); the claim may be off by a line rather than "
-                                f"false; escalated")
+                                f"report one in the enclosing scope (lines {wide_span[0]}-"
+                                f"{wide_span[1]}, at {lines}); the claim may be off by a line "
+                                f"rather than false; escalated")
 
     if any(d.file is None or (d.file == key and (
             is_environment(d.code) or d.start_line is None or d.end_line is None))
@@ -417,6 +481,13 @@ def verdict_for_tsc(claim: Claim, result: TscResult | None, codes: frozenset[int
             return tsc("UNCERTAIN", f"tsc may not see the real types in the enclosing scope "
                                     f"(lines {span[0]}-{span[1]}: any, assertion or implicit "
                                     f"any) @ {where}; escalated")
+
+    # Last, so a more specific reason (1192 is an import member error) speaks first.
+    syntax = next((d for d in here if is_syntactic(d.code) and d.start_line is not None), None)
+    if syntax:
+        return tsc("UNCERTAIN", f"tsc reported a TS1xxx syntax or grammar error (TS{syntax.code} "
+                                f"at line {syntax.start_line}) in {claim.file}, so the file may "
+                                f"not have been read as written; escalated")
 
     return tsc("FALSE_POSITIVE", f"tsc: no {label} diagnostic (TS codes "
                                  f"{', '.join(map(str, sorted(codes)))}) @ {where} or in lines "

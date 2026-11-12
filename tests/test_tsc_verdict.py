@@ -269,3 +269,108 @@ def test_definedness_confirm_blocked_by_install_types_code_anywhere(code):
     r = res(diagnostics=(diag(2304, LINE), diag(code, 1, file=OTHER)))
     v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
     assert v.verdict == "UNCERTAIN" and f"TS{code}" in v.evidence
+
+
+# L4 fixes. Each proof test below was run red against the pre-fix tsc_check.py and
+# failed on its verdict assertion before the fix.
+
+
+@pytest.mark.parametrize("claim_type", ["definedness", "type", "nullability"])
+@pytest.mark.parametrize("code, line", [(1160, SPAN[1] + 3), (1010, SPAN[0]), (1185, 1)],
+                         ids=["template_after_span", "comment_in_span", "conflict_marker"])
+def test_syntax_diagnostic_in_claimed_file_blocks_refutation(claim_type, code, line):
+    """FIX-001 (BUG-001): an unterminated template literal (TS1160), an unterminated
+    comment (TS1010) or a merge conflict marker (TS1185) means the parser did not read
+    the file as written, so silence at the claim proves nothing. Red: FALSE_POSITIVE."""
+    r = res(diagnostics=(diag(code, line),))
+    v = verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN)
+    assert v.verdict == "UNCERTAIN"
+
+
+def test_syntax_diagnostic_in_another_file_does_not_block():
+    r = res(diagnostics=(diag(1160, 1, file=OTHER),))
+    assert verdict_for_tsc(claim(), r, NULLABILITY_CODES, SPAN).verdict == "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("claim_type, code", [
+    ("type", 2739), ("type", 2740), ("type", 2559), ("type", 2352), ("type", 2416),
+    ("type", 2420), ("nullability", 2721), ("nullability", 2723),
+])
+def test_sibling_code_off_by_a_line_blocks_refutation(claim_type, code):
+    """FIX-003 (STAKES-001): TS2739 one line from a type claim, or TS2721 one line from
+    a nullability claim, is the same defect under a sibling code. Red: FALSE_POSITIVE."""
+    r = res(diagnostics=(diag(code, LINE - 1),))
+    v = verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN)
+    assert v.verdict == "UNCERTAIN" and "off by a line" in v.evidence
+
+
+@pytest.mark.parametrize("claim_type, code", [
+    ("type", 2739), ("nullability", 2721), ("nullability", 2723)])
+def test_sibling_code_at_the_line_confirms(claim_type, code):
+    r = res(diagnostics=(diag(code, LINE),))
+    assert verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN).verdict == (
+        "CONFIRMED")
+
+
+@pytest.mark.parametrize("claim_type", ["definedness", "type", "nullability"])
+def test_unlisted_code_in_span_blocks_refutation(claim_type):
+    """FIX-003: a located error in the span under a code no set lists may be a
+    sibling nobody has catalogued; it escalates rather than refutes. Red: FALSE_POSITIVE."""
+    r = res(diagnostics=(diag(9999, LINE + 1),))
+    v = verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN)
+    assert v.verdict == "UNCERTAIN" and "off by a line" in v.evidence
+
+
+def test_other_claim_types_code_in_span_does_not_block():
+    """A listed code of another claim type is not an unlisted sibling: a TS2304 in the
+    scope says nothing about nullability."""
+    r = res(diagnostics=(diag(2304, LINE + 1),))
+    assert verdict_for_tsc(claim(), r, NULLABILITY_CODES, SPAN).verdict == "FALSE_POSITIVE"
+
+
+def test_unlisted_code_outside_span_does_not_block():
+    r = res(diagnostics=(diag(9999, SPAN[1] + 1),))
+    assert verdict_for_tsc(claim(), r, NULLABILITY_CODES, SPAN).verdict == "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("claim_type", ["definedness", "type", "nullability"])
+@pytest.mark.parametrize("code", [2564, 2565])
+def test_property_initialization_code_alone_does_not_block(claim_type, code):
+    """FIX-004, repair cycle 3: the verdict does not block on a TS2564 or TS2565 by
+    itself, which in a repository not built with strictPropertyInitialization would
+    sit on many fields; the probe marks only the reads of the field it names."""
+    r = res(diagnostics=(diag(code, 1),))
+    v = verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN)
+    assert v.verdict == "FALSE_POSITIVE"
+
+
+@pytest.mark.parametrize("code", [2867, 2868])
+def test_bun_install_types_code_blocks_definedness_confirm(code):
+    """FIX-014 (STAKES-006): `Bun.serve` is a TS2867 while `HTMLRewriter` elsewhere is
+    a TS2304; the missing @types/bun removes both. Red: CONFIRMED."""
+    r = res(diagnostics=(diag(2304, LINE), diag(code, 1, file=OTHER)))
+    v = verdict_for_tsc(claim("definedness"), r, DEFINEDNESS_CODES, SPAN)
+    assert v.verdict == "UNCERTAIN" and f"TS{code}" in v.evidence
+
+
+@pytest.mark.parametrize("code", [2882, 2875, 2792])
+@pytest.mark.parametrize("claim_type", ["definedness", "type", "nullability"])
+def test_unresolved_module_codes_block_refutation(code, claim_type):
+    """FIX-015 (STAKES-007): each is an unresolved module, an environment fact."""
+    r = res(diagnostics=(diag(code, 1),))
+    v = verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN)
+    assert v.verdict == "UNCERTAIN"
+
+
+@pytest.mark.parametrize("claim_type, code", [("type", 2339), ("definedness", 2304)])
+def test_unresolved_side_effect_import_withholds_confirm(claim_type, code):
+    """FIX-015: `import "reflect-metadata"` not installed is a TS2882, and the global it
+    augments then reads as a TS2339 on `Reflect.getMetadata`. Red: CONFIRMED."""
+    r = res(diagnostics=(diag(2882, 1), diag(code, LINE)))
+    v = verdict_for_tsc(claim(claim_type), r, CODES_BY_CLAIM[claim_type], SPAN)
+    assert v.verdict == "UNCERTAIN" and "TS2882" in v.evidence
+
+
+def test_unresolved_side_effect_import_does_not_withhold_nullability_confirm():
+    r = res(diagnostics=(diag(2882, 1), diag(18047, LINE)))
+    assert verdict_for_tsc(claim(), r, NULLABILITY_CODES, SPAN).verdict == "CONFIRMED"
