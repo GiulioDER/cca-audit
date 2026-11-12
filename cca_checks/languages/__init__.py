@@ -16,6 +16,7 @@ verdict whose provenance depends on import order is not evidence.
 from .base import LanguageBackend
 from .python import PythonBackend
 from .rust import RustBackend
+from .typescript import TypeScriptBackend
 
 #: Every backend the deterministic layer knows about. Adding a language means adding
 #: it here and nowhere else -- see `_BY_EXTENSION` for what enforces that.
@@ -27,6 +28,7 @@ from .rust import RustBackend
 BACKENDS: tuple[LanguageBackend, ...] = (
     PythonBackend(),
     RustBackend(),
+    TypeScriptBackend(),
 )
 
 
@@ -88,6 +90,7 @@ __all__ = [
     "LanguageBackend",
     "PythonBackend",
     "RustBackend",
+    "TypeScriptBackend",
     "extension_of",
     "resolve",
     "supported_extensions",

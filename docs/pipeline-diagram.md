@@ -93,7 +93,8 @@ which conditional auditors to dispatch.
 
 **Detecting a language is not the same as being able to settle claims about it.** The table above
 drives the auditors, which read code as text and work on anything. The *deterministic* layer covers
-only Python and Rust, and it says so per file: `python -m cca_checks capabilities --file <F>` returns
+only Python, Rust and TypeScript (`definedness`, `type` and `nullability` there), and it says so
+per file: `python -m cca_checks capabilities --file <F>` returns
 the claim types settleable there, plus any whose tool is missing locally. Step 0.5 reports that as a
 `COVERAGE:` line, so a run in which everything rode LLM adjudication is visible rather than inferred.
 

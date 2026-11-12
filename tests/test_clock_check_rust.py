@@ -111,7 +111,7 @@ def test_a_missing_grammar_escalates_rather_than_refuting(monkeypatch):
     """An uninstalled optional extra must never read as "no clock here"."""
     from cca_checks import treesitter as ts
     ts._parser.cache_clear()
-    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", "tree_sitter_no_such_grammar")
+    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", ("tree_sitter_no_such_grammar", "language"))
     v = verdict(CLOCK, 26)
     ts._parser.cache_clear()
     assert v.verdict == "UNCERTAIN"

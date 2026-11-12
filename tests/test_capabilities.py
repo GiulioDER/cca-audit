@@ -29,7 +29,7 @@ def files(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "svc.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
-    (tmp_path / "app.ts").write_text("const a = 1;\n", encoding="utf-8")
+    (tmp_path / "app.kt").write_text("const a = 1;\n", encoding="utf-8")
     return tmp_path
 
 
@@ -52,7 +52,7 @@ def test_rust_reports_its_own_vocabulary(capsys, files):
 
 
 def test_an_uncovered_language_reports_nothing_and_says_why(capsys, files):
-    out = run(capsys, ["capabilities", "--file", "app.ts"])
+    out = run(capsys, ["capabilities", "--file", "app.kt"])
     assert out["language"] is None
     assert out["claim_types"] == []
     assert "no deterministic backend" in out["reason"]
@@ -113,7 +113,7 @@ def test_a_tool_that_is_present_but_cannot_run_is_reported(capsys, files, monkey
 def test_a_missing_grammar_is_reported_against_clock_leak(capsys, files, monkeypatch):
     from cca_checks import treesitter as ts
     ts._parser.cache_clear()
-    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", "tree_sitter_no_such_grammar")
+    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", ("tree_sitter_no_such_grammar", "language"))
     out = run(capsys, ["capabilities", "--file", "main.rs"])
     ts._parser.cache_clear()
     assert "not installed" in out["unavailable"]["clock_leak"]

@@ -29,7 +29,7 @@ def test_rust_resolves_to_the_rust_backend():
 
 
 @pytest.mark.parametrize("path", [
-    "app.ts", "main.go", "Lib.java", "x.rb", "Makefile", "README", ".env",
+    "app.kt", "main.go", "Lib.java", "x.rb", "Makefile", "README", ".env",
 ])
 def test_an_uncovered_path_resolves_to_nothing(path):
     """None is the escalate signal. It must never quietly mean "assume Python"."""

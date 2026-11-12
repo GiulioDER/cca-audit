@@ -66,12 +66,20 @@ expect those findings to escalate. Adding a language is documented in [extending
 | `pip install "cca-audit[taint]"` | semgrep, in your environment | `taint` claims, accepting its pins |
 | `pip install "cca-audit[numeric]"` | `hypothesis`, `pytest`, `mpmath` | `numeric` claims |
 | `pip install "cca-audit[rust]"` | `tree-sitter`, `tree-sitter-rust` | Rust `clock_leak` + span resolution |
+| `pip install "cca-audit[typescript]"` | `tree-sitter`, `tree-sitter-typescript` | TypeScript span resolution |
+| `npm install -g typescript@6.0.3` | the pinned compiler (needs `node`) | TypeScript `definedness`, `type`, `nullability` |
 
 **semgrep is not in `verify` on purpose.** `cca_checks` never imports it: it is resolved on PATH and
 spawned, like `cargo`. But semgrep hard-pins `mcp==1.29.0`, `ruamel.yaml.clib` and `pywin32`, so
 shipping it inside `verify` let an audit install rewrite packages unrelated to auditing. `pipx`
 isolates it and still puts the binary on PATH, which is all `resolve_tool` needs. The `taint` extra
 remains for anyone who wants it in-environment with those pins accepted knowingly.
+
+The TypeScript compiler is installed globally with npm, not with pip. Any TypeScript of major 6
+is trusted, and 6.0.3 is the version to install and the one CI pins; another major escalates.
+`typescript` from the audited tree's `node_modules` is never run. Without `node` or the
+global package, all three TypeScript claim types escalate. Without the `typescript` extra the
+verdict can still confirm but never refute, since there is no span to scope a refutation to.
 
 `pyright` stays in `verify`; it carries no such pins. The Rust toolchain is different again: `cargo`
 and `clippy` belong to the target project and are not pip extras. Missing any of them escalates the
@@ -83,6 +91,7 @@ affected claim types; it never silently passes them.
 |---|---|---|
 | `CCA_TIMEOUT_S` | 120 | each pyright / semgrep / pytest invocation |
 | `CCA_RUST_TIMEOUT_S` | 600 | each `cargo clippy` invocation — a **cold** build of a crate and all its dependencies, which routinely exceeds the 120s above |
+| `CCA_TS_TIMEOUT_S` | 600 | each TypeScript compiler run, which type checks the whole project and exceeds the 120s above on a large one |
 | `CCA_MAX_EXAMPLES` | 200 | Hypothesis examples per property |
 | `CCA_SUBSTRATE_TOL` | 1e-9 | relative divergence that confirms a numeric finding (bounded to [1e-15, 1.0]) |
 | `CCA_SUBSTRATE_DPS` | 50 | decimal digits of the reference substrate |

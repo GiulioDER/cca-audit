@@ -22,6 +22,8 @@ import re
 
 import pytest
 
+from cca_checks import tsc_check
+
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CI = REPO / ".github" / "workflows" / "ci.yml"
 TESTS = pathlib.Path(__file__).resolve().parent
@@ -39,6 +41,9 @@ _INSTALLED_BY = {
     "clippy-driver": "components: clippy",
     "semgrep": "pip install pyright semgrep",
     "pyright": "pip install pyright semgrep",
+    "node": "actions/setup-node",
+    "npm": "actions/setup-node",
+    "tsc": "npm install -g typescript@",
 }
 
 
@@ -92,6 +97,15 @@ def test_ci_installs_the_rust_toolchain_with_clippy():
     ci = _ci_text()
     assert "dtolnay/rust-toolchain" in ci
     assert "components: clippy" in ci
+
+
+def test_ci_pins_typescript_to_a_supported_major():
+    m = re.search(r"npm install -g typescript@(\d+)\.\d+\.\d+", _ci_text())
+    assert m and int(m.group(1)) in tsc_check.SUPPORTED_TS_MAJORS
+
+
+def test_the_packaging_job_checks_the_probe_ships():
+    assert "ts_probe.js" in _ci_text()
 
 
 def test_ci_installs_the_dev_extra():

@@ -144,6 +144,8 @@ pip install 'cca-audit[verify]'    # pyright, pytest
 pipx install semgrep               # taint; kept apart because semgrep pins unrelated packages
 pip install 'cca-audit[numeric]'   # hypothesis, mpmath
 pip install 'cca-audit[rust]'      # tree-sitter Rust grammar; cargo and clippy come from your toolchain
+pip install 'cca-audit[typescript]'  # tree-sitter TypeScript grammar, for spans
+npm install -g typescript@6.0.3      # the compiler for TypeScript claims; needs node
 ```
 
 Missing tools fall back to LLM verification, with one exception: **without the `numeric` extra,
@@ -187,8 +189,9 @@ sandbox. See the [Security Policy](https://github.com/GiulioDER/cca-audit/blob/m
 
 ## Limits
 
-- Deterministic coverage exists for Python and Rust only. Other languages get LLM review, and an
-  uncovered claim returns `UNCERTAIN` rather than being settled by the wrong tool.
+- Deterministic coverage exists for Python, Rust and TypeScript (for TypeScript, `definedness`,
+  `type` and `nullability` only). Other languages get LLM review, and an uncovered claim returns
+  `UNCERTAIN` rather than being settled by the wrong tool.
 - The numeric substrate check cannot see a sign or formula error that both arithmetics compute alike.
 - A crate that does not build gives clippy nothing to check, so it is `UNCERTAIN` everywhere.
 - The commit guard does not inspect command substitution or `$'...'` quoting.

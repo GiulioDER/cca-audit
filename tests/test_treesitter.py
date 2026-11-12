@@ -64,7 +64,7 @@ def test_unknown_language_raises_rather_than_returning_an_empty_tree():
 def test_missing_grammar_is_reported_as_unavailable(monkeypatch):
     """An uninstalled extra must not look like a file with nothing in it."""
     ts._parser.cache_clear()
-    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", "tree_sitter_no_such_grammar")
+    monkeypatch.setitem(ts._GRAMMAR_MODULES, "rust", ("tree_sitter_no_such_grammar", "language"))
     with pytest.raises(ts.GrammarUnavailable, match="not installed"):
         ts.parse(CLOCK, "rust")
     ts._parser.cache_clear()
