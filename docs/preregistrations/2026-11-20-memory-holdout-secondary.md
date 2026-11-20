@@ -99,3 +99,13 @@ any in-window run, it must reproduce this known case: run `20261028T133834Z` (RE
 - **S3 couples to the parent's primary**: if the brief adds confirmed findings it adds verified
   ones, so S3 is not independent evidence of cost.
 - **Model mix** inside the window moves all four metrics in both arms.
+
+## Correction (2026-11-20), appended after the record was committed; the text above is unchanged
+
+Under "What I already know", the fourth wall time, 36.8 minutes, belongs to run
+`20261025T194500Z-recovery-audit` and was computed by reading the id's first sixteen characters as
+a stamp. The registered S4 start is `memory_gap.run_time`, which reads that whole id as no time and
+finds no dispatch file, so under the registered definition that run has no S4 (it would be counted
+in `s4_untimed`). The other three wall times and the known case (`20261028T133834Z`: S1 0, S3 1,
+S4 76.9) are reproduced by `benchmarks/harness/memory_secondary.py --run`. No prediction depends on
+the 36.8 figure.
