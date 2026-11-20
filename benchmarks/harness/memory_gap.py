@@ -191,7 +191,7 @@ def runs(root: pathlib.Path, since: str, until: str) -> list[dict]:
         if (lo is not None and t < lo) or (hi is not None and t >= hi):
             continue
         seen.add(run_id)
-        out.append({**_classify(run_id, run_dir), "root": str(root)})
+        out.append({**_classify(run_id, run_dir), "root": str(root), "dir": str(run_dir)})
     return out
 
 
