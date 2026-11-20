@@ -22,6 +22,18 @@ def claim(claim_type="definedness", line=7):
     return Claim("F-1", "svc.py", line, claim_type)
 
 
+@pytest.fixture(autouse=True)
+def _svc_py(tmp_path, monkeypatch):
+    """A real svc.py, one function per line, so each line is its own enclosing span.
+
+    A refutation needs the span (DOC-001): these tests used to name a file that did not
+    exist, which only refuted because a span failure was silently skipped.
+    """
+    (tmp_path / "svc.py").write_text("".join(f"def f{i}(): pass\n" for i in range(1, 121)),
+                                     encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+
 def test_rule_sets_are_pairwise_disjoint():
     assert not DEFINEDNESS_RULES & NULLABILITY_RULES
     assert not DEFINEDNESS_RULES & TYPE_RULES
@@ -268,3 +280,60 @@ def test_verdict_for_claim_survives_malformed_diag_element():
     v = verdict_for_claim(c, [None, "x"], DEFINEDNESS_RULES)
     assert v.finding_id == "BUG-1"
     assert v.verdict in ("CONFIRMED", "FALSE_POSITIVE", "UNCERTAIN")
+
+
+def test_definedness_silence_on_an_unparsable_file_escalates(tmp_path):
+    """Invariant: a definedness refutation needs the enclosing span, so silence in a file
+    `ast.parse` rejects escalates instead of refuting.
+
+    Failure mode: `enclosing_span` raising set lo = hi = None, the span-wide check was
+    skipped, and silence at the cited line became a tool-backed FALSE_POSITIVE that fp-check
+    may not overturn, although pyright reported the name one line away (DOC-001, run
+    20261120T201246Z).
+    Red: this node against the pre-fix pyright_check.py; FALSE_POSITIVE != UNCERTAIN.
+    """
+    src = tmp_path / "bad.py"
+    src.write_text("def f():\n    x = 1\n    return RISK_CAP\n\n\ndef g(:\n    pass\n",
+                   encoding="utf-8")
+    v = verdict_for_claim(Claim("F-1", str(src), 2, "definedness"),
+                          [diag(3, "reportUndefinedVariable")], DEFINEDNESS_RULES)
+    assert v.verdict == "UNCERTAIN"
+
+
+_OPTIONAL_UPPER = ("import os\n\n\ndef f(name):\n    value: str | None = os.environ.get(name)\n"
+                   "    return value.upper(){tail}\n")
+
+
+@pytest.mark.parametrize("source,claim_type", [
+    (_OPTIONAL_UPPER.format(tail="  # pyright: ignore"), "nullability"),
+    ("# pyright: reportOptionalMemberAccess=false\n" + _OPTIONAL_UPPER.format(tail=""),
+     "nullability"),
+    ("# pyright: basic\n\n\ndef charge(user):\n    return user.card.token\n", "type"),
+])
+def test_a_pyright_comment_in_the_audited_file_escalates_its_silence(tmp_path, source,
+                                                                      claim_type):
+    """Invariant: pyright's silence refutes only a file that cannot have silenced it.
+
+    Failure mode: `enableTypeIgnoreComments: false` disables only `# type: ignore`, so a
+    `# pyright: ignore` on the line, a file-level rule switch or `# pyright: basic` (which
+    also defeats the strict blindness probe, simulated here as not blind) turned a real
+    defect into a binding FALSE_POSITIVE (SEC-003, run 20261120T201246Z).
+    Red: each case against the pre-fix pyright_check.py; FALSE_POSITIVE != UNCERTAIN.
+    """
+    src = tmp_path / "svc.py"
+    src.write_text(source, encoding="utf-8")
+    line = len(source.splitlines())
+    v = verdict_for_claim(Claim("F-1", str(src), line, claim_type), [],
+                          RULES_BY_CLAIM[claim_type], blind_probe=lambda *_: False)
+    assert v.verdict == "UNCERTAIN"
+
+
+def test_silence_still_refutes_without_a_pyright_comment(tmp_path):
+    """Control for the test above: no `# pyright:` comment (one in a string does not count),
+    so the same silence still refutes, before and after the fix."""
+    source = '"""Docs mention # pyright: ignore."""\n' + _OPTIONAL_UPPER.format(tail="")
+    src = tmp_path / "svc.py"
+    src.write_text(source, encoding="utf-8")
+    v = verdict_for_claim(Claim("F-1", str(src), len(source.splitlines()), "nullability"), [],
+                          NULLABILITY_RULES, blind_probe=lambda *_: False)
+    assert v.verdict == "FALSE_POSITIVE"

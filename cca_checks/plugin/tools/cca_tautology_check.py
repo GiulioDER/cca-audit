@@ -43,6 +43,7 @@ from pathlib import Path
 
 DEFAULT_SNAPDIR = Path(".claude/audits/.prefix_snapshot")
 MANIFEST = "manifest.json"
+IN_PROGRESS = "verify-in-progress"
 
 RED, TAUTOLOGICAL, INCONCLUSIVE = "RED", "TAUTOLOGICAL", "INCONCLUSIVE"
 
@@ -135,6 +136,16 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
         raise SystemExit(f"snapshot at {snapdir} is empty — nothing to prove red against")
 
     fixed_dir = snapdir / "fixed"
+    in_progress = snapdir / IN_PROGRESS
+    if in_progress.exists():
+        # A verify stopped before its restore (a kill, a tool timeout, a failed copy) leaves
+        # the tree at pre-fix content and the only copy of the fix in fixed/; stashing the
+        # tree again would overwrite that copy.
+        raise SystemExit(
+            f"a previous verify did not restore the fixed content, so the working tree may "
+            f"still hold the pre-fix code and the fix is only in {fixed_dir}. Recover it with "
+            f"`cp -r {fixed_dir}/. .`, then delete {in_progress} and run verify again"
+        )
     if fixed_dir.exists():
         shutil.rmtree(fixed_dir)
     fixed_dir.mkdir(parents=True)
@@ -145,6 +156,8 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
         dest = fixed_dir / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(rel, dest)
+    in_progress.write_text("verify reverted the tree; removed after a verified restore\n",
+                           encoding="utf-8")
 
     results: list[ProofResult] = []
     try:
@@ -162,6 +175,8 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
         if bad:
             print(f"\n*** RESTORE FAILED for {bad} — recover with:\n"
                   f"***   cp -r {fixed_dir}/. .\n", file=sys.stderr)
+        else:
+            in_progress.unlink()
     return results
 
 
@@ -239,7 +254,13 @@ def _planned_p1() -> int:
             f"row(s) for run {state.run_id} but L2.5 confirmed {confirmed}; the zero-proof "
             "claim cannot be checked"
         )
-    return sum(1 for row in mine if str(row.get("priority", "")).upper() == "P1")
+    by_ledger = sum(1 for row in mine if str(row.get("priority", "")).upper() == "P1")
+    # The ledger's priority is written by hand and record L2.5 does not check it against L2,
+    # so the run's own stored L2 and L2.5 are counted too, and the larger count holds.
+    l2 = pipeline_state._stored_l2(state, ".")
+    l25 = pipeline_state._stored_l25(state, ".", [r["id"] for r in l2])
+    stored = sum(1 for r in l2 if r["priority"] == "P1" and l25.get(r["id"]) == "CONFIRMED")
+    return max(by_ledger, stored)
 
 
 def _save_proofs(results: list[ProofResult]) -> None:

@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import subprocess
 import tempfile
+import tokenize
 
 from .claim import Claim, Verdict, make_verdict
 from .config import TIMEOUT_S
@@ -276,10 +278,10 @@ def run_pyright_strict(path: str) -> list[dict] | None:
     share so their fail-safe cascades cannot drift.
 
     `enableTypeIgnoreComments: false` matters most here: pyright honours
-    `# type: ignore` / `# pyright: ignore` by default, and a suppressed file yields
-    neither a claim diagnostic nor a blindness diagnostic -- so the probe would
-    report "not blind" and license a refutation on a file it was never allowed to
-    see. Disabling suppression is what makes a not-blind answer mean anything.
+    `# type: ignore` by default, and a suppressed file yields neither a claim
+    diagnostic nor a blindness diagnostic -- so the probe would report "not blind"
+    and license a refutation on a file it was never allowed to see. The setting does
+    not cover `# pyright:` comments; `verdict_for_claim` escalates any file holding one.
     """
     return _run_pyright_with_config(path, {
         "typeCheckingMode": "strict",
@@ -316,6 +318,25 @@ def pyright_is_blind_at(path: str, line_1based: int) -> bool:
 
 
 # --- Verdict ----------------------------------------------------------------
+
+_PYRIGHT_DIRECTIVE = re.compile(r"pyright\s*:")
+
+
+def _has_pyright_directive(path: str) -> bool:
+    """True when `path` holds a `# pyright:` comment, or cannot be tokenized.
+
+    `enableTypeIgnoreComments: false` disables only `# type: ignore`. pyright still honours
+    `# pyright: ignore` on a line and file-level `# pyright: basic` or `# pyright: <rule>=false`,
+    so the audited file could silence the claim's diagnostic and the strict blindness probe
+    alike. Matched anywhere in a comment, so an unusual spelling escalates rather than refutes.
+    """
+    try:
+        with tokenize.open(path) as fh:
+            return any(tok.type == tokenize.COMMENT and _PYRIGHT_DIRECTIVE.search(tok.string)
+                       for tok in tokenize.generate_tokens(fh.readline))
+    except (OSError, SyntaxError, tokenize.TokenError, UnicodeDecodeError):
+        return True
+
 
 def verdict_for_claim(
     claim: Claim,
@@ -366,7 +387,10 @@ def verdict_for_claim(
     try:
         lo, hi = enclosing_span(claim.file, claim.line)
     except Exception:
-        lo = hi = None
+        # Without the span the off-by-N check cannot run, and its silence must not refute.
+        ev = (f"could not determine the enclosing scope of {claim.file}:{claim.line}, so "
+              f"pyright's silence there cannot be checked across it; escalated")
+        return make_verdict(claim.finding_id, "UNCERTAIN", ev, "pyright")
     if lo is not None and hi is not None:
         nearby = _diags_in_span(diags, lo, hi, rules)
         if nearby:
@@ -377,6 +401,11 @@ def verdict_for_claim(
                   f"enclosing scope (lines {lo}-{hi}, at {where}) -- the claim may be off by a "
                   f"line rather than false; escalated")
             return make_verdict(claim.finding_id, "UNCERTAIN", ev, "pyright")
+
+    if _has_pyright_directive(claim.file):
+        ev = (f"{claim.file} carries a `# pyright:` comment, which can silence the claim's "
+              f"diagnostic and the blindness probe; escalated")
+        return make_verdict(claim.finding_id, "UNCERTAIN", ev, "pyright")
 
     if claim.claim_type in TYPE_DEPENDENT_CLAIMS:
         probe = blind_probe or pyright_is_blind_at

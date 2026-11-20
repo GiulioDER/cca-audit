@@ -1,5 +1,7 @@
 import textwrap
 
+import pytest
+
 from cca_checks import pyright_check as pc
 from cca_checks.claim import Claim
 from cca_checks.pyright_check import (
@@ -75,6 +77,16 @@ def test_not_blind_when_strict_pyright_is_clean(tmp_path, monkeypatch):
 
 # --- probe wiring into verdict_for_claim -----------------------------------
 
+@pytest.fixture
+def svc_py(tmp_path, monkeypatch):
+    """A real svc.py, one function per line: a refutation needs the claim's enclosing span
+    (DOC-001), and these tests used to name a file that did not exist."""
+    (tmp_path / "svc.py").write_text("".join(f"def f{i}(): pass\n" for i in range(1, 21)),
+                                     encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+
+@pytest.mark.usefixtures("svc_py")
 def test_nullability_refutation_is_escalated_when_pyright_is_blind():
     claim = Claim("F-1", "svc.py", 7, "nullability")
     v = verdict_for_claim(claim, [], NULLABILITY_RULES, blind_probe=lambda p, line: True)
@@ -83,6 +95,7 @@ def test_nullability_refutation_is_escalated_when_pyright_is_blind():
     assert "no type information" in v.evidence
 
 
+@pytest.mark.usefixtures("svc_py")
 def test_nullability_refutation_stands_when_pyright_can_see():
     claim = Claim("F-1", "svc.py", 7, "nullability")
     v = verdict_for_claim(claim, [], NULLABILITY_RULES, blind_probe=lambda p, line: False)
@@ -90,12 +103,15 @@ def test_nullability_refutation_stands_when_pyright_can_see():
     assert v.evidence == "pyright: no optional-access diagnostic @ svc.py:7"
 
 
+@pytest.mark.usefixtures("svc_py")
 def test_type_refutation_is_escalated_when_pyright_is_blind():
     claim = Claim("F-1", "svc.py", 7, "type")
     v = verdict_for_claim(claim, [], pc.TYPE_RULES, blind_probe=lambda p, line: True)
     assert v.verdict == "UNCERTAIN"
+    assert "no type information" in v.evidence
 
 
+@pytest.mark.usefixtures("svc_py")
 def test_definedness_never_runs_the_probe():
     calls = []
 

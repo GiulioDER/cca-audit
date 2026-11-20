@@ -133,7 +133,11 @@ def test_diagnostic_matches_anywhere_in_its_range():
         assert v.verdict == "CONFIRMED", cited
 
 
-def test_diagnostic_outside_its_range_still_refutes():
+def test_diagnostic_outside_its_range_still_refutes(tmp_path, monkeypatch):
+    # A real a.py, one function per line: a refutation needs the enclosing span (DOC-001).
+    (tmp_path / "a.py").write_text("".join(f"def f{i}(): pass\n" for i in range(1, 51)),
+                                   encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
     diags = [{"range": {"start": {"line": 13}, "end": {"line": 15}},
               "rule": "reportOptionalMemberAccess", "message": "m"}]
     v = pyc.verdict_for_claim(
