@@ -109,3 +109,24 @@ def test_rerender_never_writes_a_nul_from_an_old_ledger_line(tmp_path):
     assert report.rendered == 1 and report.skipped == []
     memos = list((root / "memos").iterdir())
     assert all(_clean(m) for m in memos)
+
+
+def test_a_lone_surrogate_does_not_stop_the_ledger_write(tmp_path):
+    """Invariant: a row whose text holds a lone surrogate (json.loads of half an emoji pair,
+    model output CCA does not control) is written with U+FFFD, and the rows after it too.
+
+    Failure mode: `_scrub` replaced only U+0000, so the strict UTF-8 ledger write raised
+    UnicodeEncodeError partway through the batch, and every later `bugs resolve` failed on
+    the same record (DAT-001, run 20261120T201246Z).
+    Red: tests/test_bug_records_no_nul.py::test_a_lone_surrogate_does_not_stop_the_ledger_write
+    against the pre-fix records.py (Step 5.6 of that run); UnicodeEncodeError in `write`.
+    """
+    from dataclasses import replace
+
+    lone = json.loads('"half \\ud83d of an emoji"')
+    rows = [_bug("BUG-1"), replace(_bug("BUG-2"), summary=lone), _bug("BUG-3")]
+    added, _ = write(rows, tmp_path, "2026-11-20T00:00:00Z")
+    assert added == 3
+    lines = (tmp_path / "bugs.jsonl").read_text(encoding="utf-8").splitlines()
+    summaries = [json.loads(line)["summary"] for line in lines]
+    assert "half � of an emoji" in summaries and len(summaries) == 3

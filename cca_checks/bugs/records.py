@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from typing import ClassVar, TypeVar, cast
@@ -218,7 +219,8 @@ _T = TypeVar("_T")
 
 
 def no_nul(value: _T) -> _T:
-    """`value` with U+0000 in every string replaced by U+FFFD, through lists, dicts and rows.
+    """`value` with U+0000 and lone surrogates in every string replaced by U+FFFD, through
+    lists, dicts and rows.
 
     PostgreSQL jsonb cannot store U+0000, so RE-call refuses such a record at index time and
     `roundtrip-check` would list it as missing. Summaries come from commit subjects and model
@@ -231,9 +233,14 @@ def no_nul(value: _T) -> _T:
     return cast(_T, _scrub(value))
 
 
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
 def _scrub(value: object) -> object:
     if isinstance(value, str):
-        return value.replace("\x00", "\ufffd")
+        # A lone surrogate (json.loads of half an emoji pair) cannot be encoded as UTF-8, so
+        # the ledger write would raise mid-batch and every later resolve would fail on it.
+        return _SURROGATE.sub("\ufffd", value.replace("\x00", "\ufffd"))
     if isinstance(value, list):
         return [_scrub(v) for v in value]
     if isinstance(value, tuple):

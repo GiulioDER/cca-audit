@@ -94,6 +94,58 @@ def test_fixed_content_is_stashed_before_any_revert(proj):
     assert stashed.exists() and stashed.read_text(encoding="utf-8") == FIXED
 
 
+def test_a_rerun_after_an_interrupted_verify_keeps_the_fix(proj, monkeypatch):
+    """Invariant: the only copy of the fix survives a second verify after a killed one.
+
+    Failure mode: a verify killed before its restore (a hung pre-fix test, a tool timeout)
+    leaves the tree at pre-fix content and the fix only in fixed/. The next verify deleted
+    fixed/, stashed the pre-fix tree as "fixed", reported RED and exited 0, so the fix was
+    gone (STAKES-001, run 20261120T201246Z).
+    Red: cca_checks/plugin/tools/test_cca_tautology_check.py::
+    test_a_rerun_after_an_interrupted_verify_keeps_the_fix against the pre-fix tool; DID NOT
+    RAISE SystemExit.
+    """
+    snapshot_then_fix(proj)
+    fixed = tc.DEFAULT_SNAPDIR / "fixed" / "money.py"
+    real_copy = shutil.copy2
+    broken = {"on": True}
+
+    def copy2(src, dst, *a, **k):
+        # The restore (fixed/ back onto the tree) is cut off, as a kill would cut it off.
+        if broken["on"] and Path(src).resolve() == fixed.resolve():
+            raise PermissionError("restore interrupted")
+        return real_copy(src, dst, *a, **k)
+
+    monkeypatch.setattr(tc.shutil, "copy2", copy2)
+    with pytest.raises(PermissionError):
+        tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    broken["on"] = False
+    assert (proj / "money.py").read_text(encoding="utf-8") == BUGGY  # left reverted
+    with pytest.raises(SystemExit, match="did not restore"):
+        tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert fixed.read_text(encoding="utf-8") == FIXED
+
+
+def test_a_second_verify_after_a_completed_one_still_runs(proj):
+    """Control for the test above: a verify that restored the tree leaves fixed/ equal to
+    it, so the next verify (a rework cycle) runs as before."""
+    snapshot_then_fix(proj)
+    tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    results = tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert [r.verdict for r in results] == [tc.RED]
+    assert (proj / "money.py").read_text(encoding="utf-8") == FIXED
+
+
+def test_a_verify_after_dropping_a_fix_still_runs(proj):
+    """Control: a rework that reverts a file to its pre-fix content (a fix the regression
+    gate asked to drop) is not mistaken for an interrupted verify."""
+    snapshot_then_fix(proj)
+    tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    (proj / "money.py").write_text(BUGGY, encoding="utf-8")
+    tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert (proj / "money.py").read_text(encoding="utf-8") == BUGGY
+
+
 def test_missing_snapshot_is_a_loud_error_not_a_silent_pass(proj):
     (proj / "money.py").write_text(FIXED, encoding="utf-8")   # fixed, but never snapshotted
     with pytest.raises(SystemExit, match="no snapshot"):
