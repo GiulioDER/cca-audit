@@ -19,6 +19,8 @@ from pathlib import Path
 
 from .anchors import (
     Anchor,
+    _relative,
+    anchor_at,
     anchor_for,
     read_source,
     symbol_sha,
@@ -149,11 +151,13 @@ def for_diff(root: Path, base: str, repo: str | None) -> dict:
     for file, numbers in _changed_lines(diff).items():
         if not (Path(root) / file).is_file():
             continue  # deleted by the change: nothing of it is left to anchor
+        try:  # read once per file; anchor_at's parse is cached for the same source
+            relative = _relative(Path(root), file)
+            source = read_source(Path(root) / relative)
+        except (OSError, ValueError):
+            continue
         for number in dict.fromkeys(numbers):
-            try:
-                anchors.append(anchor_for(Path(root), file, number))
-            except (OSError, ValueError):
-                break
+            anchors.append(anchor_at(relative, source, number))
     return _query(repo, anchors)
 
 

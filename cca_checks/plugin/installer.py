@@ -291,7 +291,12 @@ def _write(dest: pathlib.Path, text: str, result: InstallResult) -> None:
     if dest.exists():
         current = dest.read_text(encoding="utf-8")
         if current != text:
-            dest.with_suffix(dest.suffix + ".bak").write_text(current, encoding="utf-8")
+            # Never overwrite an earlier backup that differs: it may hold the customization
+            # a previous upgrade set aside. Take the next free numbered name instead.
+            bak, n = dest.with_suffix(dest.suffix + ".bak"), 1
+            while bak.exists() and bak.read_text(encoding="utf-8", errors="replace") != current:
+                bak, n = dest.with_suffix(f"{dest.suffix}.bak.{n}"), n + 1
+            bak.write_text(current, encoding="utf-8")
             result.backed_up += 1
     dest.write_text(text, encoding="utf-8")
     result.installed += 1

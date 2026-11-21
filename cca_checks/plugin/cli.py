@@ -159,5 +159,6 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("Run /audit-fix in Claude Code from this project to audit your changes.")
     print("For the deterministic verification layer, also install:")
-    print("    pip install 'cca-audit[verify]'   # hypothesis, pyright, semgrep, mpmath")
+    print("    pip install 'cca-audit[verify]'  # pyright, pytest, hypothesis, mpmath, tree-sitter")
+    print("    pipx install semgrep              # taint checks; deliberately not in [verify]")
     return 0

@@ -55,9 +55,13 @@ try {
     $AgentsDir = ".claude\agents"
     $CommandsDir = ".claude\commands"
     $ToolsDir = ".claude\tools"
+    $HooksDir = ".claude\hooks"
+    $GuidesDir = ".claude\guides"
     New-Item -ItemType Directory -Force -Path $AgentsDir | Out-Null
     New-Item -ItemType Directory -Force -Path $CommandsDir | Out-Null
     New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $GuidesDir | Out-Null
 
     # Copy one file, preserving any local customization as <name>.bak.
     #
@@ -71,9 +75,17 @@ try {
         if (Test-Path $dest) {
             $same = (Get-FileHash $SourcePath).Hash -eq (Get-FileHash $dest).Hash
             if (-not $same) {
-                Copy-Item $dest -Destination "$dest.bak" -Force
+                # Never overwrite an earlier backup that differs: it may hold the
+                # customization a previous upgrade set aside. Take the next free name.
+                $bak = "$dest.bak"
+                $n = 1
+                while ((Test-Path $bak) -and ((Get-FileHash $dest).Hash -ne (Get-FileHash $bak).Hash)) {
+                    $bak = "$dest.bak.$n"
+                    $n++
+                }
+                Copy-Item $dest -Destination $bak -Force
                 $script:BackedUp++
-                Write-Host "  Updated   $Name -> $DestDir\ (previous version kept as $Name.bak)"
+                Write-Host "  Updated   $Name -> $DestDir\ (previous version kept as $(Split-Path -Leaf $bak))"
                 Copy-Item $SourcePath -Destination $dest -Force
                 return
             }
@@ -116,6 +128,16 @@ try {
     if (-not $tools) { throw "no checker files found in $SrcDir\tools\" }
     $tools | ForEach-Object { Install-CcaFile $_.FullName $ToolsDir $_.Name }
 
+    # Copy the gate hooks and the guides, as `cca-audit install` does. Without the
+    # hooks nothing refuses a commit or a turn end while a run is open, and nothing
+    # says so.
+    $hooks = Get-ChildItem "$SrcDir\hooks\cca_*.py" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike "test_*" }
+    if (-not $hooks) { throw "no hook files found in $SrcDir\hooks\" }
+    $hooks | ForEach-Object { Install-CcaFile $_.FullName $HooksDir $_.Name }
+    Get-ChildItem "$SrcDir\guides\*.md" -ErrorAction SilentlyContinue |
+        ForEach-Object { Install-CcaFile $_.FullName $GuidesDir $_.Name }
+
     # Install the cca_checks package so the deterministic verifier works.
     #
     # `python` first, matching install.sh and — more importantly — matching what the
@@ -136,10 +158,15 @@ try {
         $target = "$RepoRoot[numeric]"
         # `--user` is refused inside a virtualenv and under PEP 668, both common for
         # a Python project being audited. Plain install first, --user as fallback.
+        # Under Windows PowerShell 5.1 with ErrorActionPreference Stop, every stderr line
+        # merged by 2>&1 is a terminating error, and pip writes notices and warnings
+        # there even on success. Decide on $LASTEXITCODE instead, as the git step does.
+        $ErrorActionPreference = "Continue"
         $pipOut = & $py.Source -m pip install --quiet $target 2>&1
         if ($LASTEXITCODE -ne 0) {
             $pipOut = & $py.Source -m pip install --user --quiet $target 2>&1
         }
+        $ErrorActionPreference = "Stop"
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  Installed cca_checks[numeric] -> $($py.Source) -m cca_checks"
             & $py.Source -m cca_checks --help 2>$null | Out-Null
@@ -160,6 +187,8 @@ try {
     if ($script:BackedUp -gt 0) {
         Write-Host "$($script:BackedUp) customized file(s) were updated; the previous versions are saved as *.bak."
     }
+    Write-Host "The commit and stop guards in $HooksDir run only once registered in Claude Code's"
+    Write-Host "settings: print the snippet with  cca-audit install --print-hook"
     Write-Host "CCA-Audit installed. Run /audit-fix in Claude Code to start."
 }
 finally {

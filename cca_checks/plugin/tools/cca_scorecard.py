@@ -82,6 +82,7 @@ class Report:
     rows_scored: int = 0
     rows_skipped_outcome: int = 0
     rows_skipped_malformed: int = 0
+    rows_skipped_reverified: int = 0
 
     @property
     def ready_cells(self) -> list[Cell]:
@@ -97,7 +98,10 @@ class Report:
 
 
 def _parse_ts(raw: str) -> datetime:
-    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    # Every writer stamps UTC; a stamp without an offset is read as UTC, not dropped as
+    # malformed (a naive time cannot be compared with the aware cutoff).
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
 def load_rows(ledger: Path, now: datetime, window_days: int = WINDOW_DAYS):
@@ -131,12 +135,32 @@ def load_rows(ledger: Path, now: datetime, window_days: int = WINDOW_DAYS):
                 continue
             auditor = row["auditor"]
             category = row["category"]
-            if not isinstance(auditor, str) or not isinstance(category, str):
+            finding_id = row.get("finding_id")  # build() keys on it; a list there is malformed
+            if (not isinstance(auditor, str) or not isinstance(category, str)
+                    or not isinstance(finding_id, (str, type(None)))):
                 raise TypeError
         except (KeyError, TypeError, ValueError):
             yield None, "malformed"
             continue
         yield row, "scored"
+
+
+def _parent_run(ledger: Path, run_id: str) -> str | None:
+    """The run a deferred run took its pool from: its runs/<id>/summary.json once it closed,
+    else the open run state beside the ledger (its own Step 2.6 scores before it closes).
+    "" when a record says the run has no parent; None when nothing records the run."""
+    for path in (ledger.parent / "runs" / run_id / "summary.json",
+                 ledger.parent / "run-state.json"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(record, dict) or (path.name == "run-state.json"
+                                            and record.get("run_id") != run_id):
+            continue
+        parent = record.get("parent")
+        return parent if isinstance(parent, str) else ""  # recorded: not a deferred run
+    return None  # nothing recorded
 
 
 def build(ledger: Path = DEFAULT_LEDGER, now: datetime | None = None,
@@ -146,7 +170,11 @@ def build(ledger: Path = DEFAULT_LEDGER, now: datetime | None = None,
     tally: dict[tuple[str, str], Counter] = defaultdict(Counter)
     per_auditor: dict[str, Counter] = defaultdict(Counter)
 
-    for row, kind in load_rows(ledger, now, window_days):
+    loaded = list(load_rows(ledger, now, window_days))
+    judged = {(str(row.get("run_id")), row.get("finding_id")) for row, kind in loaded
+              if kind == "scored" and row is not None and row["verdict"] in _SCORED}
+    parents: dict[str, str | None] = {}
+    for row, kind in loaded:
         if kind == "malformed":
             rep.rows_skipped_malformed += 1
             continue
@@ -155,6 +183,21 @@ def build(ledger: Path = DEFAULT_LEDGER, now: datetime | None = None,
             continue
         if row is None:
             rep.rows_skipped_malformed += 1
+            continue
+        run_id = str(row.get("run_id"))
+        if run_id not in parents:
+            parents[run_id] = _parent_run(ledger, run_id)
+        # The row's own parent_run_id (Step D.4) is hand-written and unchecked, so it is used
+        # only where the tool recorded no parent: a deferred run that was aborted leaves
+        # neither a summary nor a run state. A row naming its own run is ignored.
+        parent = parents[run_id]
+        if parent is None and row.get("parent_run_id") != run_id:
+            claimed = row.get("parent_run_id")
+            parent = claimed if isinstance(claimed, str) else None
+        if parent and (parent, row.get("finding_id")) in judged:
+            # A deferred pass re-verifying a finding its parent run already judged (one
+            # confirmed, then deferred at L3): one finding counts once, by its first verdict.
+            rep.rows_skipped_reverified += 1
             continue
         rep.rows_scored += 1
         verdict = row["verdict"]

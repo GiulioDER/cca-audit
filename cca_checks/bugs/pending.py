@@ -13,14 +13,13 @@ import json
 import os
 import shutil
 import socket
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..layer_outputs import ShapeError, l4_fixes
 from . import fp_records, run_facts
-from .gitread import remote_repo
+from .gitread import GitError, git, remote_repo
 from .store import bugs_dir, write
 
 PENDING = "pending"
@@ -34,9 +33,10 @@ SCORECARD = ".claude/audits/AUDITOR_SCORECARD.jsonl"
 
 
 def _branch(root: Path) -> str | None:
-    out = subprocess.run(["git", "-C", str(root), "branch", "--show-current"],
-                         capture_output=True, text=True)
-    name = out.stdout.strip()
+    try:
+        name = git(root, "branch", "--show-current").strip()
+    except GitError:
+        return None
     return name or None
 
 

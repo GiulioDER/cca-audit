@@ -111,3 +111,24 @@ def test_a_pending_run_links_with_or_without_trailers(_private_bugs_dir, tmp_pat
     rep = relink.relink(root, [repo], write=True, now=NOW)
     assert rep.rows_written == 2 and rep.superseding == 0
     assert {r.fix_commit for r in _bugs(root)} == {merge}
+
+
+def test_one_unreadable_record_does_not_stop_relink(_private_bugs_dir, tmp_path):
+    """CODE-006 (self hunt run 20261120T201246Z). Invariant: a record whose run files cannot
+    be read is reported and skipped, and the other records still link, as in resolve.
+    Failure mode: relink built rows outside any per-record guard, so one bad L4.json aborted
+    the whole command. Red: JSONDecodeError out of relink.relink on the pre-fix code."""
+    root = _private_bugs_dir
+    repo = make_repo(tmp_path / "repo")
+    run_git(repo, "checkout", "-q", "-b", "side")
+    run = commit(repo, "a.py", "x = 1\n", RUN_MSG, date="2026-10-13T09:00:00+00:00")
+    run_git(repo, "checkout", "-q", "master")
+    commit(repo, "m.py", "x = 2\n", "fix: the series (#12)\n\n* " + RUN_MSG,
+           date="2026-10-14T09:00:00+00:00")
+    publish(repo)
+    broken = pending_record(root, tmp_path, "r0", captured="2026-10-13T10:00:00Z", commit=run)
+    (broken / "L4.json").write_text("{not json", encoding="utf-8")
+    pending_record(root, tmp_path, "r1", captured="2026-10-13T10:00:00Z", commit=run)
+    rep = relink.relink(root, [repo], write=True, now=NOW)
+    assert any(broken.name in s for s in rep.skipped)
+    assert rep.rows_written == 2

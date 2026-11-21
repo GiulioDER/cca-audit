@@ -18,6 +18,14 @@ from .ledgers import fix_number
 from .model import ABSENT, CLAIMED, EVIDENCED, NOT_REQUIRED, BugRow
 
 _SAFE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{0,63}")
+
+
+def safe_memo_id(value: object) -> bool:
+    """Whether a finding id may become part of a memo filename: the one rule, for bug rows
+    and false-positive rows alike, since `/../..` in an id would escape the memos folder."""
+    return isinstance(value, str) and bool(_SAFE_ID.fullmatch(value)) and bool(value.strip("."))
+
+
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _SHA40 = re.compile(r"[0-9a-f]{40}")
 
@@ -201,8 +209,7 @@ def rows_and_skips(record: Path, merge: Merge, ledger: list[BugRow] | None = Non
         fix_id = raw_fix if isinstance(raw_fix, str) else ""
         finding = entry.get("finding") or entry.get("finding_id") or fix_id
         # The id becomes a memo filename, and L4 comes from untrusted places.
-        if (not isinstance(finding, str) or not _SAFE_ID.fullmatch(finding)
-                or not finding.strip(".")):
+        if not safe_memo_id(finding):
             continue
         reason = _not_fixed(entry, fix_id, card)
         if reason is not None:

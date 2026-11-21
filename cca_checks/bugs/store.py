@@ -15,9 +15,11 @@ reader takes it from `effective_caused_by`.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-from collections.abc import Sequence
+import sys
+from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -39,7 +41,9 @@ def existing_ids(ledger: Path) -> set[str]:
     if not ledger.exists():
         return set()
     ids: set[str] = set()
-    for line in ledger.read_text(encoding="utf-8").splitlines():
+    # errors="replace": a line torn inside a multibyte character fails to parse and is
+    # skipped like any other torn line, instead of stopping every later write.
+    for line in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             value = json.loads(line)
             ids.add(value["bug_id"] if "bug_id" in value else value["id"])
@@ -58,7 +62,9 @@ def bug_rows(ledger: Path) -> list[BugRow]:
     annotations = caused_by_annotations(ledger.parent)
     recovered = anchor_log.read(ledger.parent)
     rows = []
-    for line in ledger.read_text(encoding="utf-8").splitlines():
+    # errors="replace", as in existing_ids: a line torn inside a multibyte character is
+    # skipped like any other unparseable line instead of stopping resolve, relink and unlinked.
+    for line in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             value = json.loads(line)
             if value.get("kind", "bug") == "bug":
@@ -145,10 +151,50 @@ def append_annotations(root: Path, annotations: Sequence[dict]) -> int:
     return len(annotations)
 
 
+@contextlib.contextmanager
+def _ledger_lock(root: Path) -> Iterator[None]:
+    """Hold an exclusive lock on `bugs.jsonl.lock` beside the ledger.
+
+    `write` reads the ids already present and then appends. Its writers (session close, the
+    hourly resolve, record-unlinked, relink, Claude Code and Codex) can overlap, and without
+    the lock each misses the other's ids and the append-only ledger keeps both copies.
+    """
+    with (root / (LEDGER + ".lock")).open("a+b") as fh:
+        fh.seek(0)
+        if sys.platform == "win32":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)  # retries for about 10 s, then raises
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
 def write(rows: Sequence[Row], root: Path, modified: str) -> tuple[int, int]:
     memos = root / MEMOS
     memos.mkdir(parents=True, exist_ok=True)
+    with _ledger_lock(root):
+        return _write_locked(rows, root, memos, modified)
+
+
+def _write_locked(rows: Sequence[Row], root: Path, memos: Path,
+                  modified: str) -> tuple[int, int]:
     ledger = root / LEDGER
+    if ledger.exists() and ledger.stat().st_size:
+        with ledger.open("rb") as fh:
+            fh.seek(-1, os.SEEK_END)
+            torn = fh.read(1) != b"\n"
+        if torn:  # an interrupted append left half a line; the next row must not join it
+            with ledger.open("ab") as fh:
+                fh.write(b"\n")
     have = existing_ids(ledger)
     added = written = 0
     with ledger.open("a", encoding="utf-8", newline="\n") as fh:

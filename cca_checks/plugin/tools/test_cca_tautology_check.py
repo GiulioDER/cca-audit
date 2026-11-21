@@ -126,6 +126,57 @@ def test_a_rerun_after_an_interrupted_verify_keeps_the_fix(proj, monkeypatch):
     assert fixed.read_text(encoding="utf-8") == FIXED
 
 
+def test_a_proof_that_hangs_pre_fix_times_out_and_restores_the_fix(proj, monkeypatch):
+    """PERF-002 (self hunt run 20261120T201246Z). Invariant: a proof test that hangs
+    against the pre-fix code ends as INCONCLUSIVE within the timeout, and the fixed content
+    is put back. Failure mode: pytest ran with no timeout, so verify hung until something
+    killed it and the tree stayed at the pre-fix code.
+    Red: against the pre-fix tool the verify thread is still running after 20 s."""
+    import threading
+
+    from cca_checks import config
+
+    (proj / "test_hang.py").write_text(
+        "import time\nfrom money import net_payout\n\n"
+        "def test_hangs():\n    time.sleep(40)\n", encoding="utf-8")
+    snapshot_then_fix(proj)
+    monkeypatch.setattr(config, "TIMEOUT_S", 3)
+    out = []
+    worker = threading.Thread(daemon=True, target=lambda: out.extend(
+        tc.verify([("FIX-001", "test_hang.py::test_hangs")])))
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert [r.verdict for r in out] == [tc.INCONCLUSIVE]
+    assert (proj / "money.py").read_text(encoding="utf-8") == FIXED
+
+
+def test_a_proof_whose_child_hangs_with_capture_off_still_times_out(proj, monkeypatch):
+    """BUG-002 of audit run 20261120T225224Z. Invariant: the timeout bounds verify even when
+    the proof spawns a process that inherits pytest's output (capture off). Failure mode: on
+    Windows, subprocess.run waited after the kill for every holder of its pipes, so the child
+    kept verify blocked and the restore unrun. Red on Windows: still running after 60 s."""
+    import threading
+
+    from cca_checks import config
+
+    (proj / "test_child.py").write_text(
+        "import subprocess, sys, time\nfrom money import net_payout\n\n"
+        "def test_child_hangs():\n"
+        "    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)'])\n"
+        "    time.sleep(120)\n", encoding="utf-8")
+    snapshot_then_fix(proj)
+    monkeypatch.setattr(config, "TIMEOUT_S", 25)  # pytest itself takes seconds to start
+    out = []
+    worker = threading.Thread(daemon=True, target=lambda: out.extend(
+        tc.verify([("FIX-001", "test_child.py::test_child_hangs")], extra_pytest=["-s"])))
+    worker.start()
+    worker.join(timeout=60)
+    assert not worker.is_alive()
+    assert [r.verdict for r in out] == [tc.INCONCLUSIVE]
+    assert (proj / "money.py").read_text(encoding="utf-8") == FIXED
+
+
 def test_a_second_verify_after_a_completed_one_still_runs(proj):
     """Control for the test above: a verify that restored the tree leaves fixed/ equal to
     it, so the next verify (a rework cycle) runs as before."""

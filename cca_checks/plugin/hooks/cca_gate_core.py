@@ -595,12 +595,14 @@ BRIEF_MARKS = (
     "PRIOR FIXES IN THESE FILES",
     "PRIOR BUGS AT THE CHANGED CODE",
 )
-_BRIEF_LINE_ID = re.compile(r"^(?:BUG|LESSON) (\S+) \[", re.MULTILINE)
+#: One BUG or LESSON line of a reader block: (kind, record id, match label). The one definition
+#: of the line, read here by the launch guard and by `pipeline_state` for the run summary.
+BRIEF_LINE = re.compile(r"^(BUG|LESSON) (\S+) \[([^\]\n]*)", re.MULTILINE)
 
 
 def brief_ids(block: str) -> list[str]:
     """The record ids a reader block lists, one per BUG or LESSON line, in order."""
-    return _BRIEF_LINE_ID.findall(block)
+    return [record_id for _kind, record_id, _match in BRIEF_LINE.findall(block)]
 
 
 def dispatch_reasons(root, state: dict, agent_type: str, prompt: str) -> list[str]:
@@ -628,8 +630,10 @@ def dispatch_reasons(root, state: dict, agent_type: str, prompt: str) -> list[st
         return [
             f"Step 1 has not built the prior-bugs brief: {where}/ holds neither "
             f"{BRIEF_FILES[0]} nor {BRIEF_FILES[1]}. Run `python -P -m cca_checks bugs brief "
-            f"--root <target Git root> --out {where}/{BRIEF_FILES[0]} --files <FILES>` and paste "
-            "its output into this prompt"
+            f"--root <target Git root> --out {where}/{BRIEF_FILES[0]} --files <FILES>` (on "
+            "Python 3.10, which has no -P, run it without -P from outside the audited "
+            "repository, with --root and --out given as absolute paths) and paste its output "
+            "into this prompt"
         ]
     if not any(mark in prompt for mark in BRIEF_MARKS):
         return [

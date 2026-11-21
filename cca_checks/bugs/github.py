@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from ..toolpath import resolve_tool
 from .forward import Merge
 from .model import SHA40 as _SHA
 
@@ -49,8 +50,11 @@ Runner = Callable[[list[str]], str]
 
 
 def gh(args: list[str]) -> str:
+    exe = resolve_tool("gh", os.getcwd())  # never a bare `gh` found in the working directory
+    if exe is None:
+        raise GhError("gh could not run: no trusted gh executable on PATH")
     try:
-        out = subprocess.run(["gh", *args], capture_output=True, text=True,
+        out = subprocess.run([exe, *args], capture_output=True, text=True,
                              encoding="utf-8", timeout=60)
     except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
         raise GhError(f"gh could not run: {exc}") from exc

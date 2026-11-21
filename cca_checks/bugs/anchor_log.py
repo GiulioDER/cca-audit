@@ -169,7 +169,9 @@ def inherit_rows(rows: dict[str, Row]) -> dict[str, Row]:
     for _ in range(len(out)):  # one link per pass; a chain of n rows settles in n passes
         changed = False
         for row_id, row in out.items():
-            if not isinstance(row, BugRow) or row.anchors or not row.supersedes:
+            # A non-string `supersedes` (a malformed line) cannot be a dict key; skip it.
+            if (not isinstance(row, BugRow) or row.anchors
+                    or not isinstance(row.supersedes, str) or not row.supersedes):
                 continue
             before = out.get(row.supersedes)
             if (isinstance(before, BugRow) and before.anchors
@@ -184,11 +186,13 @@ def inherit_rows(rows: dict[str, Row]) -> dict[str, Row]:
 def inherit_dicts(rows: list[dict]) -> None:
     """The same rule for the legacy dictionary reader, in place."""
     by_id = {r.get("bug_id"): r for r in rows
-             if isinstance(r, dict) and r.get("kind", "bug") == "bug" and r.get("bug_id")}
+             if isinstance(r, dict) and r.get("kind", "bug") == "bug"
+             and isinstance(r.get("bug_id"), str) and r.get("bug_id")}
     for _ in range(len(by_id)):
         changed = False
         for row in by_id.values():
-            before = by_id.get(row.get("supersedes"))
+            supersedes = row.get("supersedes")
+            before = by_id.get(supersedes) if isinstance(supersedes, str) else None
             anchors = before.get("anchors") if isinstance(before, dict) else None
             if (row.get("anchors") or not isinstance(anchors, list) or not anchors
                     or not all(isinstance(a, dict) and isinstance(a.get("file"), str)

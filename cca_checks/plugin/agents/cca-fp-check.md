@@ -305,8 +305,8 @@ not understand it** — its silence about sinks is not evidence of absence. Same
 
 Use the returned JSON **verbatim** (fields: `verdict`, `evidence`, `source`), then delete the
 temp repro test after running it. You may not overturn a `CONFIRMED` or a `FALSE_POSITIVE`
-that carries a tool artifact — that is, any verdict whose `source` is `pyright`, `semgrep`,
-`clippy`, `ast`, `pytest`, or `hypothesis`. The checker read the code; you are guessing. You adjudicate
+that carries a tool artifact — that is, any verdict whose `source` is not `llm` (`pyright`,
+`semgrep`, `clippy`, `tsc`, `cargo`, `ast`, `pytest`, `hypothesis`). The checker read the code; you are guessing. You adjudicate
 `UNCERTAIN` only, and when you do you must cite the facts you gathered and emit `source: llm`.
 
 **One exception, MODE=DEFERRED only: a tool-backed `FALSE_POSITIVE` can be the first half of a

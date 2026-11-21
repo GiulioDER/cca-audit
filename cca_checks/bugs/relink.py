@@ -32,7 +32,7 @@ from .forward import Merge, rows_and_skips
 from .gitread import GitError, default_ref, git, group_clones
 from .model import BugRow, render_memo
 from .pending import PENDING, RECORDED, TMP_PREFIX
-from .resolve import _captured, _check_meta, _meta, _move, _Ordinals
+from .resolve import _Backfilled, _captured, _check_meta, _meta, _move, _Ordinals
 from .store import LEDGER, bug_rows
 from .store import write as write_rows
 from .unlinked import UNLINKED
@@ -112,6 +112,7 @@ def relink(root: Path, clones: list[Path], *, write: bool, assume_repo: str | No
         if row.run_id:
             by_run[row.run_id].append(row)
     ordinals = _Ordinals(root / LEDGER)
+    backfilled = _Backfilled(root / LEDGER)
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     sections: dict[str, dict[str, list[Section]]] = {}
     batch = []
@@ -157,16 +158,26 @@ def relink(root: Path, clones: list[Path], *, write: bool, assume_repo: str | No
             pr = _PR.search(hit.subject)
             merge = Merge(repo, hit.merge, hit.when.strftime("%Y-%m-%d"),
                           int(pr.group(1)) if pr else 0)
-            pairs, _skips = rows_and_skips(folder, merge, known)
+            try:
+                pairs, _skips = rows_and_skips(folder, merge, known)
+                for row, _fix in pairs:  # a memo that cannot render must fail here
+                    render_memo(row, stamp)
+            except Exception as exc:  # one bad record must not stop the others, as in resolve
+                report.skipped.append(f"{sub}/{folder.name}: {type(exc).__name__}: {exc}")
+                continue
             run_rows = by_run.get(str(meta.get("run_id")), [])
             linked = {r.finding_id for r in run_rows
                       if not any(s.startswith("unlinked:") for s in r.sources)}
             old = {(r.finding_id, r.ordinal): r for r in run_rows
                    if any(s.startswith("unlinked:") for s in r.sources)}
             rows = []
-            for row, _fix in pairs:
+            for row, fix_id in pairs:
                 if row.finding_id in linked:
                     report.already.append(f"{folder.name}: {row.finding_id}")
+                    continue
+                same = backfilled.match(row, fix_id)
+                if same is not None:  # backfill already recorded this bug, as resolve skips it
+                    report.already.append(f"{folder.name}: {row.finding_id} is backfill row {same}")
                     continue
                 if not merge.pr:
                     row.sources = [s for s in row.sources if not s.startswith("pr:")]
@@ -176,7 +187,6 @@ def relink(root: Path, clones: list[Path], *, write: bool, assume_repo: str | No
                     row.supersedes = previous.bug_id
                     report.superseding += 1
                 row.ordinal = ordinals.assign(row)
-                render_memo(row, stamp)
                 rows.append(row)
             report.rows += len(rows)
             report.linked.append(f"{sub}/{folder.name} -> {hit.merge[:12]}")
