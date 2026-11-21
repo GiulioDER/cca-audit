@@ -109,6 +109,10 @@ class PipelineState:
     layers: dict = field(default_factory=dict)
     schema: int = 1
     base_tree: str | None = None
+    #: A run started by a version that owes L5.4. Old runs lack the key and owe nothing new.
+    fix_audit: bool = False
+    #: The tree when L3 was recorded: the state the fix audit measures the fixes against.
+    prefix_tree: str | None = None
     seq: int = 0
     stop_refusals: int = 0
     stop_logged: bool = False
@@ -126,6 +130,7 @@ class PipelineState:
             "schema": self.schema, "run_id": self.run_id, "tier": self.tier,
             "mode": self.mode, "no_fix": self.no_fix, "started_utc": self.started_utc,
             "fixes_applied": self.fixes_applied, "base_tree": self.base_tree,
+            "fix_audit": self.fix_audit, "prefix_tree": self.prefix_tree,
             "seq": self.seq, "stop_refusals": self.stop_refusals,
             "stop_logged": self.stop_logged, "paused": self.paused, "layers": self.layers,
             "base_commit": self.base_commit, "parent": self.parent,
@@ -152,6 +157,8 @@ class PipelineState:
             layers=layers,
             schema=int(raw.get("schema", 1) or 1),
             base_tree=raw.get("base_tree"),
+            fix_audit=bool(raw.get("fix_audit", False)),
+            prefix_tree=raw.get("prefix_tree") if isinstance(raw.get("prefix_tree"), str) else None,
             seq=int(raw.get("seq", 0) or 0),
             stop_refusals=int(raw.get("stop_refusals", 0) or 0),
             stop_logged=bool(raw.get("stop_logged", False)),
@@ -410,6 +417,7 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
         run_id=new_id, tier=tier,
         mode=mode, no_fix=no_fix, started_utc=stamp,
         schema=core.SCHEMA, base_tree=core.fingerprint(root), base_commit=base_commit,
+        fix_audit=True,
         parent=stored_parent,
         owner_session=os.environ.get("CLAUDE_CODE_SESSION_ID") or None,
         client=client, auditors=auditors,
@@ -820,6 +828,14 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
                 f"L3 plans {to_fix} (--to-fix) and defers {n_deferred} (--deferred) but L2.5 "
                 f"confirmed {confirmed}; every confirmed finding is either planned or deferred"
             )
+        if state.fix_audit:
+            # The fix audit measures the fixes against this tree, so it must exist.
+            state.prefix_tree = core.fingerprint(root)
+            if state.prefix_tree is None:
+                raise RecordRefused(
+                    "L3 cannot be recorded: the working tree could not be fingerprinted "
+                    "(git missing from PATH, older than 2.31, or timed out)"
+                )
 
 
 def _read_output(layer: str, output, root) -> bytes:

@@ -52,6 +52,7 @@ def _fix_through_l6(repo, tier, verdict="APPROVED"):
     (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(repo), root=repo)
     ps.record("L5", detail="green", root=repo)
+    ps.record("L5.4", detail="fix audit", source="tool", root=repo)
     if tier != "FAST":
         ps.record("L5.5", detail="all SAFE", root=repo)
         ps.record("L5.6", detail="1 RED", source="tool", root=repo)
@@ -472,7 +473,7 @@ def test_resume_after_an_edit_made_while_paused_lists_the_stale_verdicts(git_rep
     result = ps.resume(root=git_repo)
     assert result["tree_changed"] is True
     stale = {r.split()[0] for r in result["outstanding"] if "latest edit" in r}
-    assert stale == {"L5", "L5.5", "L5.6", "L6"}
+    assert stale == {"L5", "L5.4", "L5.5", "L5.6", "L6"}
     assert result["next"] == "L5" and result["heading"] == "Step 5"
     assert list(result["outputs"]) == ["L1", "L2", "L2.5", "L3", "L4"]
 
@@ -1221,7 +1222,8 @@ def _child_to_l5(repo, parent, *, run_id="child", n=3):
     app = repo / "app.py"
     app.write_text(app.read_text(encoding="utf-8") + f"# {run_id}\n", encoding="utf-8")
     ps.record("L4", fixes=n, output=write_output(repo), root=repo)
-    return ps.record("L5", detail="green", root=repo)
+    ps.record("L5", detail="green", root=repo)
+    return ps.record("L5.4", detail="fix audit", source="tool", root=repo)
 
 
 def _close_child(repo, run_id="child"):

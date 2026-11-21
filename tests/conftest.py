@@ -217,6 +217,7 @@ def closed_parent(repo, *, run_id="parent", p2_deferred=0, p3=3, human=0, parked
     app.write_text(app.read_text(encoding="utf-8") + f"# fixed by {run_id}\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(repo), root=repo)
     ps.record("L5", detail="green", root=repo)
+    ps.record("L5.4", detail="fix audit", source="tool", root=repo)
     ps.record("L5.5", detail="all SAFE", root=repo)
     ps.record("L5.6", detail="1 RED", source="tool", root=repo)
     ps.record("L6", detail="APPROVED", root=repo)
