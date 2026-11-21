@@ -15,7 +15,7 @@ class Verdict:
     finding_id: str
     verdict: str  # CONFIRMED | FALSE_POSITIVE | UNCERTAIN
     evidence: str
-    source: str   # pyright | pytest | semgrep | hypothesis | llm
+    source: str   # pyright | semgrep | clippy | tsc | cargo | ast | pytest | hypothesis | llm
 
 def make_verdict(finding_id: str, verdict: str, evidence: str, source: str) -> Verdict:
     # Artifact-or-UNCERTAIN: a decisive verdict must carry evidence.

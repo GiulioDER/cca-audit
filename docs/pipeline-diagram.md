@@ -127,7 +127,7 @@ per finding: CONFIRMED / FALSE_POSITIVE / DUPLICATE (hunt mode — cite the upst
 False positives and duplicates are dropped; uncertain ones are escalated to the user (never fixed
 blind). **High-stakes P1 findings** get an adversarial **2-of-3** check (three independent skeptics,
 default-to-refute) on the DEEP tier — **except** findings whose verdict already rests on a tool
-artifact (`pyright`, `clippy`, `ast`, `semgrep`, `pytest`, `hypothesis`), notably a `NUM-*` P1
+artifact (`pyright`, `clippy`, `tsc`, `cargo`, `ast`, `semgrep`, `pytest`, `hypothesis`), notably a `NUM-*` P1
 carrying a `hypothesis` artifact. The artifact settles it; an LLM majority does not get to outvote a
 falsifying example. Conversely, on DEEP a `NUM-*` P1 may **not** enter the fix plan without that
 artifact.

@@ -142,7 +142,7 @@ class _Ordinals:
         self.taken: dict[tuple, set[int]] = defaultdict(set)
         self.own: dict[tuple, list[int]] = defaultdict(list)
         if ledger.exists():
-            for line in ledger.read_text(encoding="utf-8").splitlines():
+            for line in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
                 try:  # as tolerant as store.existing_ids
                     row = json.loads(line)
                     if row.get("kind", "bug") != "bug":
@@ -186,7 +186,8 @@ class _Backfilled:
     def __init__(self, ledger: Path):
         self.ids: dict[tuple[str, str], set[str]] = defaultdict(set)
         if ledger.exists():
-            for line in ledger.read_text(encoding="utf-8").splitlines():
+            # errors="replace" as in store.existing_ids: a torn multibyte line is skipped.
+            for line in ledger.read_text(encoding="utf-8", errors="replace").splitlines():
                 try:
                     row = json.loads(line)
                     if row.get("kind", "bug") != "bug":

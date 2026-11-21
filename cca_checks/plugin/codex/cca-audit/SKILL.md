@@ -144,10 +144,13 @@ When DIFF mode has no hosted `recall_records` tool, use the local reader path in
 reading a missing `prior-records.json`. In HUNT mode use this local path instead of the
 legacy `bugs prior --files`, preserving the foreign-root guard above. Resolve the target
 Git root in both modes and run `python -P -m cca_checks bugs brief --root <target Git root>
---out .claude/audits/runs/<run_id>/local-prior.json --files <targets>` once. Paste its complete
+--out .claude/audits/runs/<run_id>/local-prior.json --files <targets>` once (Python 3.10 has no
+`-P`: there, run it without `-P` from outside the audited repository, with `--root` and `--out`
+as absolute paths). Paste its complete
 output into every Layer 1 prompt. It includes relevant local bugs and owner-accepted lessons
-through the shared RE-call reader. An unavailable reader is explicit, distinct from no matches;
-if the command fails, retain that distinction and continue from current evidence. This local
+through the shared RE-call reader. An unavailable reader is explicit, distinct from no matches,
+and still writes the receipt. If the command itself fails it writes no receipt, and the L1 gate
+refuses until it runs: fix the failure and run it again, or abort the run on the record. This local
 path makes no hosted trust claim and never manufactures `prior-records.json` or hides a hosted
 refusal. It supplies context only and cannot suppress findings or authorize prior-FP matches.
 The standalone `auditor-memory` skill documents this same handoff for other Codex auditor tasks.

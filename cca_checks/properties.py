@@ -99,8 +99,10 @@ def assert_bounded(fn: Callable, args: Sequence, lo: float, hi: float) -> None:
     y = fn(*args)
     if not math.isfinite(y):
         raise PropertyViolation("bounded", tuple(args), y, f"{lo} <= result <= {hi}")
-    eps = max(ABS_TOL, REL_TOL * max(abs(lo), abs(hi), abs(y)))
-    if y < lo - eps or y > hi + eps:
+    # Each bound gets the tolerance of its own magnitude: the slack of a far bound must not
+    # widen the near one (with lo=0 and hi=1e9 a shared eps of 1.0 admitted -0.9).
+    if (y < lo - max(ABS_TOL, REL_TOL * max(abs(lo), abs(y)))
+            or y > hi + max(ABS_TOL, REL_TOL * max(abs(hi), abs(y)))):
         raise PropertyViolation("bounded", tuple(args), y, f"{lo} <= result <= {hi}")
 
 

@@ -7,11 +7,13 @@ and reported, because it would count the same bugs under a second name.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..toolpath import _is_inside, resolve_tool
 from .parse import is_cca_fix_subject
 
 # GitHub's own character set for owners and names. Anything wider lets an origin URL put
@@ -32,8 +34,18 @@ class GitError(RuntimeError):
 
 
 def git(clone: Path, *args: str) -> str:
+    # Resolved, never bare: Windows looks for a bare `git` in the working directory first,
+    # and `pipeline close` runs from the root of the repository under audit. The working
+    # directory may be any directory of that repository, and the search there applies PATHEXT
+    # (git.bat counts), so a candidate anywhere inside the repository being read is refused.
+    exe = resolve_tool("git", os.getcwd())
+    if exe is not None and _is_inside(os.path.normcase(os.path.realpath(exe)),
+                                      os.path.normcase(os.path.realpath(clone))):
+        exe = None
+    if exe is None:
+        raise GitError("no trusted git executable on PATH")
     proc = subprocess.run(
-        ["git", "-C", str(clone), *args], capture_output=True,
+        [exe, "-C", str(clone), *args], capture_output=True,
         text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:

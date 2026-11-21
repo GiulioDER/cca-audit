@@ -38,7 +38,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 DEFAULT_SNAPDIR = Path(".claude/audits/.prefix_snapshot")
@@ -101,16 +103,36 @@ _UNREACHED = re.compile(
 )
 
 
+def _timeout_s() -> float:
+    """CCA_TIMEOUT_S, the ceiling for every pytest launch; 120 s when run standalone."""
+    try:
+        from cca_checks import config
+    except ImportError:
+        return 120.0
+    return config.TIMEOUT_S
+
+
 def _run_one(nodeid: str, extra: list[str]) -> tuple[str, str]:
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", nodeid, "-q", "--tb=line",
-         "-p", "no:cacheprovider", *extra],
-        capture_output=True, text=True,
-        # No bytecode: this runs on the reverted PRE-FIX source, and a .pyc compiled from it
-        # would survive the restore and change the tree fingerprint L5 recorded.
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-    )
-    out = (proc.stdout or "") + (proc.stderr or "")
+    timeout = _timeout_s()
+    # Output to a file, not a pipe: after a timeout, subprocess.run on Windows waits for every
+    # holder of its pipes, so a process the test spawned with capture disabled kept it blocked.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as log:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", nodeid, "-q", "--tb=line",
+                 "-p", "no:cacheprovider", *extra],
+                stdout=log, stderr=subprocess.STDOUT, text=True,
+                # No bytecode: this runs on the reverted PRE-FIX source, and a .pyc compiled
+                # from it would survive the restore and change the tree fingerprint L5 recorded.
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                # A hang-class defect hangs its test pre-fix too; without a bound the restore
+                # in verify's finally never runs and the tree is left at the pre-fix code.
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return INCONCLUSIVE, f"timed out after {timeout:g} s against the pre-fix code"
+        log.seek(0)
+        out = log.read()
     tail = out.strip().splitlines()[-1] if out.strip() else f"(rc={proc.returncode})"
     if proc.returncode == 0:
         return TAUTOLOGICAL, tail
@@ -124,6 +146,23 @@ def _run_one(nodeid: str, extra: list[str]) -> tuple[str, str]:
     return INCONCLUSIVE, tail
 
 
+def _snapshot_predates_run(man_path: Path) -> str | None:
+    """The open run's id when the snapshot was written before that run started, else None.
+
+    A run that skipped `snapshot` would otherwise be judged against an earlier run's pre-fix
+    content, and a test that fails there for any reason would count as its RED proof.
+    """
+    try:
+        from cca_checks import pipeline_state
+    except ImportError:
+        return None
+    state = pipeline_state.load(".")
+    if state is None or not state.started_utc:
+        return None
+    started = datetime.fromisoformat(state.started_utc.replace("Z", "+00:00")).timestamp()
+    return state.run_id if man_path.stat().st_mtime < started else None
+
+
 def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
            extra_pytest: list[str] | None = None) -> list[ProofResult]:
     extra = extra_pytest or []
@@ -134,6 +173,13 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
     manifest = json.loads(man_path.read_text(encoding="utf-8"))
     if not manifest:
         raise SystemExit(f"snapshot at {snapdir} is empty — nothing to prove red against")
+    older = _snapshot_predates_run(man_path)
+    if older is not None:
+        raise SystemExit(
+            f"the snapshot at {snapdir} was taken before run {older} started, so it holds "
+            f"another run's pre-fix content; take `snapshot` at Layer 4 of this run, before "
+            f"its first edit"
+        )
 
     fixed_dir = snapdir / "fixed"
     in_progress = snapdir / IN_PROGRESS

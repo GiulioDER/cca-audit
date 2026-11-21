@@ -422,9 +422,8 @@ def start(tier: str, mode: str = "DIFF", *, no_fix: bool = False, run_id: str = 
 #: Ledger verdict to the L2.5 count it tallies against. DEFERRED is absent on purpose: a
 #: finding passed on unverified received no verdict, so it gets no ledger row. STALE is
 #: present: a DEFERRED run's verifier gives it, and it gets a row like any other verdict.
-_VERDICT_COUNTS = {"CONFIRMED": "confirmed", "FALSE_POSITIVE": "fp",
-                   "UNCERTAIN": "uncertain", "DUPLICATE": "duplicate", "STALE": "stale",
-                   "PRIOR_FP": "prior_fp"}
+_VERDICT_COUNTS = {verdict: count for verdict, count in layer_outputs.COUNT_OF.items()
+                   if verdict != "DEFERRED"}
 
 #: Why fp-check called a finding FALSE_POSITIVE (Step 2.5b). Only `not_real` (criteria a and c)
 #: may become a suppressing record: an out-of-scope finding sits on unchanged code by
@@ -1198,11 +1197,10 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
     return log
 
 
-#: The saved `recall_records` answer Step 1 renders the prior-bugs block from.
-PRIOR_RECORDS = "prior-records.json"
+#: The receipt `bugs brief --out` writes (Step 1's local reader path), and the saved
+#: `recall_records` answer Step 1 renders the prior-bugs block from. The launch guard's names.
+LOCAL_PRIOR, PRIOR_RECORDS = core.BRIEF_FILES
 PRIOR_CODE = "prior-code.json"
-#: The receipt `bugs brief --out` writes: Step 1's local reader path.
-LOCAL_PRIOR = "local-prior.json"
 
 
 def _check_prior_brief(state: PipelineState, root) -> None:
@@ -1223,7 +1221,9 @@ def _check_prior_brief(state: PipelineState, root) -> None:
     raise RecordRefused(
         f"L1 needs the prior-bugs brief first, and {where}/ holds neither {LOCAL_PRIOR} nor "
         f"{PRIOR_RECORDS}. Run `python -P -m cca_checks bugs brief --root <target Git root> "
-        f"--out {where}/{LOCAL_PRIOR} --files <FILES>` (or save the hosted recall_records "
+        f"--out {where}/{LOCAL_PRIOR} --files <FILES>` (on Python 3.10, which has no -P, run "
+        f"it without -P from outside the audited repository, with --root and --out given as "
+        f"absolute paths; or save the hosted recall_records "
         f"answer as {where}/{PRIOR_RECORDS}; a hunt that must read no memory passes "
         "`--skipped <unresolved-root|own-checkout>` instead of --root and --files), paste its "
         "output into every auditor prompt as Step 1 of audit-fix.md says, then record again"
@@ -1254,7 +1254,7 @@ def _saved_brief_answer(state: PipelineState, root) -> tuple[list[dict], str | N
     return records, repo
 
 
-_BRIEF_LINE = re.compile(r"^(BUG|LESSON) (\S+) \[(\w+)\]", re.MULTILINE)
+_BRIEF_LINE = core.BRIEF_LINE  # the launch guard's own rule, so both list the same records
 
 
 def _local_brief(state: PipelineState, root) -> tuple[str, list[tuple[str, str, str]]] | None:
