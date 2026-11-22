@@ -6,6 +6,29 @@ All notable changes to `cca_checks` — the deterministic verification layer beh
 version from `pyproject.toml`, not the surrounding agent-prompt tooling (which is unversioned).
 Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — nothing here is invented.
 
+## [Unreleased]
+
+**Upgrade note: the commit guard now covers the PowerShell tool.** Run `cca-audit install`, then
+replace the guard's entry in settings.json with the output of `cca-audit install --print-hook`: its
+matcher becomes `Bash|PowerShell`. `install` warns about an entry still wired to Bash only.
+
+**The commit guard judges a command the way the shell would run it.** It no longer matches a regex.
+It parses bash and PowerShell and walks the command over every path it can take, to find each
+directory a `git commit` in it could run in: through `cd`, `pushd`, `env -C`, `git -C`, functions,
+`eval`, command substitution, `bash -c`, `sh -c` (read both as bash and as dash) and variables.
+A value the walk cannot model (written by arithmetic, `read`, `printf -v`, a prefix assignment, an
+unexported name in a child shell) is unknown, and a commit in an unknown directory is judged against
+every open run. Text that names `git` and `commit` but that no modelled command runs is judged
+inside the session checkout. A 45 s watchdog refuses a command it could not judge in time while a
+run is open; the hook timeout stays 60 s. Ordinary commands are not refused, but with a run open
+`git $unknown` is, since its subcommand may be `commit`.
+
+**Known gaps.** Five constructs still commit unjudged, three of them weaker than the 0.16.0 guard;
+[limits](docs/limits.md) lists them. Fixes proposed by the audit, for the follow-up: a child shell
+should see every parent name as unknown and every function as possibly defined, instead of tracking
+exports; a merged state should mark the `pushd` stack unknown instead of empty; `pushd` and `popd`
+should fail in the dash reading.
+
 ## [0.16.0] - 2026-11-12
 
 **Upgrade note: the TypeScript backend needs its own toolchain.** Nothing changes for Python or

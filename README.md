@@ -194,7 +194,8 @@ sandbox. See the [Security Policy](https://github.com/GiulioDER/cca-audit/blob/m
   `UNCERTAIN` rather than being settled by the wrong tool.
 - The numeric substrate check cannot see a sign or formula error that both arithmetics compute alike.
 - A crate that does not build gives clippy nothing to check, so it is `UNCERTAIN` everywhere.
-- The commit guard does not inspect command substitution or `$'...'` quoting.
+- The commit guard reads bash and PowerShell closely, not exactly: a few constructs that commit
+  in an open run's checkout are still let through.
 
 The full list, with the test that asserts each one, is in
 [docs/limits.md](https://github.com/GiulioDER/cca-audit/blob/master/docs/limits.md).
