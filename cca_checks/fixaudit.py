@@ -138,12 +138,16 @@ def is_test_path(path: str) -> bool:
             or name.endswith("_test.py"))
 
 
+def _files_of(hunks: list[Hunk], fix: dict) -> set[str]:
+    """The files a fix lists, a renamed file under its new path (it is one file)."""
+    renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
+    return {renamed.get(f, f) for f in fix["files"]}
+
+
 def size_report(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
     """Per fix, its changed non-test lines; a file listed by k fixes counts 1/k to each."""
-    renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
-
     def files_of(fix: dict) -> set[str]:
-        return {renamed.get(f, f) for f in fix["files"]}  # a renamed file is one file
+        return _files_of(hunks, fix)
 
     lines: dict[str, int] = {}
     for h in hunks:
@@ -295,11 +299,10 @@ def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> Sibli
             raise FixAuditRefused(
                 f"{fix['fix_id']}: give sibling_patterns, or a sibling_reason when there are none")
     edited = {(h.path, n) for h in hunks for n in h.added_at}
-    renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
     out: list[dict] = []
     too_broad: list[dict] = []
     for fix in fixes:
-        files = {renamed.get(f, f) for f in fix["files"]}
+        files = _files_of(hunks, fix)
         own = [h for h in hunks if h.path in files]
         skip = edited | {(h.path, n) for h in own for n, _ in h.anchors}
         auto = auto_patterns(own)
@@ -343,3 +346,86 @@ def check_dispositions(hits: list[dict], dispositions: dict, repo_root: Path) ->
         elif not str(entry.get("reason") or "").strip():
             reasons.append(f"{hid}: not_applicable needs a reason")
     return reasons
+
+
+# The data auditor is bug-auditor run with the DAT- prompt; the suffix keeps it a separate need.
+DATA_AUDITOR = "bug-auditor:DAT"
+MAX_AUDITORS = 4
+_SHELL_SUFFIXES = (".sh", ".ps1")
+
+# name -> (regexes matched against an added line, the auditors the mechanism routes to)
+MECHANISMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "process": ((r"\bsubprocess\b", r"\bPopen\b", r"\bos\.system\b"),
+                ("security-auditor", "bug-auditor")),
+    "lock": ((r"\bthreading\b", r"\bLock\b", r"\bfcntl\b", r"\bmsvcrt\.locking\b", r"\bflock\b"),
+             ("bug-auditor", DATA_AUDITOR)),
+    "timeout": ((r"\btimeout\s*=", r"\.wait\(", r"\bsignal\.alarm\b"),
+                ("bug-auditor", "perf-auditor")),
+    "parser": ((r"\bjson\.loads?\b", r"\bre\.compile\b", r"\bast\.parse\b", r"\bcsv\."),
+               ("bug-auditor", DATA_AUDITOR)),
+    "file_write": ((r"\.write_(?:text|bytes)\(", r"\bopen\(.*[\"'][wax][bt+]*[\"']", r"\bos\.replace\b"),
+                   (DATA_AUDITOR,)),
+}
+# Shell installers: a trap or a changed error preference alters what a failure does, and a
+# redirection of stderr decides whether it is seen. Bug for the logic, deploy for the install.
+SHELL_MECHANISMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "trap": ((r"^\s*trap\b",), ("bug-auditor", "deploy-auditor")),
+    "ErrorActionPreference": ((r"\$ErrorActionPreference\b",), ("bug-auditor", "deploy-auditor")),
+    "redirect": ((r"\b2>",), ("bug-auditor", "deploy-auditor")),
+}
+
+
+def mechanism_flags(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
+    """Each added non-test line of a fix that adds a mechanism, once per mechanism: a process
+    launch, a lock, a timeout, a parser of untrusted input, a file write (shell files have their
+    own rows)."""
+    out = []
+    for fix in fixes:
+        files = _files_of(hunks, fix)
+        for h in hunks:
+            if h.path not in files or is_test_path(h.path):
+                continue
+            table = SHELL_MECHANISMS if h.path.endswith(_SHELL_SUFFIXES) else MECHANISMS
+            for line_no, text in zip(h.added_at, h.added):
+                for name, (patterns, auditors) in table.items():
+                    if any(re.search(p, text) for p in patterns):
+                        out.append({"fix_id": fix["fix_id"], "mechanism": name, "path": h.path,
+                                    "line": line_no, "auditors": list(auditors)})
+    return out
+
+
+def failure_test_reasons(flags: list[dict], fixes: list[dict], repo_root: Path) -> list[str]:
+    """Reasons a flagged fix does not name a test of its mechanism's own failure: no
+    `failure_test`, or one whose file or function does not exist."""
+    reasons = []
+    for fix in fixes:
+        mechanisms = sorted({f["mechanism"] for f in flags if f["fix_id"] == fix["fix_id"]})
+        if not mechanisms:
+            continue
+        fid, node = fix["fix_id"], str(fix.get("failure_test") or "").strip()
+        if not node:
+            reasons.append(f"{fid}: adds {', '.join(mechanisms)}; name failure_test, a test of "
+                           "the mechanism's own failure")
+            continue
+        file, _, rest = node.partition("::")
+        name = rest.rsplit("::", 1)[-1].split("[", 1)[0]
+        path = repo_root / file
+        if not name or not path.is_file():
+            reasons.append(f"{fid}: failure_test {node!r} is not an existing file::test node")
+            continue
+        if not re.search(rf"\bdef\s+{re.escape(name)}\b", path.read_text(encoding="utf-8", errors="replace")):
+            reasons.append(f"{fid}: failure_test {node!r}: no def {name} in {file}")
+    return reasons
+
+
+def auditors_for(fixes: list[dict], flags: list[dict], categories: dict[str, str]) -> list[str]:
+    """At most MAX_AUDITORS, by how many fixes need each: the auditor of a fix's finding
+    category, and those its flagged mechanisms route to. Ties go alphabetically."""
+    needs: dict[str, int] = {}
+    for fix in fixes:
+        wanted = {a for f in flags if f["fix_id"] == fix["fix_id"] for a in f["auditors"]}
+        if fix.get("finding") in categories:
+            wanted.add(categories[fix["finding"]])
+        for a in wanted:
+            needs[a] = needs.get(a, 0) + 1
+    return sorted(needs, key=lambda a: (-needs[a], a))[:MAX_AUDITORS]

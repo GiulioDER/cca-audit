@@ -538,3 +538,113 @@ def test_a_matched_line_holding_a_bare_carriage_return_is_one_hit(git_repo):
     sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
     assert [(h["path"], h["line"]) for h in sweep.hits] == [("b.py", 1), ("c.py", 1)]
     assert sweep.hits[0]["text"] == 'y = f("a")\n# tail'
+
+
+def _added(path, *lines):
+    """Hunks of a diff that only adds `lines` to `path`."""
+    body = "".join(f"+{x}\n" for x in lines)
+    diff = f"--- a/{path}\n+++ b/{path}\n@@ -1,0 +1,{len(lines)} @@\n{body}"
+    return fixaudit.parse_fix_diff(diff)[0]
+
+
+def _flagged(path, *lines):
+    return {(f["mechanism"], f["line"])
+            for f in fixaudit.mechanism_flags(_added(path, *lines), [{"fix_id": "F1", "files": [path]}])}
+
+
+def test_bug002_shape_flags_a_timeout():
+    """Invariant: a fix that adds a process launch with a timeout is flagged for both.
+
+    Node: tests/test_fixaudit_checks.py::test_bug002_shape_flags_a_timeout.
+    Red: 2026-11-22 mutating the timeout regex `\btimeout\s*=` to `\btimeoutX\s*=` failed
+    `assert {('process', 1)} == {('process', 1), ('timeout', 1)}`.
+    """
+    assert _flagged("a.py", "    r = subprocess.run(cmd, timeout=t)") == {("process", 1), ("timeout", 1)}
+
+
+def test_bug003_shape_flags_a_parser():
+    """Invariant: json.loads over ledger rows is a parser of untrusted input.
+
+    Node: tests/test_fixaudit_checks.py::test_bug003_shape_flags_a_parser.
+    Red: 2026-11-22 mutating `\bjson\.loads?\b` to `\bjson\.dumps?\b` failed
+    `assert set() == {('parser', 2)}`.
+    """
+    assert _flagged("a.py", "x = 1", "    row = json.loads(line)") == {("parser", 2)}
+
+
+def test_a_shell_installer_has_its_own_rows():
+    """Invariant: .sh and .ps1 files match the shell rows, not the Python ones.
+
+    Node: tests/test_fixaudit_checks.py::test_a_shell_installer_has_its_own_rows.
+    Red: 2026-11-22 mutating mechanism_flags to `table = MECHANISMS` failed
+    `assert set() == {('redirect', 2), ('trap', 1)}`.
+    """
+    assert _flagged("i.sh", "trap cleanup EXIT", "run 2>/dev/null") == {("trap", 1), ("redirect", 2)}
+    assert _flagged("i.ps1", "$ErrorActionPreference = 'Stop'") == {("ErrorActionPreference", 1)}
+    assert _flagged("i.sh", "x = subprocess.run(c)") == set()
+
+
+def test_test_files_never_raise_flags():
+    """Invariant: a test may launch processes and write files freely.
+
+    Node: tests/test_fixaudit_checks.py::test_test_files_never_raise_flags.
+    Red: 2026-11-22 dropping `or is_test_path(h.path)` in mechanism_flags failed
+    `assert {('process', 1), ('timeout', 1)} == set()`.
+    """
+    assert _flagged("tests/test_a.py", "subprocess.run(c, timeout=1)") == set()
+
+
+def _flag(fix_id="F1", mechanism="timeout", auditors=("bug-auditor", "perf-auditor")):
+    return {"fix_id": fix_id, "mechanism": mechanism, "path": "a.py", "line": 1,
+            "auditors": list(auditors)}
+
+
+def test_a_flagged_fix_without_failure_test_is_refused(tmp_path):
+    """Invariant: a flagged fix must name failure_test; an unflagged one need not.
+
+    Node: tests/test_fixaudit_checks.py::test_a_flagged_fix_without_failure_test_is_refused.
+    Red: 2026-11-22 mutating `if not node:` in failure_test_reasons to `if False:` failed
+    `assert (1 == 1 and False)` (the reason read "failure_test '' is not an existing ...").
+    """
+    fixes = [{"fix_id": "F1", "files": ["a.py"]}, {"fix_id": "F2", "files": ["b.py"]}]
+    reasons = fixaudit.failure_test_reasons([_flag()], fixes, tmp_path)
+    assert len(reasons) == 1 and reasons[0].startswith("F1: adds timeout")
+
+
+def test_a_failure_test_naming_a_missing_node_is_refused(tmp_path):
+    """Invariant: failure_test must name an existing file holding that def; a real one passes.
+
+    Node: tests/test_fixaudit_checks.py::test_a_failure_test_naming_a_missing_node_is_refused.
+    Red: 2026-11-22 mutating the def check to `if False and not re.search(...)` failed with
+    `IndexError: list index out of range` (no reason for a missing def).
+    """
+    _write(tmp_path, "tests/test_x.py", "def test_timeout_fires():\n    pass\n")
+
+    def reasons(node):
+        return fixaudit.failure_test_reasons(
+            [_flag()], [{"fix_id": "F1", "files": ["a.py"], "failure_test": node}], tmp_path)
+
+    assert reasons("tests/test_x.py::test_timeout_fires") == []
+    assert reasons("tests/test_x.py::TestC::test_timeout_fires[p1]") == []
+    assert "no def test_nope" in reasons("tests/test_x.py::test_nope")[0]
+    assert "not an existing" in reasons("tests/test_y.py::test_timeout_fires")[0]
+    assert "not an existing" in reasons("tests/test_x.py")[0]
+
+
+def test_no_more_than_four_auditors():
+    """Invariant: at most 4 auditors, the most needed first, ties alphabetical, the data auditor
+    counted apart from bug-auditor.
+
+    Node: tests/test_fixaudit_checks.py::test_no_more_than_four_auditors.
+    Red: 2026-11-22 mutating `[:MAX_AUDITORS]` to `[:MAX_AUDITORS + 1]` failed
+    `assert [..., 'perf-auditor'] == [..., 'numeric-auditor']` (a fifth auditor).
+    """
+    fixes = [{"fix_id": f"F{i}", "files": [], "finding": f"BUG-{i}"} for i in (1, 2, 3)]
+    categories = {"BUG-1": "bug-auditor", "BUG-2": "bug-auditor", "BUG-3": "numeric-auditor"}
+    flags = [_flag("F1", "process", ("security-auditor", "bug-auditor")),
+             _flag("F2", "parser", ("bug-auditor", fixaudit.DATA_AUDITOR)),
+             _flag("F3", "timeout", ("bug-auditor", "perf-auditor")),
+             _flag("F3", "trap", ("deploy-auditor",))]
+    got = fixaudit.auditors_for(fixes, flags, categories)
+    assert got == ["bug-auditor", "bug-auditor:DAT", "deploy-auditor", "numeric-auditor"]
+    assert fixaudit.auditors_for(fixes, [], categories) == ["bug-auditor", "numeric-auditor"]
