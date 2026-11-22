@@ -246,14 +246,20 @@ def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str, int]]:
         if str(e).rstrip().endswith(f"failed in {repo_root}:"):
             return []
         raise FixAuditRefused(f"sibling pattern {pattern!r} could not be searched: {e}") from e
+    # git() reads in text mode, which turns a bare carriage return inside a matched line into a
+    # newline. A row without a NUL is therefore the rest of the previous row's text.
+    rows: list[list] = []
+    for row in out.split("\n"):  # not splitlines(): a form feed inside a matched line is no row end
+        if "\0" in row:
+            path, line, text = row.split("\0", 2)
+            rows.append([path, int(line), text])
+        elif rows:
+            rows[-1][2] += "\n" + row
     hits = []
     seen: dict[tuple[str, str], int] = {}
-    for row in out.split("\n"):  # not splitlines(): a form feed inside a matched line is no row end
-        if not row:
-            continue
-        path, line, text = row.split("\0", 2)
+    for path, line, text in rows:
         text = text.strip()
-        hits.append((path, int(line), text, seen.get((path, text), 0)))
+        hits.append((path, line, text, seen.get((path, text), 0)))
         seen[(path, text)] = seen.get((path, text), 0) + 1
     return hits
 
@@ -277,7 +283,8 @@ def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> Sibli
     """Every other place a fix's patterns occur, so each can be fixed or justified.
 
     A fix's patterns are the call heads of its changes (auto_patterns) plus its declared
-    `sibling_patterns`: fixed strings, or a regex when prefixed `re:`. Empty `sibling_patterns`
+    `sibling_patterns`: fixed strings (tolerant of spacing, and like the auto patterns not matched
+    inside a longer name), or a regex when prefixed `re:`. Empty `sibling_patterns`
     needs a `sibling_reason`. A site on a line the fixes added is not a hit (it was edited), nor
     is the anchor line a guard was attached to. A declared pattern over MAX_HITS_PER_PATTERN
     hits is refused; an auto pattern over it is dropped into `too_broad`.

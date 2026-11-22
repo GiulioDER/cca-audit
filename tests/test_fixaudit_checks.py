@@ -446,7 +446,7 @@ def test_call_heads_become_patterns_and_trivial_lines_do_not():
     (c) not skipping test paths (`if False:` for `is_test_path`) failed
     `assert ['read_text(e...', 'g("z"'] == [...]`.
     """
-    removed =("    return None", "  )", "", "x = f(1)", 'for l in p.read_text(encoding="utf-8").splitlines():',
+    removed = ("    return None", "  )", "", "x = f(1)", 'for l in p.read_text(encoding="utf-8").splitlines():',
                'exe = resolve_tool("git", os.getcwd())', "y = 'a'")
     hunks = [Hunk("a.py", 1, 7, 1, 0, removed, ()),
              Hunk("tests/test_a.py", 1, 1, 1, 0, ('assert g("z")',), ())]
@@ -520,3 +520,21 @@ def test_parse_records_added_lines_and_anchors():
     (h,) = fixaudit.parse_fix_diff(diff)[0]
     assert h.added_at == (2, 3, 5)
     assert h.anchors == ((1, "one"),)
+
+
+def test_a_matched_line_holding_a_bare_carriage_return_is_one_hit(git_repo):
+    """Invariant: git() reads in text mode, so a bare CR in a matched line arrives as a newline;
+    that line is still one hit, and the row after it is not lost.
+
+    Node: tests/test_fixaudit_checks.py::test_a_matched_line_holding_a_bare_carriage_return_is_one_hit.
+    Red 2026-11-22: mutating the `_grep` parse to the round 2 one (skip empty rows, split every
+    row on NUL into three) failed with
+    `ValueError: not enough values to unpack (expected 3, got 1)`.
+    """
+    _write(git_repo, "a.py", 'x = f("a")\n')
+    _write(git_repo, "b.py", 'y = f("a")\r# tail\n')
+    _write(git_repo, "c.py", 'z = f("a")\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = f("a", 1)\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert [(h["path"], h["line"]) for h in sweep.hits] == [("b.py", 1), ("c.py", 1)]
+    assert sweep.hits[0]["text"] == 'y = f("a")\n# tail'
