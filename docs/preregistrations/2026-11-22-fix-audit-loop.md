@@ -113,3 +113,28 @@ Status: Q3 measured; Q1 and Q2 not yet measured.
   `git show --numstat --format=` lines excluding `fixaudit.is_test_path` paths, and divides by the
   fixes sharing the commit.
 - **Setting:** `SIZE_THRESHOLD` becomes 140 (the 90th percentile rounded up).
+
+## Correction (2026-11-22)
+
+Appended; nothing above is edited.
+
+- **The script's new path.** The Q3 script named in the Command line above lived in a session
+  scratchpad, so the result could not be re-run from the repository. It is now committed as
+  `benchmarks/harness/fix_size_q3.py` (`PYTHONPATH=. python benchmarks/harness/fix_size_q3.py`,
+  and with a sha for the single commit check). The committed copy is reformatted, drops one unused
+  constant and also prints the number of distinct values; its logic is unchanged. Re-run
+  2026-11-22 from this checkout: n = 198 fixes in 20 commits, none skipped, no binary file,
+  percentiles 50.1, 93.6, 139.4 and 141.7 (as recorded above), 20 distinct values; the single
+  commit check on bfc7d2568ff40b52dace6ee3653c7caef0b48463 printed 86 again.
+- **"20 distinct sizes" should read "at most 20 distinct values".** Every fix of one commit gets
+  that commit's value, so the sample can hold no more distinct values than commits. This re-run
+  counted 20.
+- **The measured statistic is not the one `size_report` applies.** Q3 measured, per ledger fix,
+  the non-test lines (added plus removed) of its whole fix commit divided by the number of ledger
+  fixes sharing that commit: a commit-level average. `fixaudit.size_report` applies, per L4 fix,
+  the non-test lines (added plus removed) in the files that fix lists, over the fix diff from the
+  run's `prefix_tree`, a file listed by k fixes counting 1/k to each. They can differ widely: in a
+  commit of many fixes, a fix that alone changed a large file counts that file whole under
+  `size_report` but only the commit's average under Q3. A per-fix re-measure with the applied
+  statistic, from run archives (each run's L4 file with its prefix tree and commit), is owed and
+  not done. `SIZE_THRESHOLD` stays 140 until it is.
