@@ -8,10 +8,12 @@ against reverted files, because a mocked run would not show which tree it judged
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
+from cca_checks import pipeline_state as ps
 from cca_checks.plugin.tools import cca_tautology_check as tc
 
 PRE_L4 = "def norm(s):\n    return s.strip()\n"        # the original bug: no lowercasing
@@ -37,18 +39,48 @@ STRIPS = "test_norm.py::test_strips"
 AT_SIGN = "test_norm.py::test_keeps_an_at_sign[a@b]"
 
 
-@pytest.fixture
-def run(git_repo, monkeypatch):
+def _after_one_pass(root: Path) -> Path:
     """A tree after one fix audit pass: both snapshots taken, the fix audit fix applied."""
-    monkeypatch.chdir(git_repo)
-    norm = git_repo / "norm.py"
+    norm = root / "norm.py"
     norm.write_text(PRE_L4, encoding="utf-8")
-    (git_repo / "test_norm.py").write_text(TESTS, encoding="utf-8")
+    (root / "test_norm.py").write_text(TESTS, encoding="utf-8")
     tc.cmd_snapshot([Path("norm.py")], tc.DEFAULT_SNAPDIR)   # Layer 4 start
     norm.write_text(L4, encoding="utf-8")
     tc.cmd_snapshot([Path("norm.py")], PASS_1)               # before the fix audit edit
     norm.write_text(FIX_AUDIT, encoding="utf-8")
-    return git_repo
+    return root
+
+
+@pytest.fixture
+def run(git_repo, monkeypatch):
+    monkeypatch.chdir(git_repo)
+    return _after_one_pass(git_repo)
+
+
+def _record_runs(monkeypatch) -> list[str]:
+    """Stub every proof run as RED and return the node ids, in the order they ran."""
+    ran: list[str] = []
+
+    def run_one(nodeid, extra):
+        ran.append(nodeid)
+        return tc.RED, ""
+
+    monkeypatch.setattr(tc, "_run_one", run_one)
+    return ran
+
+
+def _restore_writes_junk(monkeypatch, snapdir: Path) -> None:
+    """Make every restore out of `snapdir`'s fixed/ land JUNK, so its hash check fails."""
+    fixed = (snapdir / "fixed" / "norm.py").resolve()
+    real = shutil.copy2
+
+    def copy2(src, dst, *a, **k):
+        if Path(src).resolve() == fixed:
+            Path(dst).write_text("JUNK\n", encoding="utf-8")
+            return dst
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(tc.shutil, "copy2", copy2)
 
 
 def _cli(capsys, *proofs: str) -> list[tuple[str, str, str]]:
@@ -159,14 +191,143 @@ def test_an_unusable_snapshot_is_refused_before_any_file_is_reverted(run, monkey
     """Invariant: every named snapshot is checked before the first revert.
 
     Failure mode: snapshots were checked as their turn came, so proofs against a good one
-    ran (and its files were reverted) before another was refused as left in progress.
+    ran (and its files were reverted) before another was refused as missing.
     Red: tests/test_fixaudit_proofs.py::test_an_unusable_snapshot_is_refused_before_any_file_is_reverted
     against the mutation that checks each manifest inside the loop of `verify` fails
-    `assert ran == []` with ["test_norm.py::test_lowercases"].
+    `assert ran == []` with ["test_norm.py::test_lowercases"]. Fix round 1 made the snapshot
+    unusable by a missing manifest instead of a stranded sentinel, because the directory scan
+    now catches a sentinel before the loop and would hide that mutation.
     """
-    (PASS_1 / tc.IN_PROGRESS).write_text("left by an interrupted verify\n", encoding="utf-8")
-    ran: list[str] = []
-    monkeypatch.setattr(tc, "_run_one", lambda nodeid, extra: (ran.append(nodeid), (tc.RED, ""))[1])
-    with pytest.raises(SystemExit, match="did not restore"):
+    (PASS_1 / tc.MANIFEST).unlink()
+    ran = _record_runs(monkeypatch)
+    with pytest.raises(SystemExit, match="no snapshot"):
         tc.verify([("FIX-1", LOWERS), ("FA-1-1", STRIPS, PASS_1)])
     assert ran == []
+
+
+def test_a_failed_restore_never_lets_a_second_spelling_overwrite_the_fix(run, monkeypatch):
+    """Invariant: after a restore fails its hash check, fixed/ and the sentinel survive.
+
+    Failure mode (the review probe of fix round 1): the default snapshot and the same
+    directory spelled absolute were two groups; the first restore failed, the second group
+    stashed the bad tree over fixed/, restored it, passed its hash check and deleted the
+    sentinel, so the fix and the recovery marker were gone and the gate exited 0.
+    Red: tests/test_fixaudit_proofs.py::test_a_failed_restore_never_lets_a_second_spelling_overwrite_the_fix
+    against ce30128 fails the fixed/norm.py assertion with "JUNK".
+    """
+    ran = _record_runs(monkeypatch)
+    _restore_writes_junk(monkeypatch, tc.DEFAULT_SNAPDIR)
+    absolute = (run / tc.DEFAULT_SNAPDIR).resolve()
+    refused = None
+    try:
+        tc.verify([("A", LOWERS), ("B", STRIPS, absolute)])
+    except SystemExit as exc:
+        refused = str(exc)
+    fixed = tc.DEFAULT_SNAPDIR / "fixed" / "norm.py"
+    assert fixed.read_text(encoding="utf-8") == FIX_AUDIT
+    assert (tc.DEFAULT_SNAPDIR / tc.IN_PROGRESS).exists()
+    assert refused is not None and "RESTORE FAILED" in refused
+    assert ran == [LOWERS, STRIPS]   # one cycle ran both, then stopped
+
+
+def test_a_failed_restore_stops_verify_before_the_next_snapshot(run, monkeypatch):
+    """Invariant: after a failed restore, no later snapshot's cycle runs (ruling 1).
+
+    Failure mode: the next snapshot stashed the tree the failed restore left as its fix and
+    judged proofs against it.
+    Red: tests/test_fixaudit_proofs.py::test_a_failed_restore_stops_verify_before_the_next_snapshot
+    against the mutation `raise SystemExit(` to `print(` in the failed restore branch of
+    `_verify_against` fails `assert ran == [LOWERS]` with STRIPS also run.
+    """
+    ran = _record_runs(monkeypatch)
+    _restore_writes_junk(monkeypatch, tc.DEFAULT_SNAPDIR)
+    refused = None
+    try:
+        tc.verify([("FIX-1", LOWERS), ("FA-1-1", STRIPS, PASS_1)])
+    except SystemExit as exc:
+        refused = str(exc)
+    assert ran == [LOWERS]
+    assert refused is not None and "cp -r" in refused
+
+
+def test_one_snapshot_under_two_spellings_is_reverted_once(run, monkeypatch):
+    """Invariant: proofs naming one directory in two spellings share one cycle (ruling 2).
+
+    Failure mode: each spelling got its own stash, revert and restore of the same files.
+    Red: tests/test_fixaudit_proofs.py::test_one_snapshot_under_two_spellings_is_reverted_once
+    against the mutation `groups.setdefault(where, ...)` (key not resolved) in `verify` fails
+    `assert reverts == 1` with 2.
+    """
+    ran = _record_runs(monkeypatch)
+    prefix = (tc.DEFAULT_SNAPDIR / "prefix").resolve()
+    real = shutil.copy2
+    reverts = 0
+
+    def copy2(src, dst, *a, **k):
+        nonlocal reverts
+        reverts += Path(src).resolve().is_relative_to(prefix)
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(tc.shutil, "copy2", copy2)
+    results = tc.verify([("A", LOWERS), ("B", STRIPS, (run / tc.DEFAULT_SNAPDIR).resolve())])
+    assert reverts == 1
+    assert [r.finding for r in results] == ["A", "B"] and ran == [LOWERS, STRIPS]
+    assert _left_clean(run)
+
+
+def test_a_stranded_sentinel_in_another_snapshot_blocks_verify(run, monkeypatch):
+    """Invariant: a sentinel in any snapshot under .claude/audits stops verify before a revert.
+
+    Failure mode: a killed verify of pass 1 left norm.py at the L4 copy and the fix only in
+    pass-1/fixed; a verify naming only the default snapshot stashed that tree as the fix.
+    Red: tests/test_fixaudit_proofs.py::test_a_stranded_sentinel_in_another_snapshot_blocks_verify
+    against the mutation `for sentinel in []:` (the scan removed) in `verify` fails
+    `assert ran == []` with [LOWERS].
+    """
+    (PASS_1 / tc.IN_PROGRESS).write_text("left by an interrupted verify\n", encoding="utf-8")
+    ran = _record_runs(monkeypatch)
+    refused = None
+    try:
+        tc.verify([("FIX-1", LOWERS)])
+    except SystemExit as exc:
+        refused = str(exc)
+    assert ran == []
+    assert refused is not None and "pass-1" in refused
+
+
+def test_the_proof_file_names_each_proofs_snapshot(git_repo, monkeypatch):
+    """Invariant: runs/<run_id>/L5.6.json says which snapshot each proof was red against.
+
+    Failure mode: a fix audit proof and an original one were stored alike, so nothing after
+    the run could tell which tree a RED was taken on.
+    Red: tests/test_fixaudit_proofs.py::test_the_proof_file_names_each_proofs_snapshot against
+    the mutation deleting `row["snapdir"] = r.snapdir` in `_save_proofs` fails the rows
+    comparison with no snapdir keys.
+    """
+    monkeypatch.chdir(git_repo)
+    state = ps.start("STANDARD", root=git_repo)   # before the snapshots, as Layer 4 takes them
+    _after_one_pass(git_repo)
+    _record_runs(monkeypatch)
+    tc._save_proofs(tc.verify([("FIX-1", LOWERS), ("FA-1-1", STRIPS, PASS_1)]))
+    path = git_repo / ".claude" / "audits" / "runs" / state.run_id / "L5.6.json"
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert [(r["finding"], r.get("snapdir")) for r in rows] == [
+        ("FIX-1", tc.DEFAULT_SNAPDIR.as_posix()), ("FA-1-1", PASS_1.as_posix())]
+
+
+def test_a_proof_with_more_than_three_elements_is_rejected(run, monkeypatch):
+    """Invariant: verify refuses a proof tuple longer than three, before any revert.
+
+    Failure mode: extra elements were ignored, so a caller's misplaced argument was dropped.
+    Red: tests/test_fixaudit_proofs.py::test_a_proof_with_more_than_three_elements_is_rejected
+    against the mutation deleting the `if len(own) > 1:` check in `verify` fails
+    `assert ran == []` with [STRIPS].
+    """
+    ran = _record_runs(monkeypatch)
+    rejected = False
+    try:
+        tc.verify([("FA-1-1", STRIPS, PASS_1, "extra")])
+    except ValueError:
+        rejected = True
+    assert ran == []
+    assert rejected

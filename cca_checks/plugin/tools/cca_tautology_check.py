@@ -60,6 +60,7 @@ class ProofResult:
     nodeid: str
     verdict: str
     detail: str
+    snapdir: str = ""   # the snapshot it was judged against; empty for a proof judged elsewhere
 
     @property
     def is_proof(self) -> bool:
@@ -180,6 +181,11 @@ def _checked_manifest(snapdir: Path) -> dict:
             f"its first edit"
         )
 
+    _refuse_if_stranded(snapdir)
+    return manifest
+
+
+def _refuse_if_stranded(snapdir: Path) -> None:
     fixed_dir = snapdir / "fixed"
     in_progress = snapdir / IN_PROGRESS
     if in_progress.exists():
@@ -191,7 +197,6 @@ def _checked_manifest(snapdir: Path) -> dict:
             f"still hold the pre-fix code and the fix is only in {fixed_dir}. Recover it with "
             f"`cp -r {fixed_dir}/. .`, then delete {in_progress} and run verify again"
         )
-    return manifest
 
 
 def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]],
@@ -217,7 +222,7 @@ def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]]
             shutil.copy2(snapdir / "prefix" / rel, rel)
         for finding, nodeid in proofs:
             verdict, detail = _run_one(nodeid, extra)
-            results.append(ProofResult(finding, nodeid, verdict, detail))
+            results.append(ProofResult(finding, nodeid, verdict, detail, snapdir.as_posix()))
     finally:
         bad = []
         for rel in live:                                   # ALWAYS restore
@@ -225,10 +230,12 @@ def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]]
             if _sha(rel) != _sha(fixed_dir / rel):
                 bad.append(str(rel))
         if bad:
-            print(f"\n*** RESTORE FAILED for {bad} — recover with:\n"
-                  f"***   cp -r {fixed_dir}/. .\n", file=sys.stderr)
-        else:
-            in_progress.unlink()
+            # Stop here: a later snapshot would stash this tree as the fix, and one sharing
+            # this directory would overwrite fixed/, the only copy of it.
+            raise SystemExit(f"\n*** RESTORE FAILED for {bad}; the fix is only in {fixed_dir}. "
+                             f"Recover it with:\n***   cp -r {fixed_dir}/. .\n*** then delete "
+                             f"{in_progress} and run verify again")
+        in_progress.unlink()
     return results
 
 
@@ -241,20 +248,29 @@ def verify(proofs: list[tuple[str, str] | tuple[str, str, Path | None]],
     the bug it fixes did not exist before Layer 4.
     """
     extra = extra_pytest or []
-    groups: dict[Path, list[tuple[int, str, str]]] = {}
+    # Keyed by the resolved path: one directory under two spellings is one snapshot, since a
+    # second cycle over it would replace its fixed/ with whatever the first left in the tree.
+    groups: dict[Path, tuple[Path, list[tuple[int, str, str]]]] = {}
     for i, (finding, nodeid, *own) in enumerate(proofs):
-        where = own[0] if own and own[0] is not None else snapdir
-        groups.setdefault(Path(where), []).append((i, finding, nodeid))
+        if len(own) > 1:
+            raise ValueError(f"a proof is (finding, nodeid[, snapdir]), got {2 + len(own)} "
+                             f"elements for {finding}")
+        where = Path(own[0] if own and own[0] is not None else snapdir)
+        groups.setdefault(where.resolve(), (where, []))[1].append((i, finding, nodeid))
     if not groups:
-        groups[Path(snapdir)] = []
+        groups[Path(snapdir).resolve()] = (Path(snapdir), [])
     # Every snapshot is checked before any file is reverted, so a refusal never strands one.
-    manifests = {where: _checked_manifest(where) for where in groups}
+    manifests = {key: _checked_manifest(where) for key, (where, _) in groups.items()}
+    # A killed verify of any snapshot (an earlier pass's, say) left its files reverted and
+    # its fix only in its fixed/; stashing the tree now would take that copy as the fix.
+    for sentinel in sorted(Path(".claude/audits").rglob(IN_PROGRESS)):
+        _refuse_if_stranded(sentinel.parent)
     ordered: dict[int, ProofResult] = {}
     # One snapshot at a time, each restored before the next stashes the tree: a crash then
     # leaves no other snapshot's files reverted, and a file two snapshots share is stashed
     # as the fixed content, never as another snapshot's pre-fix copy.
-    for where, group in groups.items():
-        done = _verify_against(where, manifests[where],
+    for key, (where, group) in groups.items():
+        done = _verify_against(where, manifests[key],
                                [(finding, nodeid) for _, finding, nodeid in group], extra)
         ordered.update((i, r) for (i, _, _), r in zip(group, done, strict=True))
     return [ordered[i] for i in sorted(ordered)]
@@ -363,6 +379,10 @@ def _save_proofs(results: list[ProofResult]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         rows = [{"finding": r.finding, "nodeid": r.nodeid, "verdict": r.verdict}
                 for r in results]
+        # Which tree each proof was red against: a fix audit proof names its pass snapshot.
+        for row, r in zip(rows, results, strict=True):
+            if r.snapdir:
+                row["snapdir"] = r.snapdir
         # A REVISE cycle may re-run only some proofs: keep the earlier verdicts of the rest.
         rerun = {r.finding for r in results}
         try:
