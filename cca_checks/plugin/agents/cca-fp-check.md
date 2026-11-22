@@ -1,6 +1,6 @@
 ---
 name: fp-check
-description: Findings verifier (anti-hallucination). Re-checks each P1/P2 finding (every deferred finding, P3 included, in a deferred pass) against the real code and returns CONFIRMED / FALSE_POSITIVE / UNCERTAIN, plus DUPLICATE in a hunt and STALE in a deferred pass.
+description: Findings verifier (anti-hallucination). Re-checks each P1/P2 finding (every deferred finding, P3 included, in a deferred pass) against the real code and returns CONFIRMED / FALSE_POSITIVE / UNCERTAIN, plus DUPLICATE in a hunt and STALE in a deferred pass; in a fix audit (MODE=FIXAUDIT) it verifies every fix audit finding and adds RESOLVED and OUT_OF_SCOPE.
 tools: Read, Grep, Glob, Bash
 model: inherit
 ---
@@ -22,12 +22,14 @@ agent: fp-check
 status: COMPLETE | PARTIAL | SKIPPED | ERROR
 timestamp: [ISO timestamp]
 duration: [seconds]
-mode: DIFF | HUNT | DEFERRED
+mode: DIFF | HUNT | DEFERRED | FIXAUDIT
 findings_checked: [count]
 confirmed: [count]
 false_positives: [count]
 duplicates: [count]        # MODE=HUNT only; 0 otherwise
 stale: [count]             # MODE=DEFERRED only; 0 otherwise
+resolved: [count]          # MODE=FIXAUDIT only; 0 otherwise
+out_of_scope: [count]      # MODE=FIXAUDIT only; 0 otherwise
 uncertain: [count]
 errors: []
 ---
@@ -41,6 +43,13 @@ sent P3 findings: the run records them `DEFERRED`. In MODE=DEFERRED you receive 
 findings themselves, P2 and P3 alike, and verify every one. You are also given `base_tree` and
 `base_commit` of the earlier run that deferred them: the tree its auditors read (before its own
 fixes), and the commit its diff was taken against.
+
+In MODE=FIXAUDIT (Step 5.4 of the pipeline, the fix audit) you verify what the fix audit auditors
+reported about the code this run's own fixes wrote: every finding of the pass, P3 included, each
+with its id `FA-<k>-<n>`, `fix_id`, the original finding id, file, line and claim. You are given the
+run's `fixaudit.json` (its `delta_hunks` with their text, the sibling list, the mechanism flags) and
+the tree it was written at. From pass 2 on you also receive every CONFIRMED P1 or P2 of an earlier
+pass not yet resolved, to re-verify at the current tree.
 
 ## Verdict per Finding
 
@@ -73,6 +82,10 @@ For each finding, check against the ACTUAL code with Read/Grep:
      `git show <base_commit>:<file>` and weigh the finding's own evidence: the audited tree
      may have held uncommitted changes that commit lacks. FALSE_POSITIVE means it was never
      there.
+   - **MODE=FIXAUDIT**: is the cited code in a line a fix hunk of `delta_hunks` added or changed,
+     or at a sibling site the sweep listed? Outside both is **OUT_OF_SCOPE**: real or not, it is not
+     this pass's finding, so it is reported as deferred and never sent back to repair. An earlier
+     pass's finding handed to you for re-verification keeps the scope its own pass gave it.
 3. **Impact** — Is the stated impact real, or already mitigated elsewhere (config in another
    module, guard upstream, value validated before this point)?
 
@@ -88,6 +101,13 @@ Emit exactly one verdict per finding:
   the earlier state (or `git show <base_commit>:<file>` and the finding's own evidence, when the
   tree is gone) and what you read now. Nothing is left to fix, so it is not eligible for the fix
   plan.
+- **RESOLVED** *(MODE=FIXAUDIT only)*: an earlier pass's CONFIRMED finding you were handed to
+  re-verify, whose defect is gone at the current tree. Write it as a new row of this pass carrying
+  `resolves`, the earlier id (`FA-<j>-<n>`), with the same `fix_id` and original finding id. A
+  defect still present is CONFIRMED again, as a new row of this pass. A changed hunk alone is not
+  RESOLVED: read the code now and cite what removed the defect.
+- **OUT_OF_SCOPE** *(MODE=FIXAUDIT only)*: outside the fix hunks and the listed sibling sites. Give
+  the file:line and say why it is outside; it is reported as deferred, not fixed in this run.
 - **UNCERTAIN** — cannot confirm or refute without runtime or business context. → never fix blind;
   escalate to a human.
 
@@ -342,8 +362,8 @@ investigate, do not drop.
 you gathered (guard location, caller list, resolved symbol) — never re-read the finding text alone.
 Mark `source: llm` and `evidence:` = the cited facts.
 
-**Artifact-or-UNCERTAIN rule:** a `CONFIRMED`/`FALSE_POSITIVE`/`STALE` verdict MUST carry non-empty
-`evidence`; otherwise emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you
+**Artifact-or-UNCERTAIN rule:** a `CONFIRMED`/`FALSE_POSITIVE`/`STALE`/`RESOLVED` verdict MUST carry
+non-empty `evidence`; otherwise emit `UNCERTAIN` and escalate. Never silently drop a `crash_impact` you
 couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 
 ## Output Format
@@ -358,6 +378,7 @@ couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 | ENV-001 | UNCERTAIN | llm | depends on deployment config not in repo |
 | BUG-011 | DUPLICATE | llm | already reported upstream: https://github.com/<owner>/<repo>/issues/412 |
 | DEF-004 | STALE | llm | `git show 1a2b3c4:app/orders.py` line 88 had the bare lookup; now guarded at orders.py:80 |
+| FA-2-1 | RESOLVED | llm | resolves FA-1-1: ledger.py:41 now passes errors="replace", as its three sibling readers do |
 
 ## Confirmed
 - <ID>: <one-line reason>
@@ -371,12 +392,19 @@ couldn't reproduce — that is `UNCERTAIN`, not `FALSE_POSITIVE`.
 ## Stale (MODE=DEFERRED only)
 - <ID>: <`git show <base_tree>:<file>` evidence it was there>; <what moved, rewrote or fixed it>
 
+## Resolved (MODE=FIXAUDIT only)
+- <ID>: resolves <earlier FA id>; <what at the current tree removed the defect>
+
+## Out of scope (MODE=FIXAUDIT only)
+- <ID>: <file:line>; <why it is outside the fix hunks and the sibling sites>
+
 ## Uncertain — needs human
 - <ID>: <what context is missing>
 ```
 
 Omit the duplicates section entirely in MODE=DIFF and MODE=DEFERRED; it has no meaning there.
-Omit the stale section outside MODE=DEFERRED.
+Omit the stale section outside MODE=DEFERRED, and the resolved and out of scope sections outside
+MODE=FIXAUDIT.
 
 Every row MUST fill `Evidence` (a tool artifact — the JSON `evidence` field verbatim — or the
 specific cited facts for an `llm`-sourced verdict). Verdicts obey the artifact-or-UNCERTAIN

@@ -37,6 +37,14 @@ errors: []
 The diff introduced by the audit fixes ONLY (the changes made in the fix layer, not the
 original feature diff), plus the list of findings each fix was meant to resolve.
 
+In a run with a fix audit (Layer 5.4) you are also handed each fix's L4 entry (`files`,
+`sibling_patterns`, `sibling_reason`, `size_reason`), the sibling list of the fix audit report, and
+its kept passes. A hunk that applies a fix's change to a sibling site (a place matching that fix's
+patterns, in a file the fix lists) is in scope of that fix's finding: the sibling sweep asked for
+it, so it is not SCOPE_CREEP. A hunk that repairs a fix audit finding (`FA-<k>-<n>`) is in scope of
+the fix it names. A fix that carries a `size_reason` is judged against that reason: size the reason
+explains is not SCOPE_CREEP by itself.
+
 ## Review Process
 
 Review ONLY the fix diff. For each hunk, the intended change is to resolve a specific finding.

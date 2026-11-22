@@ -27,6 +27,7 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 | 3 | fix plan | `pipeline record L3 --to-fix <K> --deferred <D> --output .claude/audits/out/L3.json` |
 | 4 | implement | `pipeline record L4 --fixes <N> --detail "<N> fixes" --output .claude/audits/out/L4.json` |
 | 5 | re-verify | `pipeline record L5 --detail "tests green"` |
+| 5.4 | **fix audit** | `fixaudit check`, then the tool records it: `python -m cca_checks fixaudit record` *(STD/DEEP add `--audit .claude/audits/out/L5.4.json`)* |
 | 5.5 | **regression diff** *(STD/DEEP)* | `pipeline record L5.5 --detail "all SAFE"` |
 | 5.6 | **red-state proof** *(STD/DEEP)* | the checker records it: `python -m cca_checks tautology verify ... --record` |
 | 6 | **architect gate** | `pipeline record L6 --detail APPROVED\|REVISE\|BLOCKED [--output .claude/audits/out/L6.json]` *(the file: ACCEPT or REJECT per false positive)* |
@@ -34,9 +35,9 @@ This is a DETERMINISTIC workflow — follow every step exactly.
 | D | deferred pass *(the `deferred` argument)* | `pipeline deferred --write .claude/audits/out/L1.json`, then `pipeline start --mode DEFERRED --from <run_id> --tier <TIER>`; then layers 1 to 7 as § Second Pass says |
 | any | pause / resume | `pipeline pause --reason "<why>"`, later `pipeline resume` |
 
-Every command above is prefixed `python -m cca_checks ` (the two tool rows show it in full): the
-scorecard and the red-state proof run from the installed package, never from a project copy that an
-older install may have left behind. Recording is not paperwork, and since 0.11 it is not optional at
+Every command above is prefixed `python -m cca_checks ` (the three tool rows show it in full): the
+scorecard, the fix audit and the red-state proof run from the installed package, never from a
+project copy that an older install may have left behind. Recording is not paperwork, and since 0.11 it is not optional at
 any step. `record` refuses a layer whose predecessors are missing and names the
 section to re-read; the commit guard refuses `git commit`, and `pipeline close` refuses to retire the
 run, until every layer the run owes reads `done`. The gate learns that code changed from the working
@@ -281,6 +282,7 @@ ELSE:                TIER = STANDARD
 | L1 deploy-auditor | — | if RUN_DEPLOY | if RUN_DEPLOY |
 | L2.5 findings verification | **P1 only** (single fp-check) | single fp-check, P1+P2 | fp-check + **adversarial 2-of-3 on high-stakes P1** + **`numeric` artifact required on NUM-\* P1** |
 | L4 P1 fix style | direct | red→green test | red→green test |
+| L5.4 fix audit | checks only (`fixaudit check`, then `fixaudit record`) | checks + auditor pass on the fix hunks, verified by fp-check | checks + auditor pass on the fix hunks, verified by fp-check |
 | L5.5 regression diff | — | yes | yes |
 | L6 architect gate | yes (verdict only) | yes + mapping | yes + mapping |
 
@@ -941,12 +943,13 @@ python -m cca_checks pipeline record L3 --to-fix <N> --deferred <D> \
 
 ## Fix Attempt Budget & Journal (STANDARD/DEEP)
 
-The fix lifecycle (L4 implement → L5 re-verify → L5.5 regression → L6 architect) is a repair loop per
-finding. Bound it **per finding, once** — not per stage — so a single stubborn finding cannot ping-pong
-between gates and burn 3×3 cycles.
+The fix lifecycle (L4 implement → L5 re-verify → L5.4 fix audit → L5.5 regression → L6 architect) is a
+repair loop per finding. Bound it **per finding, once** — not per stage — so a single stubborn finding
+cannot ping-pong between gates and burn 3×3 cycles.
 
-- `attempts[FIX-id]` starts at 0. Increment it **each time** any gate (L5 test-repair, L5.5
-  REGRESSION_RISK/SCOPE_CREEP, L6 REVISE) sends that finding back for another edit.
+- `attempts[FIX-id]` starts at 0. Increment it **each time** any gate (L5 test-repair, L5.4 confirmed
+  fix audit finding, L5.5 REGRESSION_RISK/SCOPE_CREEP, L6 REVISE) sends that finding back for another
+  edit. For L5.4 the code keeps its own count as well (§ Step 5.4, The cap).
 - Cap = **3 total** repair cycles per finding across ALL gates combined.
 - On the 3rd exhausted attempt: **park** the finding — mark it `UNCERTAIN → human`, revert its partial
   edit, drop it from the active fix set, and **continue fixing the other findings.** One hard finding
@@ -985,19 +988,43 @@ Rules:
 3. Confirm the new test PASSES (green) and the baseline still passes.
 A P1 fix without a red→green test is incomplete (the architect gate will flag it). FAST tier skips this.
 
-**→ Record, with the count.** The gate detects that code changed from the working tree, so L5, L5.5
-and L5.6 are owed whether or not this is recorded; `--fixes` is recorded for the report:
+**The L4 file** is a JSON array with one entry per fix. Step 5.4 reads these fields from the copy
+`record` stores, so after changing the file, record L4 again with the same command:
+
+```json
+[{"fix_id": "FIX-001", "finding": "BUG-003", "files": ["app/ledger.py", "tests/test_ledger.py"],
+  "sibling_patterns": ["load_rows("], "failure_test": "tests/test_ledger.py::test_bad_bytes_are_replaced",
+  "size_reason": "<only when Step 5.4 reports the fix oversized>"}]
+```
+
+- `fix_id` and `finding`: the fix and the finding id it answers.
+- `files`: every file the fix changed, at least one, each a repo-relative POSIX path spelt as
+  `git diff` spells it (no `./`, no `..`, no backslash, no drive letter). Every non-test file the
+  fixes edit must be listed by some fix; a sibling site fixed at Step 5.4 adds its file here, to the
+  fix whose finding it shares.
+- `sibling_patterns`: other places the same defect may live that are not textual copies of the
+  changed line, such as "reads the parent from the summary only". Each is a fixed string (matched
+  with any spacing between its tokens; a leading name does not match inside a longer one), or an
+  extended regex after the prefix `re:`. The list may be `[]` only when `sibling_reason` says why
+  there are none.
+- `failure_test`: a pytest node id (`tests/test_x.py::test_name`), required when Step 5.4 flags the
+  fix for a new mechanism: a test of that mechanism's own failure.
+- `size_reason`: required when Step 5.4 reports the fix over the size threshold; L5.5 is handed it.
+
+**→ Record, with the count.** The gate detects that code changed from the working tree, so L5, L5.4,
+L5.5 and L5.6 are owed whether or not this is recorded; `--fixes` is recorded for the report:
 
 ```bash
 python -m cca_checks pipeline record L4 --fixes <N> --detail "<N> fixes applied" \
-  --output .claude/audits/out/L4.json   # the fixes applied: fix id, finding id, files
+  --output .claude/audits/out/L4.json   # the fixes applied, one entry per fix as above
 ```
 
-Then **re-read § Step 5, § Step 5.5 and § Step 5.6.** The tests going green here is the single most
-reliable trigger for stopping early, because it is the point at which ordinary engineering instinct,
-and the general instructions in your harness, both say the work is done. In this pipeline it is not:
-three gates remain, and they exist because a green suite says nothing about whether the fix was in
-scope, whether it broke something adjacent, or whether the test that went green was ever red.
+Then **re-read § Step 5, § Step 5.4, § Step 5.5 and § Step 5.6.** The tests going green here is the
+single most reliable trigger for stopping early, because it is the point at which ordinary
+engineering instinct, and the general instructions in your harness, both say the work is done. In
+this pipeline it is not: the gates after it remain, and they exist because a green suite says nothing
+about whether the fix code has its own bugs, whether the fix was in scope, whether it broke something
+adjacent, or whether the test that went green was ever red.
 
 ## Step 5: Layer 5 — Re-verify
 
@@ -1041,23 +1068,222 @@ covering the behaviour that did NOT change.
 python -m cca_checks pipeline record L5 --detail "tests green, lint clean"
 ```
 
+**Before Step 5.5,** the cue: the tests went green; the fix code has not been audited yet: re-read
+§ Step 5.4. Everything so far checked the code the fixes were written against, and the tests the
+fixes came with; nothing has looked for bugs in the fix code itself.
+
+## Step 5.4: Layer 5.4, Fix Audit (every tier; the auditor pass on STANDARD/DEEP)
+
+The original code was audited at L1; the fix code has so far met only narrower questions (do the
+tests pass). The run that audited the 22 P2 fixes of the 2026-11-20 self hunt confirmed 7 P2s, every
+one in or next to those fixes: a sibling site left unfixed, a new bug in a new mechanism, a new code
+or doc defect. This layer finds them inside the run, so the next run is not the first thing that does.
+
+L5.4 is owed whenever L4 is, on every tier, by a run started by this version (`pipeline start` writes
+`"fix_audit": true`; a run opened by an older version owes no L5.4, and `fixaudit check` refuses it
+for want of a `prefix_tree`). It is a fix verdict: recorded against the tree, stale after any edit.
+A repair made for an L5.4 finding changes the tree, so L5 and L5.4 are owed again: that is the loop,
+and the gate enforces it. Only its tool records it; `pipeline record L5.4` is refused.
+
+**Part 1: the deterministic checks (every tier).**
+
+```bash
+python -m cca_checks fixaudit check
+```
+
+It writes `.claude/audits/runs/<run_id>/fixaudit.json` for the current tree and prints a summary
+(`report`, `tree`, `sibling_hits`, `too_broad`, `mechanisms`, `oversized`, `auditors`, `delta_hunks`).
+The fix diff is the working tree against `prefix_tree`, the tree `pipeline record L3` stored before
+the first fix edit, so the feature under audit is not in it. It refuses (exit 2, with the reason)
+while the stored L4 file is missing, an entry lacks a `fix_id` or a `files` list as Step 4 describes,
+a non-test file the fixes edit is listed by no entry, an entry has no `sibling_patterns` (or `[]`
+without a `sibling_reason`), or a declared pattern matches over 50 sites or cannot be searched (a
+bad regex). Fix L4.json, record L4 again, and run `fixaudit check` again. The report holds three
+checks, and each blocks the record:
+
+1. **Sibling sweep** (`siblings`). Each fix's patterns are searched over the tracked files: the
+   automatic ones (each call on a line the fix removed, or on the line a new guard was attached
+   to, whose first argument holds a string literal, as `callee("literal"`), and its declared
+   `sibling_patterns`. A site on a line the fix diff added is not a hit (it was edited), nor is the
+   line a guard was attached to. Every hit in `siblings.hits` needs a disposition in
+   `.claude/audits/out/L5.4-siblings.json`, keyed by its `hit_id`:
+
+   ```json
+   {"S-1a2b3c4d5e": {"disposition": "not_applicable", "reason": "<why this site does not have the defect>"}}
+   ```
+
+   `"not_applicable"` with a reason is the only disposition accepted. To fix a sibling, edit it: it
+   then leaves the list. Add its file to the `files` of the fix whose finding it shares (a sibling
+   fix is part of that fix, not a new one), record L4 again, then Step 5 and `fixaudit check` again.
+   A hit marked `fixed` is refused, because a hit still listed is a site nobody edited. An automatic
+   pattern matching over 50 sites is listed under `siblings.too_broad` and not enforced: read it,
+   and when the sibling class is real, declare a narrower pattern. A hit id is derived from the
+   fix, the pattern, the file and the line's text, so a disposition keeps its hit through later
+   checks while that line is unchanged.
+2. **New mechanism flags** (`mechanisms`). An added non-test line of a `.py` file that launches a
+   process, takes a lock, sets a timeout or wait, parses untrusted input, or writes a file, or a
+   `.sh` or `.ps1` line with a `trap`, `$ErrorActionPreference` or a `2>` redirection, flags its fix.
+   A flagged fix names `failure_test` in L4: a test of that mechanism's own failure (the timeout
+   firing, the lock contended, malformed input). The tool checks that the file exists and defines the
+   test function; whether the test really exercises the failure is for the auditors and L6 to judge.
+3. **Size** (`sizes`). Per fix, the changed non-test lines in its `files`, a file listed by k fixes
+   counting 1/k to each. A fix the report marks `over` names `size_reason` in L4.
+
+**On FAST that is the whole layer.** Record it with no verdict file:
+
+```bash
+python -m cca_checks fixaudit record
+```
+
+**Part 2: the auditor pass (STANDARD and DEEP).**
+
+*Who.* The auditors the report names in `auditors`: at most 4, the auditor of each fix's finding
+plus those its flagged mechanisms route to, ranked by how many fixes need each. Each is the subagent
+type of that name; `bug-auditor:DAT` is `bug-auditor` given Agent 9's DAT- scope (§ Step 1). Launch
+them in ONE message (parallel), each with:
+
+```
+subagent_type: <an auditor named in fixaudit.json>
+Mode: FIX AUDIT, pass <k>. You audit the code this run's own fixes wrote, not the feature.
+Your scope, and nothing else:
+  - the hunks in `delta_hunks` of .claude/audits/runs/<run_id>/fixaudit.json, with their text (on
+    pass 1 every fix hunk; later, the diff since the tree the last pass audited), each with the
+    L4 entry of its fix (fix_id, the finding it answers, files);
+  - the sibling sites in `siblings.hits`, with their dispositions, and `siblings.too_broad`;
+  - the flagged `mechanisms`, and whether each flagged fix's failure_test exercises the failure;
+  - the FIX_JOURNAL rows of these fixes.
+Report bugs in the lines these hunks add or change: a sibling site left with the defect, a new bug in
+a new mechanism, a code or doc defect the fix introduced. Anything else you notice is OUT_OF_SCOPE:
+report it labelled so, never as a finding of this pass.
+Each finding: file (repo-relative POSIX path), line, priority P1|P2|P3, fix_id, the original finding
+id, claim, and evidence quoting the line. Read-only. Return a JSON array as the FIRST thing in your
+reply.
+```
+
+*Verification.* One `fp-check` in MODE=FIXAUDIT (its agent file says how) over every finding of this
+pass, P3 included, and, from pass 2 on, every CONFIRMED P1 or P2 of an earlier pass not yet
+RESOLVED, to be re-verified at the current tree. An auditor's guess never costs a repair cycle.
+
+```
+subagent_type: fp-check
+MODE=FIXAUDIT, pass <k>, tree <the tree fixaudit check printed>. You are given fixaudit.json.
+For each finding, verify against ACTUAL code via Read/Grep:
+  (a) does the issue exist at the cited file:line at the current tree?
+  (b) is it in a line a hunk of delta_hunks added or changed, or at a listed sibling site?
+      Outside both ⇒ OUT_OF_SCOPE.
+  (c) is the stated impact real, or already mitigated?
+For each earlier CONFIRMED finding handed to you: is the defect gone now? Gone ⇒ RESOLVED, a new
+row of this pass with `resolves` naming the earlier id; present ⇒ CONFIRMED again, a new row.
+Verdict per finding: CONFIRMED | FALSE_POSITIVE | UNCERTAIN | RESOLVED | OUT_OF_SCOPE, each with
+file:line evidence.
+```
+
+*The verdict file*, `.claude/audits/out/L5.4.json`:
+
+```json
+{"pass": 1, "audited_tree": "<the tree fixaudit check printed>", "hunks": ["<every id in delta_hunks>"],
+ "findings": [{"id": "FA-1-1", "fix_id": "FIX-001", "finding": "BUG-003", "priority": "P2",
+               "verdict": "CONFIRMED", "file": "app/ledger.py", "line": 41, "claim": "<one line>"}]}
+```
+
+- `pass` is one past the last kept pass (1 the first time); ids are `FA-<k>-<n>` for pass k, never an
+  L1 finding id or FIX id. `audited_tree` is the current tree, so audit the report `fixaudit check`
+  wrote at this tree; `hunks` covers every id in `delta_hunks`.
+- `verdict` is the verifier's: `CONFIRMED`, `FALSE_POSITIVE`, `UNCERTAIN`, `RESOLVED` or
+  `OUT_OF_SCOPE`. `fix_id` and `finding` are a pair L4 has. `file` is a repo-relative POSIX path, and
+  a CONFIRMED P1 or P2 must sit in a file the current fix diff touches.
+- A `RESOLVED` row is a new row of this pass carrying `resolves`, the id of the earlier pass's
+  CONFIRMED finding it re-verified, about the same `fix_id`. It is refused at the tree that pass
+  audited: nothing edited since means nothing fixed. A finding re-verified as still present is
+  written again as a new `CONFIRMED` row of this pass.
+
+```bash
+python -m cca_checks fixaudit record --audit .claude/audits/out/L5.4.json
+```
+
+`fixaudit record` refuses unless, at the current tree: `fixaudit.json` is current; every sibling hit
+has a valid disposition; every flagged fix names an existing `failure_test` and every oversized fix
+a `size_reason`; and, on STANDARD/DEEP, the verdict file passes the rules above and no CONFIRMED
+P1 or P2 of any kept pass is unresolved (RESOLVED in a later pass, or parked with its fix reverted).
+When the verdict file passes every check except that last one, `record` keeps it as pass k
+(`runs/<run_id>/fixaudit-pass-<k>.json`) and still refuses. A kept pass is never replaced: the next
+pass is measured from it and its RESOLVED rows point into it. A pass is kept only when the
+deterministic checks hold, so settle those first. Once L5.4 is recorded, each kept pass's verdicts
+are appended once to `.claude/audits/FIXAUDIT_LEDGER.jsonl`, and the sibling dispositions are kept in
+the run directory. That ledger and the journal below are append-only: never edit either by hand.
+
+**The loop.** When the pass just kept holds a CONFIRMED P1 or P2:
+
+1. Journal one cycle for each original finding those findings name (one row per original finding
+   and pass, however many of its fix audit findings the pass confirmed):
+
+   ```bash
+   python -m cca_checks fixaudit journal --finding <original finding id> --fix-id <FIX-id> \
+     --pass <k> --verdict CONFIRMED --reason "<FA id>: <claim>"
+   ```
+
+   It writes `runs/<run_id>/fixaudit-journal.jsonl`, and refuses a pass that is not kept, a pass that
+   confirmed no P1 or P2 in that fix, a second row for the same finding and pass, and a pass at the
+   tree an earlier confirmed pass of that finding already audited (a cycle needs a repair in
+   between). Append the FIX_JOURNAL.md row too, with gate `L5.4`, and increment `attempts[FIX-id]`.
+2. Before the first repair edit for pass k, snapshot every file the repairs of this pass will edit:
+   `python -m cca_checks tautology snapshot --snapdir .claude/audits/.fixaudit_snapshot/pass-<k> <files>`.
+   Take it once per pass: a second snapshot into the same directory replaces the first.
+3. Go back to § Step 4 for the repair, with a red→green test for the fix audit finding, handing the
+   re-fixer the finding's FIX_JOURNAL rows. Update L4.json if the files change and record L4 again,
+   then Step 5, then this step again: pass k+1 audits the new `delta_hunks` and re-verifies.
+
+A CONFIRMED P3 and an OUT_OF_SCOPE finding are not fixed in this run and do not block: list each
+under Deferred in the report and in the commit message's `Deferred:` lines (FA id, priority,
+file:line, claim). `pipeline deferred` builds its pool from L2.5 and L3 only, so it does not carry
+them; the commit message is where they survive. UNCERTAIN goes to a human; FALSE_POSITIVE is dropped.
+
+**The cap.** The tool counts the CONFIRMED journal rows of each original finding. At 3 the finding is
+parked: revert its whole fix, every file its L4 entry lists, back to the pre-fix tree
+(`git restore --source <prefix_tree> --worktree -- <files>`, with `prefix_tree` from `fixaudit.json`;
+delete a file the fix created), and park the original finding `UNCERTAIN → human` as § Fix Attempt
+Budget says. Three CONFIRMED rows already park it in the journal; to state the decision there as well,
+journal it with `--verdict PARKED` (accepted only once the cap is reached, and only for a kept pass
+that has no row of that finding yet, so for the pass after the third confirmation). `record`
+refuses until none of those files, nor the fix audit finding's own file, differs from
+`prefix_tree`: a file the fix shares with another fix counts as reverted only when it has no hunk
+left at all. The revert
+changes the tree, so Step 5 and this step run again; the parked fix's declared `sibling_patterns`
+still list hits, which take `not_applicable` with the reason that the fix was reverted. The code
+counts only L5.4 cycles, while `attempts[FIX-id]` counts every gate: when that shared cap parks a
+finding first, revert its fix the same way, and the next pass re-verifies its open fix audit findings
+RESOLVED, since the code they named is gone. No run commits a fix with a known bug it introduced.
+
+**Red proof.** The repair of a CONFIRMED fix audit P1 or P2 is a behaviour fix and owes a red proof
+like any other. Its baseline is the pass snapshot taken in step 2, not the Step 4 snapshot: the bug
+did not exist before L4, so every honest test would read TAUTOLOGICAL there. § Step 5.6 says how.
+
+Then re-read § Step 5.5 and § Step 5.6 (STANDARD/DEEP), or § Step 6 on FAST.
+
 ## Step 5.5: Layer 5.5 — Regression Diff (ANTI-REGRESSION) — STANDARD/DEEP
 
 If zero fixes were applied and the working tree is unchanged, the gate does not owe this layer, so say
 so in the report. Otherwise run one `differential-review` agent over the **whole
 working-tree diff since Layer 4 began** — the audit fixes, not the original feature, but including
-anything the Step 5 repair loop touched:
+anything the Step 5 repair loop and the Step 5.4 repairs touched. Hand it, inline, the L4 entries
+(`files`, `sibling_patterns`, `sibling_reason`, `size_reason`), the sibling list of the latest
+`fixaudit.json` (`siblings.hits` with their dispositions, and `siblings.too_broad`), and the kept
+L5.4 passes:
 ```
 subagent_type: differential-review
 For each fix hunk, the intended change is to resolve a specific finding. Verify:
   - does NOT alter behaviour outside its finding's scope (no incidental semantic change);
   - no control-flow / sign / units / default-value drift introduced as a side effect;
   - no new path silently bypasses an existing guard.
+A hunk that applies a fix's change to a sibling site (a place matching that fix's patterns, in a
+file the fix lists) is in scope of that fix's finding: it is the sibling sweep's fix, not
+SCOPE_CREEP. A hunk that repairs a fix audit finding (FA-<k>-<n>) is in scope of the fix it names.
+A fix with a size_reason is judged against that reason.
 Map each hunk → finding. Verdict per hunk: SAFE | SCOPE_CREEP | REGRESSION_RISK (file:line + reasoning).
 ```
-REGRESSION_RISK → revert/correct, re-run L5 **then L5.5 again**. SCOPE_CREEP → trim to minimal,
-re-run L5 **then L5.5 again**. All SAFE → proceed. Each such correction **increments `attempts[FIX-id]`**
-and appends a FIX_JOURNAL row; a finding that hits the shared 3-cycle cap here is parked
+REGRESSION_RISK → revert/correct, re-run L5 and L5.4 **then L5.5 again**. SCOPE_CREEP → trim to
+minimal, re-run L5 and L5.4 **then L5.5 again**. All SAFE → proceed. Each such correction
+**increments `attempts[FIX-id]`** and appends a FIX_JOURNAL row; a finding that hits the shared 3-cycle cap here is parked
 (`UNCERTAIN → human`) and its hunk reverted, so this loop cannot run unbounded.
 
 Scoping this gate to "Layer 4 changes" alone would leave a hole in exactly the place edits are made
@@ -1086,6 +1312,21 @@ python -m cca_checks tautology verify \
 It reverts the snapshotted files to their pre-fix content, re-runs each claimed proof, restores the
 fixed content (hash-verified, inside a `finally`), and **exits non-zero if any claimed proof is not a
 proof** — it is a gate, not a report.
+
+**A repair made for a fix audit finding** is proved against the snapshot its pass took (§ Step 5.4,
+the loop, step 2), named after the node id with `@`:
+
+```bash
+python -m cca_checks tautology verify \
+  --proof FIX-002=tests/test_x.py::test_fee \
+  --proof FA-<k>-<n>=<nodeid>@.claude/audits/.fixaudit_snapshot/pass-<k> --json --record
+```
+
+The text after the last `@` is read as a snapshot directory only when it holds a snapshot manifest;
+otherwise the whole text is the node id, so a mistyped directory leaves a node id pytest cannot
+collect, and the proof reads INCONCLUSIVE. Proofs against different snapshots run one snapshot
+at a time, each restored before the next. A fix audit proof does not count toward `--no-proofs`: a
+run with fix audit repairs and no P1 passes their proofs with `--proof`.
 
 | Verdict | Meaning | Action |
 |---|---|---|
@@ -1116,7 +1357,9 @@ failed, which blocks the commit until it is reworked.
 One `architect-reviewer` agent (read-only gate — it does NOT edit code; it returns REVISE with
 instructions). Pass it the CONFIRMED P1/P2 list (IDs + fix locations) inline. STANDARD/DEEP additionally
 require the mapping table. Pass it also every FALSE_POSITIVE of L2.5, each with its claim, its
-`fp_reason` and fp-check's evidence: the architect accepts or rejects each one.
+`fp_reason` and fp-check's evidence: the architect accepts or rejects each one. Pass it also the
+L5.4 material Step 5.5 was handed (the L4 entries, the sibling list, the kept passes) and each fix
+audit repair's Step 5.6 proof.
 ```
 subagent_type: architect-reviewer
 Review the full diff (feature + audit fixes). Assess Completeness, Quality, Correctness, Security.
@@ -1126,6 +1369,11 @@ Verdict rules:
   - Orphan CONFIRMED P1 (no fix, fix that doesn't resolve it, or a P1 missing its red→green test) → REVISE.
   - A P1 whose Step 5.6 proof came back TAUTOLOGICAL or INCONCLUSIVE → REVISE (the fix is unverified).
     You are HANDED the Step 5.6 output — do not re-derive the red state by hand.
+  - A sibling edit (a fix's change applied to a site matching that fix's patterns, in a file the fix
+    lists) is in scope of that fix's finding: map it to that finding; it is not a phantom fix. So is
+    a repair of a fix audit finding (FA-<k>-<n>), mapped to the fix it names.
+  - A repair of a CONFIRMED fix audit P1/P2 whose Step 5.6 proof is not RED → REVISE.
+  - Judge whether each flagged fix's failure_test really exercises its mechanism's failure.
   - Phantom fix (change not tied to any finding) → REVISE (trim it).
   - Otherwise judge normally.
 THEN, for every FALSE_POSITIVE you were handed, read the code and the evidence and decide:
@@ -1136,7 +1384,7 @@ THEN, for every FALSE_POSITIVE you were handed, read the code and the evidence a
   your verdict: the finding is reported as disputed, for a human.
 Final verdict: APPROVED | REVISE | BLOCKED.
 ```
-APPROVED → commit. REVISE → implement feedback, re-verify (L5, L5.5 and, on STANDARD/DEEP, L5.6), re-submit. Each REVISE cycle
+APPROVED → commit. REVISE → implement feedback, re-verify (L5, L5.4, then on STANDARD/DEEP L5.5 and L5.6), re-submit. Each REVISE cycle
 **increments `attempts[FIX-id]`** for every finding it sends back and appends a FIX_JOURNAL row; the
 architect MUST be handed each such finding's prior FIX_JOURNAL rows so its feedback does not contradict
 an already-rejected attempt. A finding reaching the shared 3-cycle cap is **parked** (`UNCERTAIN → human`)
@@ -1228,6 +1476,7 @@ genuinely must be abandoned, abandon it on the record with
 | 3. Fix Plan | DONE: Z planned (P1:A P2:B); D deferred (L2.5 and L3) |
 | 4. Implementation | DONE — Z applied (P1 red→green tests: <m>) |
 | 5. Re-verify | DONE — tests pass, lint clean |
+| 5.4 Fix Audit | DONE, recorded by the tool: <H> sibling hits disposed, <M> mechanism flags; <P> passes, <C> confirmed, <R> resolved, <K> parked (FAST: checks only) |
 | 5.5 Regression Diff | DONE — all hunks SAFE |
 | 5.6 Red-State Proof | DONE, recorded by the tool: <N> RED (STANDARD/DEEP) |
 | 6. Architect Gate | APPROVED — all P1/P2 mapped |
@@ -1375,8 +1624,9 @@ DUPLICATE finding's row carries `"verdict": "DUPLICATE"`. A FALSE_POSITIVE row c
 fields, with `"fp_reason": "out_of_scope"` when the reason is "out of scope". Record with `--duplicate <D>` and
 `--stale <S>`, and no `--unverified`: a deferred run cannot defer, and `record` refuses it.
 
-**D.5 Steps 2.6 to 5.5** run as written above. At Step 3 every CONFIRMED finding is planned;
-UNCERTAIN goes to a human.
+**D.5 Steps 2.6 to 5.5** run as written above, Step 5.4 (the fix audit) included: a deferred run
+owes L5.4 like any other run. At Step 3 every CONFIRMED finding is planned; UNCERTAIN goes to a
+human.
 
 **D.6 Step 5.6.** Record `python -m cca_checks tautology verify --no-proofs --record` only when the pool holds no
 P1. A pool loaded from a run's summary never does: P1 findings are never deferred. A pool parsed
