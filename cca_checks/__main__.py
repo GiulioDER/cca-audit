@@ -227,6 +227,10 @@ def main(argv=None) -> int:
         from .qwen_tests import main as qwen_main
 
         return qwen_main(argv[1:])
+    if argv and argv[0] == "fixaudit":
+        from .fixaudit_record import main as fixaudit_main
+
+        return fixaudit_main(argv[1:])
     if argv and argv[0] in _TOOLS:
         # Before argparse, so every remaining word reaches the tool untouched, flags
         # included (`--json`, `--record`, `--proof A=B`, `--help`).
@@ -273,6 +277,10 @@ def main(argv=None) -> int:
     qt = sub.add_parser("qwen-tests", add_help=False,
                         help="bounded remote tests and signed CCA proof receipts")
     qt.add_argument("qwen_args", nargs=argparse.REMAINDER)
+
+    fa = sub.add_parser("fixaudit", add_help=False,
+                        help="the fix audit layer L5.4: check, journal, record")
+    fa.add_argument("fixaudit_args", nargs=argparse.REMAINDER)
 
     a = p.parse_args(argv)
     if a.cmd == "bugs":

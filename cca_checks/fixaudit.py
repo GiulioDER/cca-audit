@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from . import layer_outputs, pipeline_state
 from .bugs.caused_by import _path, fix_diff
 from .bugs.gitread import GitError, git
 
@@ -434,3 +436,77 @@ def auditors_for(fixes: list[dict], flags: list[dict], categories: dict[str, str
         for a in wanted:
             needs[a] = needs.get(a, 0) + 1
     return sorted(needs, key=lambda a: (-needs[a], a))[:MAX_AUDITORS]
+
+
+REPORT = "fixaudit.json"
+#: Each pass's verdict file, as `fixaudit record` kept it: the journal holds no tree, and the
+#: next pass's delta is measured from this file's `audited_tree`.
+PASS_FILE = "fixaudit-pass-{}.json"
+
+
+def kept_passes(root: Path, run_id: str) -> dict[int, dict]:
+    """The verdict files `fixaudit record` kept for this run, by pass number, in order."""
+    found = {}
+    for path in (Path(root) / ".claude" / "audits" / "runs" / run_id).glob(PASS_FILE.format("*")):
+        number = path.stem.rsplit("-", 1)[-1]
+        if number.isdigit():
+            found[int(number)] = json.loads(path.read_bytes())
+    return dict(sorted(found.items()))
+
+
+def stored_fixes(root: Path, state) -> list[dict]:
+    """The run's stored L4 entries, each with the `fix_id` and `files` every check reads."""
+    value = pipeline_state._stored_json(state, "L4", root)
+    if value is None:
+        raise FixAuditRefused("this run has no stored L4 file; record L4 with --output first")
+    # `finding` set the way l4_fixes resolves it, so a `finding_id` entry routes and journals too
+    fixes = [{**f, "finding": f.get("finding") or f.get("finding_id") or f.get("fix_id")}
+             for f in layer_outputs.l4_fixes(value)]
+    for n, fix in enumerate(fixes):
+        if not isinstance(fix.get("fix_id"), str) or not fix["fix_id"]:
+            raise FixAuditRefused(f'L4 entry {n} needs a non-empty string "fix_id"')
+        files = fix.get("files")
+        if not isinstance(files, list) or not all(isinstance(f, str) and f for f in files):
+            raise FixAuditRefused(f'{fix["fix_id"]}: "files" must list the paths the fix changed')
+    return fixes
+
+
+def finding_auditors(root: Path, state) -> dict[str, str]:
+    """Each L2 finding's auditor, under the names `auditors_for` routes to."""
+    out = {}
+    for row in pipeline_state._stored_l2(state, root):
+        if row["id"].startswith("DAT-"):  # the data auditor is bug-auditor with the DAT- prompt
+            out[row["id"]] = DATA_AUDITOR
+        elif isinstance(row.get("auditor"), str) and row["auditor"]:
+            out[row["id"]] = row["auditor"].removeprefix("cca-")
+    return out
+
+
+def build_report(root: Path, state, tree: str) -> dict:
+    """The deterministic report at `tree`, unwritten. `delta_hunks` are the hunks changed since
+    the last kept pass's audited tree (every fix hunk before the first pass)."""
+    fixes = stored_fixes(root, state)
+    hunks, skipped = fix_hunks(root, state.prefix_tree, tree)
+    sweep = sibling_hits(root, hunks, fixes)
+    flags = mechanism_flags(hunks, fixes)
+    passes = kept_passes(root, state.run_id)
+    delta = fix_hunks(root, passes[max(passes)]["audited_tree"], tree)[0] if passes else hunks
+    return {
+        "tree": tree, "prefix_tree": state.prefix_tree,
+        "hunks": [{"id": h.id, **asdict(h)} for h in hunks],
+        "siblings": {"hits": sweep.hits, "too_broad": sweep.too_broad},
+        "mechanisms": flags, "sizes": size_report(hunks, fixes), "skipped": skipped,
+        "auditors": auditors_for(fixes, flags, finding_auditors(root, state)),
+        "delta_hunks": [h.id for h in delta],
+    }
+
+
+def check_report(root: Path, state) -> dict:
+    """Write `runs/<run_id>/fixaudit.json` at the current tree and return it."""
+    tree = pipeline_state.current_tree(state, root)
+    if tree is None:
+        raise FixAuditRefused("the working tree could not be fingerprinted, so the report could "
+                              "never be shown current (git missing from PATH, or timed out)")
+    report = build_report(root, state, tree)
+    pipeline_state._store_run_file(state, REPORT, report, root)
+    return report

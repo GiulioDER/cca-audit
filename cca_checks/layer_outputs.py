@@ -212,6 +212,13 @@ def l54_audit(data) -> dict:
             raise ShapeError(f'L5.4 {row["id"]} priority must be one of {", ".join(PRIORITIES)}')
         if row.get("verdict") not in FA_VERDICTS:
             raise ShapeError(f'L5.4 {row["id"]} verdict must be one of {", ".join(FA_VERDICTS)}')
+        if row["verdict"] == "RESOLVED":
+            # The re-verified finding has a new id; this names the one it clears.
+            resolves = row.get("resolves")
+            target = _FA_ID.fullmatch(resolves) if isinstance(resolves, str) else None
+            if not target or int(target.group(1)) >= pass_no:
+                raise ShapeError(f'L5.4 {row["id"]} is RESOLVED and needs "resolves", the id of '
+                                 "the earlier pass's finding it re-verified")
         line = row.get("line")
         if not isinstance(line, int) or isinstance(line, bool) or line < 1:
             raise ShapeError(f'L5.4 {row["id"]} needs an integer "line" of 1 or more')

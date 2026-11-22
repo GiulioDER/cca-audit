@@ -1,4 +1,5 @@
-"""Bookkeeping for the fix audit layer L5.4: the repair journal and the side ledger of verdicts.
+"""Bookkeeping for the fix audit layer L5.4: the repair journal, the side ledger of verdicts,
+and the `fixaudit` commands that check the fixes and record L5.4.
 
 Both files are append-only, like the disposition ledger: a line is never rewritten. The journal
 lives in the run's directory and is what makes the 3-cycle repair cap a rule the code enforces,
@@ -9,10 +10,14 @@ would tally them as L2.5 dispositions.
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import os
 import pathlib
+import sys
+
+from . import fixaudit, layer_outputs, pipeline_state
 
 JOURNAL = "fixaudit-journal.jsonl"
 LEDGER = pathlib.Path(".claude/audits/FIXAUDIT_LEDGER.jsonl")
@@ -41,7 +46,10 @@ def _journal_path(root: pathlib.Path, run_id: str) -> pathlib.Path:
 def _rows(root: pathlib.Path, run_id: str) -> list[dict]:
     """The journal rows. A malformed line raises: skipping it could hide a CONFIRMED cycle and
     let a finding past the cap, so the run stops and the line is repaired by hand."""
-    path = _journal_path(root, run_id)
+    return _read_rows(_journal_path(root, run_id))
+
+
+def _read_rows(path: pathlib.Path) -> list[dict]:
     if not path.exists():
         return []
     rows = []
@@ -91,3 +99,237 @@ def append_verdicts(root: pathlib.Path, run_id: str, audit: dict) -> int:
             for finding in audit["findings"]]
     _append(root / LEDGER, rows)
     return len(rows)
+
+
+AUDIT = pathlib.Path(".claude/audits/out/L5.4.json")
+SIBLINGS = pathlib.Path(".claude/audits/out/L5.4-siblings.json")
+#: A confirmed fix audit finding of these priorities blocks L5.4; a P3 goes to the deferred pool.
+BLOCKING = ("P1", "P2")
+JOURNAL_VERDICTS = (*layer_outputs.FA_VERDICTS, "PARKED")
+
+
+def _dispositions(root: pathlib.Path) -> tuple[dict, list[str]]:
+    """The sibling dispositions file (none written means none given), or why it is unusable."""
+    path = root / SIBLINGS
+    if not path.exists():
+        return {}, []
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError) as exc:
+        return {}, [f"{SIBLINGS.as_posix()} is not readable JSON ({exc})"]
+    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
+        return {}, [f'{SIBLINGS.as_posix()} must map each hit id to {{"disposition", "reason"}}']
+    return data, []
+
+
+def _audit_file(root: pathlib.Path, rel: pathlib.Path) -> tuple[dict | None, str | None]:
+    """The checked verdict file, or why it cannot be used."""
+    path = root / rel
+    if not pipeline_state.core._inside(str(path), str(root / pipeline_state.core.EXCLUDED)):
+        # Anywhere else it is part of the tree, so writing it would change what was audited.
+        return None, f"the L5.4 verdict file {rel} must lie under .claude/audits/"
+    if not path.is_file():
+        return None, (f"no L5.4 verdict file at {rel}: on STANDARD and DEEP the fix hunks are "
+                      "audited, verified and written there before L5.4 is recorded")
+    try:
+        return layer_outputs.l54_audit(json.loads(path.read_bytes())), None
+    except (OSError, ValueError) as exc:  # ShapeError is a ValueError
+        return None, f"the L5.4 verdict file {rel} is unusable: {exc}"
+
+
+def _pass_reasons(data: dict, passes: dict[int, dict], report: dict) -> tuple[list[str], bool]:
+    """Why the verdict file cannot stand as the run's latest pass, and whether it is a new pass
+    (False for a pass already kept and sent again, which was checked when it was kept)."""
+    k, latest = data["pass"], max(passes, default=0)
+    reasons = []
+    if data["audited_tree"] != report["tree"]:
+        reasons.append(f"L5.4 pass {k} audited tree {data['audited_tree']}, not the current "
+                       f"{report['tree']}: audit the report `fixaudit check` writes at this tree")
+    if passes.get(k) == data:
+        return reasons, False
+    if k != latest + 1:
+        # A kept pass is never replaced: the next pass's delta and RESOLVED rows point at it.
+        return reasons + [f"L5.4 is numbered pass {k}, but the last kept pass is {latest}: "
+                          f"number it {latest + 1}"], True
+    missing = [h for h in report["delta_hunks"] if h not in data["hunks"]]
+    if missing:
+        reasons.append(f"L5.4 pass {k} does not cover the changed hunks {', '.join(missing)}")
+    for row in data["findings"]:
+        if row["verdict"] != "RESOLVED":
+            continue
+        p = int(row["resolves"].split("-")[1])
+        target = next((f for f in passes.get(p, {}).get("findings", [])
+                       if f["id"] == row["resolves"]), None)
+        if target is None or target["verdict"] != "CONFIRMED":
+            reasons.append(f"{row['id']} resolves {row['resolves']}, which no kept pass confirmed")
+        elif passes[p]["audited_tree"] == data["audited_tree"]:
+            reasons.append(f"{row['id']} resolves {row['resolves']} at the tree pass {p} "
+                           "audited: nothing was edited since, so nothing was fixed")
+    return reasons, True
+
+
+def _unresolved(passes: dict[int, dict], held: set[str]) -> list[str]:
+    cleared = {row["resolves"] for p in passes.values() for row in p["findings"]
+               if row["verdict"] == "RESOLVED"}
+    return [f"{row['id']} ({row['priority']}, {row['fix_id']}) was confirmed in pass {k} and is "
+            "unresolved: fix it and have the next pass re-verify it RESOLVED, or park "
+            f"{row['finding']}"
+            for k, p in passes.items() for row in p["findings"]
+            if row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING
+            and row["id"] not in cleared and row["finding"] not in held]
+
+
+def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
+              ) -> tuple[list[str], dict | None, dict | None]:
+    """(reasons, a new pass to keep, the report rebuilt at the current tree).
+
+    The checks run on a fresh report, so an L4 field added after `fixaudit check` counts; the
+    stored one only has to be current. A new pass is kept when every check holds except the
+    resolution of its confirmed findings, because the next pass is measured from it.
+    """
+    tree = pipeline_state.current_tree(state, root)
+    if tree is None:
+        return ["the working tree could not be fingerprinted (git missing from PATH, or timed "
+                "out), so L5.4 could never be shown current"], None, None
+    reasons = []
+    stored = _journal_path(root, state.run_id).with_name(fixaudit.REPORT)
+    if not stored.is_file():
+        reasons.append(f"no {fixaudit.REPORT} in this run: "
+                       "run `python -m cca_checks fixaudit check`")
+    elif json.loads(stored.read_bytes()).get("tree") != tree:
+        reasons.append(f"{fixaudit.REPORT} is stale: the tree changed since `fixaudit check`; "
+                       "run it again and audit that report")
+    report = fixaudit.build_report(root, state, tree)
+    fixes = fixaudit.stored_fixes(root, state)
+    dispositions, bad = _dispositions(root)
+    reasons += bad
+    for hit in report["siblings"]["hits"]:
+        reasons += [f"{hit['fix_id']}: sibling {hit['path']}:{hit['line']}: {why}"
+                    for why in fixaudit.check_dispositions([hit], dispositions, root)]
+    reasons += fixaudit.failure_test_reasons(report["mechanisms"], fixes, root)
+    reasons += [f"{s['fix_id']}: {s['lines']:g} changed lines, over {fixaudit.SIZE_THRESHOLD}; "
+                "give size_reason in L4"
+                for s in report["sizes"] if s["over"] and not s["has_reason"]]
+    if state.tier == "FAST":
+        if audit is not None:
+            reasons.append("a FAST run has no auditor pass: record L5.4 without --audit")
+        return reasons, None, report
+    passes = fixaudit.kept_passes(root, state.run_id)
+    held = parked(root, state.run_id)
+    data, why = _audit_file(root, audit or AUDIT)
+    if data is None:
+        return reasons + [str(why)] + _unresolved(passes, held), None, report
+    file_reasons, new = _pass_reasons(data, passes, report)
+    keep = data if new and not file_reasons and not reasons else None
+    considered = passes if file_reasons else {**passes, data["pass"]: data}
+    return reasons + file_reasons + _unresolved(considered, held), keep, report
+
+
+def record_reasons(root: pathlib.Path, state, audit: pathlib.Path | None = None) -> list[str]:
+    """Why L5.4 cannot be recorded now; empty when it can. Writes nothing."""
+    return _evaluate(root, state, audit)[0]
+
+
+def record(root: pathlib.Path, audit: pathlib.Path | None = None) -> list[str]:
+    """Record L5.4 through the gate when every condition holds; otherwise return why not.
+
+    Writes in an order a retry survives: a new pass's file is kept first (even when its
+    confirmed findings then refuse the record), and the side ledger gets each kept pass's rows
+    once, only after the gate recorded L5.4, so a refused record appends nothing.
+    """
+    state = pipeline_state.load(root)
+    if state is None:
+        return ["no CCA run is open"]
+    reasons, keep, report = _evaluate(root, state, audit)
+    if keep is not None:
+        pipeline_state._store_run_file(state, fixaudit.PASS_FILE.format(keep["pass"]), keep, root)
+    if reasons:
+        return reasons
+    assert report is not None  # a None report always comes with a reason
+    if (root / SIBLINGS).exists():
+        pipeline_state._store_run_file(state, SIBLINGS.name, _dispositions(root)[0], root)
+    passes = fixaudit.kept_passes(root, state.run_id)
+    # Read before the gate records, so a malformed ledger refuses instead of failing after it.
+    logged = {row.get("pass") for row in _read_rows(root / LEDGER)
+              if row.get("run_id") == state.run_id and row.get("layer") == "L5.4"}
+    checks = (f"{len(report['siblings']['hits'])} sibling hits disposed, "
+              f"{len(report['mechanisms'])} mechanism flags")
+    detail = f"FAST checks: {checks}" if state.tier == "FAST" else \
+        f"pass {max(passes)}: {checks}, {sum(len(p['findings']) for p in passes.values())} findings"
+    pipeline_state.record("L5.4", detail=detail, source="tool", root=root, tree=report["tree"])
+    for k, p in passes.items():
+        if k not in logged:
+            append_verdicts(root, state.run_id, p)
+    return []
+
+
+def _journal_cli(root: pathlib.Path, state, a: argparse.Namespace) -> list[str]:
+    """Validate one journal row at the boundary (`journal` checks nothing), then append it."""
+    reasons = []
+    if a.verdict not in JOURNAL_VERDICTS:
+        reasons.append(f"--verdict {a.verdict!r} is not one of {', '.join(JOURNAL_VERDICTS)}")
+    kept = fixaudit.kept_passes(root, state.run_id)
+    if a.pass_no not in kept:
+        reasons.append(f"--pass {a.pass_no} is not a kept pass (kept: "
+                       f"{', '.join(map(str, kept)) or 'none'}); `fixaudit record` keeps a pass")
+    if not any(f["finding"] == a.finding and f["fix_id"] == a.fix_id
+               for f in fixaudit.stored_fixes(root, state)):
+        # The cap counts per original finding: a misspelt one would never reach it.
+        reasons.append(f"L4 has no fix {a.fix_id} for finding {a.finding}")
+    if not a.reason.strip():
+        reasons.append("--reason is empty")
+    if reasons:
+        return reasons
+    journal(root, state.run_id, finding=a.finding, fix_id=a.fix_id, pass_no=a.pass_no,
+            verdict=a.verdict, reason=a.reason)
+    return []
+
+
+def _run(a: argparse.Namespace, root: pathlib.Path) -> list[str]:
+    if a.cmd == "record":
+        reasons = record(root, None if a.audit is None else pathlib.Path(a.audit))
+        if not reasons:
+            print("L5.4 recorded")
+        return reasons
+    state = pipeline_state.load(root)
+    if state is None:
+        return ["no CCA run is open"]
+    if a.cmd == "journal":
+        return _journal_cli(root, state, a)
+    report = fixaudit.check_report(root, state)
+    print(json.dumps({
+        "report": f".claude/audits/runs/{state.run_id}/{fixaudit.REPORT}", "tree": report["tree"],
+        "sibling_hits": len(report["siblings"]["hits"]),
+        "too_broad": len(report["siblings"]["too_broad"]),
+        "mechanisms": len(report["mechanisms"]),
+        "oversized": [s["fix_id"] for s in report["sizes"] if s["over"]],
+        "auditors": report["auditors"], "delta_hunks": report["delta_hunks"],
+    }))
+    return []
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="python -m cca_checks fixaudit",
+                                description="the fix audit layer, L5.4")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("check", help="write the deterministic report, runs/<run_id>/fixaudit.json")
+    j = sub.add_parser("journal", help="append one fix audit cycle to the run's journal")
+    j.add_argument("--finding", required=True, help="the original finding the fix answered")
+    j.add_argument("--fix-id", required=True)
+    j.add_argument("--pass", dest="pass_no", type=int, required=True)
+    j.add_argument("--verdict", required=True)
+    j.add_argument("--reason", required=True)
+    r = sub.add_parser("record", help="record L5.4 once every condition holds")
+    r.add_argument("--audit", help=f"the verdict file, STANDARD and DEEP only (default {AUDIT})")
+    for s in (c, j, r):
+        s.add_argument("--root", default=".")
+    a = p.parse_args(argv)
+    try:
+        reasons = _run(a, pathlib.Path(a.root))
+    except ValueError as exc:
+        # Every refusal below (FixAuditRefused, ShapeError, RecordRefused) is a ValueError,
+        # and a refusal is a message and exit 2, not a traceback.
+        reasons = [str(exc)]
+    for reason in reasons:
+        print(f"refused: {reason}", file=sys.stderr)
+    return 2 if reasons else 0
