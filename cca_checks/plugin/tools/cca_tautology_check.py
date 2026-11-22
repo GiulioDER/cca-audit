@@ -163,9 +163,8 @@ def _snapshot_predates_run(man_path: Path) -> str | None:
     return state.run_id if man_path.stat().st_mtime < started else None
 
 
-def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
-           extra_pytest: list[str] | None = None) -> list[ProofResult]:
-    extra = extra_pytest or []
+def _checked_manifest(snapdir: Path) -> dict:
+    """The manifest of the snapshot at `snapdir`; SystemExit when verify must not use it."""
     man_path = snapdir / MANIFEST
     if not man_path.exists():
         raise SystemExit(f"no snapshot at {snapdir} — run `snapshot` at Layer 4 start "
@@ -192,6 +191,13 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
             f"still hold the pre-fix code and the fix is only in {fixed_dir}. Recover it with "
             f"`cp -r {fixed_dir}/. .`, then delete {in_progress} and run verify again"
         )
+    return manifest
+
+
+def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]],
+                    extra: list[str]) -> list[ProofResult]:
+    fixed_dir = snapdir / "fixed"
+    in_progress = snapdir / IN_PROGRESS
     if fixed_dir.exists():
         shutil.rmtree(fixed_dir)
     fixed_dir.mkdir(parents=True)
@@ -224,6 +230,34 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
         else:
             in_progress.unlink()
     return results
+
+
+def verify(proofs: list[tuple[str, str] | tuple[str, str, Path | None]],
+           snapdir: Path = DEFAULT_SNAPDIR,
+           extra_pytest: list[str] | None = None) -> list[ProofResult]:
+    """Judge each proof against its snapshot: its third element when given, else `snapdir`.
+
+    A fix made for a fix audit finding is proved against the tree that pass audited, since
+    the bug it fixes did not exist before Layer 4.
+    """
+    extra = extra_pytest or []
+    groups: dict[Path, list[tuple[int, str, str]]] = {}
+    for i, (finding, nodeid, *own) in enumerate(proofs):
+        where = own[0] if own and own[0] is not None else snapdir
+        groups.setdefault(Path(where), []).append((i, finding, nodeid))
+    if not groups:
+        groups[Path(snapdir)] = []
+    # Every snapshot is checked before any file is reverted, so a refusal never strands one.
+    manifests = {where: _checked_manifest(where) for where in groups}
+    ordered: dict[int, ProofResult] = {}
+    # One snapshot at a time, each restored before the next stashes the tree: a crash then
+    # leaves no other snapshot's files reverted, and a file two snapshots share is stashed
+    # as the fixed content, never as another snapshot's pre-fix copy.
+    for where, group in groups.items():
+        done = _verify_against(where, manifests[where],
+                               [(finding, nodeid) for _, finding, nodeid in group], extra)
+        ordered.update((i, r) for (i, _, _), r in zip(group, done, strict=True))
+    return [ordered[i] for i in sorted(ordered)]
 
 
 def render(results: list[ProofResult]) -> str:
@@ -373,8 +407,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--snapdir", type=Path, default=DEFAULT_SNAPDIR)
 
     v = sub.add_parser("verify", help="prove each claimed red->green test was really red")
-    v.add_argument("--proof", action="append", default=[], metavar="FINDING=NODEID",
-                   help="repeatable, e.g. --proof FIX-004=tests/test_x.py::test_injection")
+    v.add_argument("--proof", action="append", default=[],
+                   metavar="FINDING=NODEID[@SNAPDIR]",
+                   help="repeatable, e.g. --proof FIX-004=tests/test_x.py::test_injection; "
+                        "@SNAPDIR judges that proof against its own snapshot (a fix audit "
+                        "pass's) instead of --snapdir. The text after the LAST @ is read as "
+                        "SNAPDIR only when it names an existing directory holding a snapshot "
+                        "manifest; otherwise the whole text is the node id")
     v.add_argument("--snapdir", type=Path, default=DEFAULT_SNAPDIR)
     v.add_argument("--json", action="store_true")
     v.add_argument("--record", action="store_true",
@@ -419,7 +458,12 @@ def main(argv: list[str] | None = None) -> int:
         if "=" not in spec:
             raise SystemExit(f"--proof needs FINDING=NODEID, got {spec!r}")
         f, n = spec.split("=", 1)
-        proofs.append((f, n))
+        # A node id may hold an @ (a parametrize id), so only a real snapshot splits it off.
+        node, _, where = n.rpartition("@")
+        if node and where and (Path(where) / MANIFEST).is_file():
+            proofs.append((f, node, Path(where)))
+        else:
+            proofs.append((f, n))
     if not proofs:
         raise SystemExit("verify needs at least one --proof FINDING=NODEID")
 
