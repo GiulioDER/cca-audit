@@ -159,10 +159,10 @@ def _entry(n, files, **extra):
             "sibling_patterns": [], "sibling_reason": "the call heads cover it", **extra}
 
 
-def _to_l5(repo, tier, fixes, edit):
+def _to_l5(repo, tier, fixes, edit, run_id=""):
     """A run of `tier` through L5: L3 recorded, `edit` applied, L4 storing `fixes`, L5 green."""
     n = len(fixes)
-    state = ps.start(tier, root=repo)
+    state = ps.start(tier, run_id=run_id, root=repo)
     ps.record("L1", detail="auditors", output=write_output(repo), root=repo)
     ps.record("L2", counts={"unique": n}, output=findings_output(repo, n), root=repo)
     append_ledger(repo, state.run_id, n)
@@ -877,18 +877,19 @@ def test_an_earlier_runs_dispositions_do_not_clear_a_later_runs_hit(git_repo):
     """Invariant (STAKES-003, the auditor's probe test_stale_siblings_probe.py made real): run B,
     with the same fix id and the same hit as run A, is refused while the dispositions file is
     run A's, naming both runs.
-    Red NOT YET SHOWN for this node. The pre-fix code (023a1b5) refuses run A's file of the new
-    shape at the first record, so the baseline fails in setup, which is no red proof. The planned
-    red is the mutation of the new `_dispositions`, `if data["run_id"] != run_id:` as
-    `if False:`, expected to fail `assert any(run_a in r and run_b in r ...)` on `[]`; it was
-    not run in L4 (the run was refused by a session permission check)."""
+    The pre-fix code (023a1b5) refuses run A's file of the new shape at the first record, so the
+    baseline fails in setup, which is no red proof. Red 2026-11-22 against the mutation of
+    `_dispositions` in cca_checks/fixaudit_record.py, `if data["run_id"] != run_id:` as
+    `if False:`: fails `assert any(run_a in r and run_b in r ...)` with `AssertionError: []`.
+    Run B takes an explicit run id: the default is a timestamp in seconds, and on CI run B got
+    run A's id and was refused at start (RecordRefused, reproduced by passing run_id=run_a)."""
     run_a, hit = _sibling_run(git_repo)
     _dispose(git_repo, run_a, [hit["hit_id"]])
     assert fr.record(git_repo) == []
     ps.abort("next run", root=git_repo)
     _put(git_repo, "store.py", _STORE)
     run_b = _to_l5(git_repo, "FAST", [_entry(1, ["store.py"])],
-                   lambda: _put(git_repo, "store.py", _STORE_FIXED))
+                   lambda: _put(git_repo, "store.py", _STORE_FIXED), run_id=f"{run_a}b")
     (hit_b,) = _check(git_repo)["siblings"]["hits"]
     assert hit_b["hit_id"] == hit["hit_id"] and run_b != run_a
     reasons = fr.record(git_repo)
