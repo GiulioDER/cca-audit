@@ -8,6 +8,8 @@ so here the file and the counts are made to agree.
 
 from __future__ import annotations
 
+import re
+
 PRIORITIES = ("P1", "P2", "P3")
 #: The fixed classes a finding's `defect_class` names, in precedence order: a finding that fits
 #: several takes the first. Defined in audit-fix.md, "Defect classes". `category` stays the
@@ -170,3 +172,46 @@ def l4_fixes(data) -> list[dict]:
             raise ShapeError(f'L4 entry {n} names no finding ("finding" or "finding_id")')
         out.append({**entry, "fix_id": fix_id} if fix_id is not None else entry)
     return out
+
+
+FA_VERDICTS = ("CONFIRMED", "FALSE_POSITIVE", "UNCERTAIN", "RESOLVED", "OUT_OF_SCOPE")
+_FA_ID = re.compile(r"FA-([0-9]+)-[0-9]+")
+_FA_TEXT = ("fix_id", "finding", "file", "claim")
+
+
+def l54_audit(data) -> dict:
+    """The fix audit verdict file: its pass, the tree and hunks audited, and one entry per finding."""
+    if not isinstance(data, dict):
+        raise ShapeError("L5.4's file must be a JSON object")
+    pass_no = data.get("pass")
+    if not isinstance(pass_no, int) or isinstance(pass_no, bool) or pass_no < 1:
+        raise ShapeError('L5.4 needs an integer "pass" of 1 or more')
+    if not isinstance(data.get("audited_tree"), str) or not data["audited_tree"]:
+        raise ShapeError('L5.4 needs a non-empty string "audited_tree"')
+    hunks = data.get("hunks")
+    if not isinstance(hunks, list) or not all(isinstance(h, str) for h in hunks):
+        raise ShapeError('L5.4 "hunks" must be an array of hunk id strings')
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        raise ShapeError('L5.4 needs a "findings" array')
+    seen: set[str] = set()
+    for n, row in enumerate(findings):
+        if not isinstance(row, dict):
+            raise ShapeError(f"L5.4 finding {n} must be an object")
+        match = _FA_ID.fullmatch(row.get("id")) if isinstance(row.get("id"), str) else None
+        if not match or int(match.group(1)) != pass_no:
+            raise ShapeError(f'L5.4 finding {n} needs an id of the form "FA-{pass_no}-<n>"')
+        if row["id"] in seen:
+            raise ShapeError(f"L5.4 names {row['id']} more than once")
+        seen.add(row["id"])
+        for key in _FA_TEXT:
+            if not isinstance(row.get(key), str) or not row[key]:
+                raise ShapeError(f'L5.4 {row["id"]} needs a non-empty string "{key}"')
+        if row.get("priority") not in PRIORITIES:
+            raise ShapeError(f'L5.4 {row["id"]} priority must be one of {", ".join(PRIORITIES)}')
+        if row.get("verdict") not in FA_VERDICTS:
+            raise ShapeError(f'L5.4 {row["id"]} verdict must be one of {", ".join(FA_VERDICTS)}')
+        line = row.get("line")
+        if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+            raise ShapeError(f'L5.4 {row["id"]} needs an integer "line" of 1 or more')
+    return data
