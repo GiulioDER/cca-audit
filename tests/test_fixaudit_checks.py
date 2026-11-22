@@ -648,3 +648,41 @@ def test_no_more_than_four_auditors():
     got = fixaudit.auditors_for(fixes, flags, categories)
     assert got == ["bug-auditor", "bug-auditor:DAT", "deploy-auditor", "numeric-auditor"]
     assert fixaudit.auditors_for(fixes, [], categories) == ["bug-auditor", "numeric-auditor"]
+
+
+def test_a_lock_is_flagged_and_a_lookalike_is_not():
+    """Invariant: threading and msvcrt.locking are locks; a word that only contains one is not.
+
+    Node: tests/test_fixaudit_checks.py::test_a_lock_is_flagged_and_a_lookalike_is_not.
+    Red: 2026-11-22 mutating `\bmsvcrt\.locking\b` to `\bmsvcrtX\.locking\b` failed
+    `assert {('lock', 1)} == {('lock', 1), ('lock', 2)}`; mutating `\bLock\b` to `Lock` failed
+    `assert {('lock', 1)} == set()` (MyLocker flagged).
+    """
+    assert _flagged("a.py", "m = threading.Lock()", "msvcrt.locking(fd, 1, 1)") == {("lock", 1), ("lock", 2)}
+    assert _flagged("a.py", "MyLocker = 1") == set()
+
+
+def test_a_file_write_is_flagged_and_a_read_or_dump_is_not():
+    """Invariant: open with a write, append or exclusive mode and write_text are file writes;
+    open for reading and json.dumps are not.
+
+    Node: tests/test_fixaudit_checks.py::test_a_file_write_is_flagged_and_a_read_or_dump_is_not.
+    Red: 2026-11-22 mutating the mode class `[wax]` to `[wrax]` failed
+    `assert {('file_write', 2)} == set()` (open(p, "r") flagged); mutating `\.write_(?:text|bytes)\(` to
+    `\.writeX_(...` failed `assert {...} == {...}` (('file_write', 2) missing).
+    """
+    assert _flagged("a.py", 'f = open(p, "w")', "Path(p).write_text(s)", "g = open(p, 'ab')",
+                    "os.replace(a, b)") == {("file_write", 1), ("file_write", 2), ("file_write", 3),
+                                            ("file_write", 4)}
+    assert _flagged("a.py", "f = open(p)", 'g = open(p, "r")', "s = json.dumps(x)") == set()
+
+
+def test_a_docs_file_raises_no_flags():
+    """Invariant: only .py files use the Python rows, so prose naming json.loads is not flagged.
+
+    Node: tests/test_fixaudit_checks.py::test_a_docs_file_raises_no_flags.
+    Red: 2026-11-22 mutating mechanism_flags `elif h.path.endswith(".py"):` to `elif True:` failed
+    `assert {('parser', 1), ('timeout', 1)} == set()`.
+    """
+    assert _flagged("NOTES.md", "call json.loads(x) with timeout=3") == set()
+    assert _flagged("cfg.toml", "timeout=3") == set()

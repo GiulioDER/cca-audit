@@ -376,16 +376,21 @@ SHELL_MECHANISMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 
 
 def mechanism_flags(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
-    """Each added non-test line of a fix that adds a mechanism, once per mechanism: a process
-    launch, a lock, a timeout, a parser of untrusted input, a file write (shell files have their
-    own rows)."""
+    """One flag per added non-test line and mechanism it matches: a process launch, a lock, a
+    timeout, a parser of untrusted input, a file write in a .py file, or the shell rows in a
+    .sh or .ps1 file. Other files (docs, config) raise none."""
     out = []
     for fix in fixes:
         files = _files_of(hunks, fix)
         for h in hunks:
             if h.path not in files or is_test_path(h.path):
                 continue
-            table = SHELL_MECHANISMS if h.path.endswith(_SHELL_SUFFIXES) else MECHANISMS
+            if h.path.endswith(_SHELL_SUFFIXES):
+                table = SHELL_MECHANISMS
+            elif h.path.endswith(".py"):
+                table = MECHANISMS
+            else:
+                continue
             for line_no, text in zip(h.added_at, h.added):
                 for name, (patterns, auditors) in table.items():
                     if any(re.search(p, text) for p in patterns):
