@@ -242,17 +242,27 @@ def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]]
         raise
     finally:
         bad = []
+        copy_error: OSError | None = None
         for rel in live:                                   # ALWAYS restore
-            shutil.copy2(fixed_dir / rel, rel)
+            try:
+                shutil.copy2(fixed_dir / rel, rel)
+            except OSError as exc:
+                # A locked file (Windows) must still reach the recovery message below, and
+                # the other files still get their restore.
+                copy_error = copy_error or exc
+                bad.append(str(rel))
+                continue
             if _sha(rel) != _sha(fixed_dir / rel):
                 bad.append(str(rel))
         if bad:
             # Stop here: a later snapshot would stash this tree as the fix, and one sharing
             # this directory would overwrite fixed/, the only copy of it.
             during = f" after {in_flight!r} stopped the proofs" if in_flight else ""
-            raise SystemExit(f"\n*** RESTORE FAILED for {bad}{during}; the fix is only in "
-                             f"{fixed_dir}. Recover it with:\n***   cp -r {fixed_dir}/. .\n"
-                             f"*** then delete {in_progress} and run verify again")
+            failure = SystemExit(f"\n*** RESTORE FAILED for {bad}{during}; the fix is only in "
+                                 f"{fixed_dir}. Recover it with:\n***   cp -r {fixed_dir}/. .\n"
+                                 f"*** then delete {in_progress} and run verify again")
+            failure.__cause__ = copy_error   # None when every copy ran and a hash differed
+            raise failure
         in_progress.unlink()
     return results
 

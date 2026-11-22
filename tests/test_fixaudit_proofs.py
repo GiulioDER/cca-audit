@@ -406,3 +406,35 @@ def test_the_restore_failure_names_the_exception_that_stopped_the_proofs(run, mo
     except SystemExit as exc:
         refused = str(exc)
     assert refused is not None and "RuntimeError('boom')" in refused
+
+
+def test_a_restore_copy_that_raises_ends_in_the_recovery_message(run, monkeypatch):
+    """Invariant: a restore copy that raises OSError surfaces as the recovery SystemExit.
+
+    Failure mode: a locked file on Windows made the restore copy raise PermissionError, which
+    escaped bare, without the instruction that names fixed/ as the only copy of the fix.
+    Red: tests/test_fixaudit_proofs.py::test_a_restore_copy_that_raises_ends_in_the_recovery_message
+    against 1bf1a49, and against the mutation `except OSError as exc:` to
+    `except FileNotFoundError as exc:` in `_verify_against`, fails
+    `isinstance(raised, SystemExit)` with a PermissionError; against the mutation deleting
+    `failure.__cause__ = copy_error` it fails the `__cause__` assertion.
+    """
+    _record_runs(monkeypatch)
+    fixed = (tc.DEFAULT_SNAPDIR / "fixed" / "norm.py").resolve()
+    real = shutil.copy2
+
+    def copy2(src, dst, *a, **k):
+        if Path(src).resolve() == fixed:
+            raise PermissionError("norm.py is locked")
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(tc.shutil, "copy2", copy2)
+    raised = None
+    try:
+        tc.verify([("A", LOWERS)])
+    except BaseException as exc:  # noqa: BLE001 (which exception escapes is the observation)
+        raised = exc
+    assert isinstance(raised, SystemExit) and "RESTORE FAILED" in str(raised)
+    assert isinstance(raised.__cause__, PermissionError)
+    assert (tc.DEFAULT_SNAPDIR / tc.IN_PROGRESS).exists()
+    assert fixed.read_text(encoding="utf-8") == FIX_AUDIT
