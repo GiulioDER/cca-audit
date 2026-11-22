@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .bugs.caused_by import _path, fix_diff
+from .bugs.gitread import GitError, git
 
 # Placeholder: Task 9's measurement of past fixes (their 90th percentile) sets this.
 SIZE_THRESHOLD = 40
@@ -130,3 +131,98 @@ def size_report(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
         out.append({"fix_id": fix["fix_id"], "lines": total, "over": total > SIZE_THRESHOLD,
                     "has_reason": bool(str(fix.get("size_reason") or "").strip())})
     return out
+
+
+MAX_HITS_PER_PATTERN = 50
+_REGEX_PREFIX = "re:"
+
+
+def auto_patterns(hunks: list[Hunk]) -> list[str]:
+    """Removed non-test lines, whitespace collapsed, that hold a call or a string literal.
+
+    A bare `return None` or `)` would match everywhere, so a line must carry a `(` or a quote.
+    """
+    out: list[str] = []
+    for h in hunks:
+        if is_test_path(h.path):
+            continue
+        for line in h.removed:
+            text = " ".join(line.split())
+            if ("(" in text or '"' in text or "'" in text) and text not in out:
+                out.append(text)
+    return out
+
+
+def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str]]:
+    """(path, line, text) of every tracked-file line matching `pattern`: a fixed string, or an
+    extended regex when it starts with `re:`."""
+    mode, body = ("-E", pattern[len(_REGEX_PREFIX):]) if pattern.startswith(_REGEX_PREFIX) else ("-F", pattern)
+    try:
+        out = git(repo_root, "grep", "-n", mode, "-e", body)
+    except GitError as e:
+        # git grep exits 1 with no stderr when nothing matches; a bad regex has a message.
+        if str(e).rstrip().endswith(f"failed in {repo_root}:"):
+            return []
+        raise FixAuditRefused(f"sibling pattern {pattern!r} could not be searched: {e}") from e
+    hits = []
+    for row in out.splitlines():
+        path, line, text = row.split(":", 2)
+        hits.append((path, int(line), text.strip()))
+    return hits
+
+
+def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
+    """Every other place a fix's patterns occur, so each can be fixed or justified.
+
+    A fix's patterns are its removed lines (auto_patterns) plus its declared `sibling_patterns`,
+    fixed strings unless prefixed `re:`. Empty `sibling_patterns` needs a `sibling_reason`.
+    A hit inside one of the fix's own hunks (new side) is the fix itself, not a sibling.
+    """
+    for fix in fixes:
+        declared = fix.get("sibling_patterns")
+        if declared is None or (not declared and not str(fix.get("sibling_reason") or "").strip()):
+            raise FixAuditRefused(
+                f"{fix['fix_id']}: give sibling_patterns, or a sibling_reason when there are none")
+    renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
+    out: list[dict] = []
+    for fix in fixes:
+        files = {renamed.get(f, f) for f in fix["files"]}
+        own = [h for h in hunks if h.path in files]
+        seen: set[tuple[str, int]] = set()
+        for pattern in auto_patterns(own) + list(fix["sibling_patterns"]):
+            found = [(path, line, text) for path, line, text in _grep(repo_root, pattern)
+                     if not any(h.path == path and h.new_start <= line < h.new_start + h.new_len
+                                for h in own)]
+            if len(found) > MAX_HITS_PER_PATTERN:
+                raise FixAuditRefused(
+                    f"{fix['fix_id']}: pattern {pattern!r} matches {len(found)} sites "
+                    f"(limit {MAX_HITS_PER_PATTERN}); declare a narrower one")
+            for path, line, text in found:
+                if (path, line) not in seen:
+                    seen.add((path, line))
+                    out.append({"hit_id": f"S-{len(out) + 1}", "fix_id": fix["fix_id"],
+                                "pattern": pattern, "path": path, "line": line, "text": text})
+    return out
+
+
+def check_dispositions(hits: list[dict], dispositions: dict, repo_root: Path) -> list[str]:
+    """Reasons a hit has no valid disposition. `fixed` holds only while the hit's text is gone
+    from its path; `not_applicable` needs a reason."""
+    reasons = []
+    for hit in hits:
+        hid = hit["hit_id"]
+        entry = dispositions.get(hid)
+        if not entry:
+            reasons.append(f"{hid}: no disposition")
+            continue
+        kind = entry.get("disposition")
+        if kind == "not_applicable":
+            if not str(entry.get("reason") or "").strip():
+                reasons.append(f"{hid}: not_applicable needs a reason")
+        elif kind == "fixed":
+            body = (repo_root / hit["path"]).read_text(encoding="utf-8", errors="replace")
+            if hit["text"] in body:
+                reasons.append(f"{hid}: marked fixed, but {hit['text']!r} still occurs in {hit['path']}")
+        else:
+            reasons.append(f"{hid}: disposition must be 'fixed' or 'not_applicable', not {kind!r}")
+    return reasons
