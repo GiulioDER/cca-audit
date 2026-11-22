@@ -194,7 +194,9 @@ def _call_heads(line: str) -> list[str]:
                 depth += 1
             elif c in ")]}":
                 depth -= 1
-        arg = " ".join(line[m.end():end].split())
+        # whitespace outside string literals is collapsed; inside one it is part of the value
+        arg = re.sub(r"(\"[^\"]*\"|'[^']*')|\s+", lambda x: x.group(1) or " ",
+                     line[m.end():end]).strip()
         if '"' in arg or "'" in arg:
             heads.append(f"{callee}({arg}")
     return heads
@@ -216,7 +218,8 @@ def auto_patterns(hunks: list[Hunk]) -> list[str]:
 
 def _tolerant(text: str) -> str:
     """An extended regex matching `text` literally, with any run of spaces where it has tokens
-    apart (so a reformatted or double spaced copy still matches)."""
+    apart (so a reformatted or double spaced copy still matches). A leading word is not matched
+    inside a longer name (`load(` is not `json_load(`), though a dotted prefix is allowed."""
     parts: list[str] = []
     tokens = _TOKEN.findall(text)
     for prev, tok in zip([None, *tokens], tokens):
@@ -225,12 +228,16 @@ def _tolerant(text: str) -> str:
             parts.append("[[:space:]]+" if word and (tok[0].isalnum() or tok[0] == "_")
                          else "[[:space:]]*")
         parts.append(re.sub(r"([\\.^$*+?()\[\]{}|])", r"\\\1", tok))
-    return "".join(parts)
+    body = "".join(parts)
+    if tokens and (tokens[0][0].isalnum() or tokens[0][0] == "_"):
+        return "(^|[^[:alnum:]_])" + body
+    return body
 
 
-def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str]]:
-    """(path, line, text) of every tracked text file line matching `pattern`: a fixed string
-    (whitespace tolerant), or an extended regex when it starts with `re:`."""
+def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str, int]]:
+    """(path, line, text, n) of every tracked text file line matching `pattern`: a fixed string
+    (whitespace tolerant), or an extended regex when it starts with `re:`. `n` counts the
+    identical stripped texts earlier in the same path, which tells two copies of a line apart."""
     body = pattern[len(_REGEX_PREFIX):] if pattern.startswith(_REGEX_PREFIX) else _tolerant(pattern)
     try:
         out = git(repo_root, "grep", "-n", "-I", "-z", "-E", "-e", body)
@@ -240,9 +247,14 @@ def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str]]:
             return []
         raise FixAuditRefused(f"sibling pattern {pattern!r} could not be searched: {e}") from e
     hits = []
-    for row in out.splitlines():
+    seen: dict[tuple[str, str], int] = {}
+    for row in out.split("\n"):  # not splitlines(): a form feed inside a matched line is no row end
+        if not row:
+            continue
         path, line, text = row.split("\0", 2)
-        hits.append((path, int(line), text.strip()))
+        text = text.strip()
+        hits.append((path, int(line), text, seen.get((path, text), 0)))
+        seen[(path, text)] = seen.get((path, text), 0) + 1
     return hits
 
 
@@ -254,9 +266,10 @@ class SiblingSweep:
     too_broad: list[dict]
 
 
-def _hit_id(fix_id: str, pattern: str, path: str, text: str) -> str:
-    """Stable across runs of the sweep, so a disposition written once keeps its hit."""
-    key = "\0".join((fix_id, pattern, path, text))
+def _hit_id(fix_id: str, pattern: str, path: str, text: str, n: int) -> str:
+    """Stable across runs of the sweep, so a disposition written once keeps its hit; `n` keeps
+    two identical lines of one file apart."""
+    key = "\0".join((fix_id, pattern, path, text, str(n)))
     return "S-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
 
 
@@ -287,17 +300,17 @@ def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> Sibli
         for pattern in auto + [d for d in fix["sibling_patterns"] if d not in auto]:
             found = [x for x in _grep(repo_root, pattern) if x[:2] not in skip]
             if len(found) > MAX_HITS_PER_PATTERN:
-                if pattern in auto:
+                if pattern in auto and pattern not in fix["sibling_patterns"]:
                     too_broad.append({"fix_id": fix["fix_id"], "pattern": pattern,
                                       "count": len(found)})
                     continue
                 raise FixAuditRefused(
                     f"{fix['fix_id']}: pattern {pattern!r} matches {len(found)} sites "
                     f"(limit {MAX_HITS_PER_PATTERN}); declare a narrower one")
-            for path, line, text in found:
+            for path, line, text, n in found:
                 if (path, line) not in seen:
                     seen.add((path, line))
-                    out.append({"hit_id": _hit_id(fix["fix_id"], pattern, path, text),
+                    out.append({"hit_id": _hit_id(fix["fix_id"], pattern, path, text, n),
                                 "fix_id": fix["fix_id"], "pattern": pattern, "path": path,
                                 "line": line, "text": text})
     return SiblingSweep(out, too_broad)

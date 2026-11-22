@@ -203,7 +203,9 @@ def test_bug001_shape_lists_the_other_readers(git_repo):
 
     Node: tests/test_fixaudit_checks.py::test_bug001_shape_lists_the_other_readers.
     Red 2026-11-22: mutating `_call_heads` so that `heads.append(...)` is never reached failed
-    `assert sorted(...) == [('resolve.py', 5), ...]` with `[] == [...]`.
+    `assert sorted(...) == [('resolve.py', 5), ...]` with `[] == [...]`. Dropping the occurrence
+    index `str(n)` from the key in `_hit_id` failed `assert 2 == 3` (the two identical resolve.py
+    lines shared one id).
     """
     _write(git_repo, "store.py", _STORE)
     _write(git_repo, "resolve.py", _RESOLVE)
@@ -214,6 +216,8 @@ def test_bug001_shape_lists_the_other_readers(git_repo):
     sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix(files=["store.py"])])
     assert sorted((h["path"], h["line"]) for h in sweep.hits) == [
         ("resolve.py", 5), ("resolve.py", 13), ("store.py", 17)]
+    ids = [h["hit_id"] for h in sweep.hits]
+    assert len(set(ids)) == len(ids)  # resolve.py:5 and :13 are identical lines
     assert {h["pattern"] for h in sweep.hits} == {'read_text(encoding="utf-8"'}
     assert sweep.too_broad == []
 
@@ -323,11 +327,12 @@ def test_num001_shape_needs_a_declared_pattern(git_repo):
 
     Node: tests/test_fixaudit_checks.py::test_num001_shape_needs_a_declared_pattern.
     Red 2026-11-22: mutating `_grep` to ignore the `re:` prefix (`if False else`) failed
-    `assert [] == ['other.py']` at the `regex` assert.
+    `assert [] == ['other.py']` at the `regex` assert. Dropping the word boundary in `_tolerant`
+    failed the first assert (the `json_load(...)` reader came back as an auto hit).
     """
     old = '    return load(root / "runs" / run_id / "summary.json")'
     _write(git_repo, "a.py", old + "\n")
-    _write(git_repo, "other.py", '    path = root / "runs" / run_id / "summary.json"\n')
+    _write(git_repo, "other.py", '    return json_load(root / "runs" / run_id / "summary.json")\n')
     hunks = _fix_hunks_of(git_repo, lambda: _write(
         git_repo, "a.py", old.replace("summary", "run") + "\n"))
     assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits == []
@@ -339,19 +344,29 @@ def test_num001_shape_needs_a_declared_pattern(git_repo):
     assert fixaudit.sibling_hits(git_repo, hunks, [literal]).hits == []
 
 
-def test_a_fix_without_sibling_patterns_or_reason_is_refused():
-    """Invariant: a fix declares sibling_patterns, empty only with a non-empty sibling_reason.
+def test_a_fix_without_sibling_patterns_or_reason_is_refused(git_repo):
+    """Invariant: a fix declares sibling_patterns, empty only with a non-empty sibling_reason; a
+    declared pattern needs no reason.
 
     Node: tests/test_fixaudit_checks.py::test_a_fix_without_sibling_patterns_or_reason_is_refused.
-    Red 2026-11-22: deleting the validation loop at the top of `sibling_hits` failed with
-    KeyError ('sibling_patterns') for the first fix, not FixAuditRefused.
+    Red 2026-11-22, each a mutation of the validation in `sibling_hits`:
+    (1) `not str(fix.get("sibling_reason") or "").strip()` replaced by `False`: `[]` with no
+    reason is accepted, `Failed: DID NOT RAISE FixAuditRefused` at case 2;
+    (2) `.strip()` dropped: the whitespace reason is accepted, DID NOT RAISE at case 3;
+    (3) `not declared and` dropped: a declared pattern without a reason is refused, so the
+    positive case raises `FixAuditRefused: F1: give sibling_patterns, ...`;
+    (4) `declared is None or` dropped: the missing key falls through to `fix["sibling_patterns"]`
+    and fails with KeyError at case 1 (a crash, as the later code cannot run without the key).
     """
-    from pathlib import Path
-    for fix in ({"fix_id": "F1", "files": ["a.py"]},
-                {"fix_id": "F1", "files": ["a.py"], "sibling_patterns": []},
-                {"fix_id": "F1", "files": ["a.py"], "sibling_patterns": [], "sibling_reason": "  "}):
+    base = {"fix_id": "F1", "files": ["a.py"]}
+    for fix in ({**base, "sibling_reason": "no other copy"},
+                {**base, "sibling_patterns": []},
+                {**base, "sibling_patterns": [], "sibling_reason": "  "}):
         with pytest.raises(FixAuditRefused, match="F1"):
-            fixaudit.sibling_hits(Path("."), [], [fix])
+            fixaudit.sibling_hits(git_repo, [], [fix])
+    assert fixaudit.sibling_hits(git_repo, [], [{**base, "sibling_patterns": ['zzz("q"']}]).hits == []
+    assert fixaudit.sibling_hits(git_repo, [], [{**base, "sibling_patterns": [],
+                                                 "sibling_reason": "no other copy"}]).hits == []
 
 
 def test_an_unedited_hit_cannot_be_marked_fixed_and_ids_are_stable(git_repo):
@@ -393,8 +408,11 @@ def test_a_declared_pattern_over_50_hits_is_refused_an_auto_one_is_dropped(git_r
 
     Node: tests/test_fixaudit_checks.py::test_a_declared_pattern_over_50_hits_is_refused_an_auto_one_is_dropped.
     Red 2026-11-22: (a) mutating the declared branch to `continue` instead of raising failed
-    `pytest.raises(FixAuditRefused)` (DID NOT RAISE); (b) mutating the auto branch (`if pattern in auto:` to `if False:`) failed the first
-    `sibling_hits` call with `FixAuditRefused: F1: pattern 'call("x"' matches 51 sites`.
+    `pytest.raises(FixAuditRefused)` (DID NOT RAISE); (b) mutating the auto branch
+    (`if pattern in auto and ...` to `if False:`) failed the first `sibling_hits` call with
+    `FixAuditRefused: F1: pattern 'call("x"' matches 51 sites`; (c) dropping
+    `and pattern not in fix["sibling_patterns"]` (a declared pattern equal to an auto one is
+    demoted) failed `Failed: DID NOT RAISE FixAuditRefused` at the `same` case.
     """
     line = '    call("x")'
     many = fixaudit.MAX_HITS_PER_PATTERN + 1
@@ -407,6 +425,9 @@ def test_a_declared_pattern_over_50_hits_is_refused_an_auto_one_is_dropped(git_r
     broad = _fix(sibling_patterns=['call("x")'])
     with pytest.raises(FixAuditRefused, match=r"call\(\"x\"\).*narrower"):
         fixaudit.sibling_hits(git_repo, hunks, [broad])
+    same = _fix(sibling_patterns=['call("x"'])  # declared, though identical to the auto pattern
+    with pytest.raises(FixAuditRefused, match="narrower"):
+        fixaudit.sibling_hits(git_repo, hunks, [same])
     _write(git_repo, "many.py", "\n".join(line for _ in range(many - 1)) + "\n")
     _git(git_repo, "add", "-A")
     ok = fixaudit.sibling_hits(git_repo, hunks, [broad])
@@ -419,10 +440,13 @@ def test_call_heads_become_patterns_and_trivial_lines_do_not():
     block; `return None`, `)`, calls without a literal and test files give none.
 
     Node: tests/test_fixaudit_checks.py::test_call_heads_become_patterns_and_trivial_lines_do_not.
-    Red 2026-11-22: mutating `auto_patterns` to skip `h.anchors` failed the final assert,
-    `assert [] == ['h("k"']`.
+    Red 2026-11-22: (a) mutating `auto_patterns` to skip `h.anchors` failed the final assert,
+    `assert [] == ['h("k"']`; (b) forcing the literal check in `_call_heads` true
+    (`if True:`) failed `assert ['f(1', 'read...', 'getcwd('] == ['read_text(e...']`;
+    (c) not skipping test paths (`if False:` for `is_test_path`) failed
+    `assert ['read_text(e...', 'g("z"'] == [...]`.
     """
-    removed = ("    return None", "  )", "", "x = f(1)", 'for l in p.read_text(encoding="utf-8").splitlines():',
+    removed =("    return None", "  )", "", "x = f(1)", 'for l in p.read_text(encoding="utf-8").splitlines():',
                'exe = resolve_tool("git", os.getcwd())', "y = 'a'")
     hunks = [Hunk("a.py", 1, 7, 1, 0, removed, ()),
              Hunk("tests/test_a.py", 1, 1, 1, 0, ('assert g("z")',), ())]
@@ -430,6 +454,56 @@ def test_call_heads_become_patterns_and_trivial_lines_do_not():
     assert fixaudit.auto_patterns(hunks[:1] * 2) == fixaudit.auto_patterns(hunks[:1])
     anchored = Hunk("b.py", 1, 2, 1, 3, (), ("x",), added_at=(2,), anchors=((1, '    h("k", 1)'),))
     assert fixaudit.auto_patterns([anchored]) == ['h("k"']
+
+
+def test_a_head_keeps_the_whitespace_inside_a_string_literal(git_repo):
+    """Invariant: whitespace inside a string literal of a call head is not collapsed, so
+    `f("a  b")` matches its own copies and not `f("a b")`.
+
+    Node: tests/test_fixaudit_checks.py::test_a_head_keeps_the_whitespace_inside_a_string_literal.
+    Red 2026-11-22: mutating `_call_heads` to `arg = " ".join(line[m.end():end].split())` failed
+    `assert [...] == [("b.py", 1)]`: the head became `f("a b"`, which matched c.py instead.
+    """
+    _write(git_repo, "a.py", 'x = f("a  b")\n')
+    _write(git_repo, "b.py", 'y = f("a  b")\n')
+    _write(git_repo, "c.py", 'z = f("a b")\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = f("a  b", 1)\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert [(h["path"], h["line"]) for h in sweep.hits] == [("b.py", 1)]
+    assert sweep.hits[0]["pattern"] == 'f("a  b"'
+
+
+def test_a_call_head_does_not_match_inside_a_longer_name(git_repo):
+    """Invariant: `load(` is not found in `json_load(` or `reload(`, but is found as `obj.load(`.
+
+    Node: tests/test_fixaudit_checks.py::test_a_call_head_does_not_match_inside_a_longer_name.
+    Red 2026-11-22: (a) dropping the `(^|[^[:alnum:]_])` prefix in `_tolerant` failed
+    `assert [('b.py', 1), ..., ('c.py', 3)] == [('b.py', 1), ('c.py', 3)]` (the json_load and
+    reload lines came back as well); (b) a prefix that also refuses a dot,
+    `(^|[^.[:alnum:]_])`, failed `assert [('c.py', 3)] == [('b.py', 1), ('c.py', 3)]`.
+    The NUM-001 test also fails under (a): its `json_load(...)` reader becomes an auto hit.
+    """
+    _write(git_repo, "a.py", 'x = load("a")\n')
+    _write(git_repo, "b.py", 'y = obj.load("a")\n')
+    _write(git_repo, "c.py", 'z = json_load("a")\nw = reload("a")\nv = load("a")\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = load("a", 1)\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert sorted((h["path"], h["line"]) for h in sweep.hits) == [("b.py", 1), ("c.py", 3)]
+
+
+def test_a_matched_line_holding_a_form_feed_is_a_hit_not_a_crash(git_repo):
+    """Invariant: a matched line with a form feed (which `str.splitlines` treats as a line end)
+    is one hit.
+
+    Node: tests/test_fixaudit_checks.py::test_a_matched_line_holding_a_form_feed_is_a_hit_not_a_crash.
+    Red 2026-11-22: mutating `_grep` to `out.splitlines()` failed with
+    `ValueError: not enough values to unpack (expected 3, got 1)`.
+    """
+    _write(git_repo, "a.py", 'x = f("a")\n')
+    _write(git_repo, "b.py", 'y = f("a")\x0c# tail\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = f("a", 1)\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert [(h["path"], h["line"], h["text"]) for h in sweep.hits] == [("b.py", 1, 'y = f("a")\x0c# tail')]
 
 
 def test_parse_records_added_lines_and_anchors():
