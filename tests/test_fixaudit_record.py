@@ -273,8 +273,8 @@ def test_record_refuses_an_undisposed_sibling(git_repo):
     assert [(h["path"], h["line"]) for h in hits] == [("readers.py", 2)]
     reasons = fr.record(git_repo)
     assert reasons == [f"FIX-1: sibling readers.py:2: {hits[0]['hit_id']}: no disposition"]
-    disposition = {hits[0]["hit_id"]: {"disposition": "not_applicable",
-                                       "reason": "reads a file this repo writes"}}
+    disposition = {"run_id": run, "hits": {hits[0]["hit_id"]: {
+        "disposition": "not_applicable", "reason": "reads a file this repo writes"}}}
     _put(git_repo, fr.SIBLINGS.as_posix(), json.dumps(disposition))
     assert fr.record(git_repo) == []
     kept = git_repo / ".claude" / "audits" / "runs" / run / fr.SIBLINGS.name
@@ -460,8 +460,9 @@ def test_the_journal_command_validates_its_row(git_repo):
     assert _journal(git_repo, "FALSE_POSITIVE", 2) == 2  # not CONFIRMED: only the pass check
     assert _journal(git_repo, "CONFIRMED", 1, finding="F-9") == 2
     assert _journal(git_repo, "CONFIRMED", 1, finding="F-2", fix_id="FIX-2") == 2
-    assert _journal(git_repo, "PARKED", 1) == 2  # parked with no cycle at all
-    assert fr.cycles(git_repo, run) == {}
+    assert _journal(git_repo, "PARKED", 1) == 2  # parked with one cycle, under the cap
+    # the kept pass 1 is a cycle without a journal row (STAKES-001), and refused rows add none
+    assert fr.cycles(git_repo, run) == {"F-1": 1}
     assert _journal(git_repo, "CONFIRMED", 1) == 0
     assert _journal(git_repo, "CONFIRMED", 1) == 2  # the same cycle counted twice
     assert _journal(git_repo, "FALSE_POSITIVE", 1) == 2  # any second row: only the duplicate rule
@@ -681,7 +682,10 @@ def test_a_parked_fix_with_a_skipped_binary_file_blocks_while_it_differs(git_rep
         _put(git_repo, "app.py", "x = 2\n")
         (git_repo / "blob.bin").write_bytes(b"\x00\x02")
 
-    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "blob.bin"])], edit)
+    run = _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "blob.bin"])], edit)
+    # the skipped binary is acknowledged, so only the revert check can block
+    _put(git_repo, fr.SIBLINGS.as_posix(),
+         json.dumps({"run_id": run, "hits": {}, "skipped": {"blob.bin": "a test fixture"}}))
     _three_cycles(git_repo, line=50)
     _edit_and_test(git_repo, "app.py", "x = 1\n")
     report = _verdicts(git_repo, 4, [])
@@ -800,7 +804,7 @@ def test_the_seven_case_fixture_blocks_until_each_is_resolved(git_repo):
     disposed = {}
     for case, n in (("BUG-001", 1), ("SEC-001", 2), ("NUM-001", 3)):
         disposed[hits[f"FIX-{n}"]["hit_id"]] = {"disposition": "not_applicable", "reason": "r"}
-        _put(git_repo, fr.SIBLINGS.as_posix(), json.dumps(disposed))
+        _put(git_repo, fr.SIBLINGS.as_posix(), json.dumps({"run_id": run, "hits": disposed}))
         remaining.discard(case)
         assert _blockers(fr.record(git_repo)) == remaining
     for case, n, test in (("BUG-002", 4, "test_timeout_fires"), ("BUG-003", 5, "test_malformed_rows")):
@@ -820,3 +824,124 @@ def test_the_seven_case_fixture_blocks_until_each_is_resolved(git_repo):
         assert _blockers(reasons) == remaining
     assert reasons == []
     assert ps.load(git_repo).layers["L5.4"]["source"] == "tool"
+
+
+# --- run 20261122T184346Z, L4 fixes ---------------------------------------------------------
+
+_STORE = 'def load(p):\n    return p.read_text(encoding="utf-8")\n'
+_STORE_FIXED = 'def load(p):\n    return p.read_text(encoding="utf-8", errors="replace")\n'
+
+
+def _sibling_run(repo):
+    """A FAST run whose FIX-1 leaves one sibling hit, in readers.py; returns (run_id, hit)."""
+    _commit(repo, {"store.py": _STORE,
+                   "readers.py": 'def other(q):\n    return q.read_text(encoding="utf-8")\n'})
+    run = _to_l5(repo, "FAST", [_entry(1, ["store.py"])], lambda: _put(repo, "store.py",
+                                                                        _STORE_FIXED))
+    (hit,) = _check(repo)["siblings"]["hits"]
+    return run, hit
+
+
+def _dispose(repo, run_id, hit_ids=(), skipped=None):
+    data = {"run_id": run_id, "hits": {h: {"disposition": "not_applicable", "reason": "r"}
+                                       for h in hit_ids}}
+    if skipped is not None:
+        data["skipped"] = skipped
+    _put(repo, fr.SIBLINGS.as_posix(), json.dumps(data))
+    return data
+
+
+def test_a_dispositions_file_must_carry_this_runs_id(git_repo):
+    """Invariant (ENV-001, STAKES-003): the sibling dispositions file counts only when its
+    top-level `run_id` is the open run's, so a file an earlier run left behind clears nothing.
+    Failure caught: hit ids are stable across runs, so an unbound file cleared a later run's hit.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_dispositions_file_must_carry_this_runs_id:
+    baseline 023a1b5 (pre-fix `_dispositions`); the flat map without a run_id was accepted, so it
+    failed the first assertion, `assert any('has no "run_id"' in r ...)` on `[]`."""
+    run, hit = _sibling_run(git_repo)
+    _put(git_repo, fr.SIBLINGS.as_posix(), json.dumps(
+        {hit["hit_id"]: {"disposition": "not_applicable", "reason": "r"}}))
+    reasons = fr.record(git_repo)
+    assert any('has no "run_id"' in r and run in r for r in reasons), reasons
+    _dispose(git_repo, "20000101T000000Z", [hit["hit_id"]])
+    reasons = fr.record(git_repo)
+    assert any("20000101T000000Z" in r and run in r for r in reasons), reasons
+    assert "L5.4" not in ps.load(git_repo).layers
+    data = _dispose(git_repo, run, [hit["hit_id"]])
+    assert fr.record(git_repo) == []
+    kept = git_repo / ".claude" / "audits" / "runs" / run / fr.SIBLINGS.name
+    assert json.loads(kept.read_text(encoding="utf-8")) == data
+
+
+def test_an_earlier_runs_dispositions_do_not_clear_a_later_runs_hit(git_repo):
+    """Invariant (STAKES-003, the auditor's probe test_stale_siblings_probe.py made real): run B,
+    with the same fix id and the same hit as run A, is refused while the dispositions file is
+    run A's, naming both runs.
+    Red NOT YET SHOWN for this node. The pre-fix code (023a1b5) refuses run A's file of the new
+    shape at the first record, so the baseline fails in setup, which is no red proof. The planned
+    red is the mutation of the new `_dispositions`, `if data["run_id"] != run_id:` as
+    `if False:`, expected to fail `assert any(run_a in r and run_b in r ...)` on `[]`; it was
+    not run in L4 (the run was refused by a session permission check)."""
+    run_a, hit = _sibling_run(git_repo)
+    _dispose(git_repo, run_a, [hit["hit_id"]])
+    assert fr.record(git_repo) == []
+    ps.abort("next run", root=git_repo)
+    _put(git_repo, "store.py", _STORE)
+    run_b = _to_l5(git_repo, "FAST", [_entry(1, ["store.py"])],
+                   lambda: _put(git_repo, "store.py", _STORE_FIXED))
+    (hit_b,) = _check(git_repo)["siblings"]["hits"]
+    assert hit_b["hit_id"] == hit["hit_id"] and run_b != run_a
+    reasons = fr.record(git_repo)
+    assert any(run_a in r and run_b in r for r in reasons), reasons
+    assert not (git_repo / ".claude" / "audits" / "runs" / run_b / fr.SIBLINGS.name).exists()
+
+
+def test_a_skipped_non_test_path_needs_a_reason_before_record(git_repo, capsys):
+    """Invariant (SEC-001): an edit no check can read (a binary file here) is printed by
+    `fixaudit check` under `skipped`, and `record` refuses while a skipped non-test path has no
+    reason under "skipped" in the dispositions file; a skipped test path needs none.
+    Failure caught: a skipped edit passed L5.4 unaudited, with no one told.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_skipped_non_test_path_needs_a_reason_before_record:
+    baseline 023a1b5; the check summary had no `skipped`, so it failed
+    `assert None == ['blob.bin', 'tests/data.bin']`. The record refusal itself (the
+    skipped-reason list in `_evaluate`) has no red shown yet: its planned mutation, that
+    comprehension's condition as `if False`, was not run in L4."""
+    (git_repo / "blob.bin").write_bytes(b"\x00\x01")
+    (git_repo / "tests").mkdir(exist_ok=True)
+    (git_repo / "tests" / "data.bin").write_bytes(b"\x00\x01")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "binaries")
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        (git_repo / "blob.bin").write_bytes(b"\x00\x02")
+        (git_repo / "tests" / "data.bin").write_bytes(b"\x00\x02")
+
+    run = _to_l5(git_repo, "FAST", [_entry(1, ["app.py", "blob.bin"])], edit)
+    assert cca_main(["fixaudit", "check", "--root", str(git_repo)]) == 0
+    assert json.loads(capsys.readouterr().out).get("skipped") == ["blob.bin", "tests/data.bin"]
+    reasons = fr.record(git_repo)
+    assert any("blob.bin is skipped" in r for r in reasons), reasons
+    assert not any("tests/data.bin" in r for r in reasons), reasons
+    _dispose(git_repo, run, skipped={"blob.bin": "  "})
+    assert any("blob.bin is skipped" in r for r in fr.record(git_repo))
+    _dispose(git_repo, run, skipped={"blob.bin": "a fixture image; no code reads it"})
+    assert fr.record(git_repo) == []
+
+
+def test_three_confirming_passes_park_a_finding_with_no_journal_row(git_repo):
+    """Invariant (STAKES-001, the auditor's probe test_no_journal_cap_never_reached made real):
+    the cap counts kept passes at distinct audited trees that confirmed a P1 or P2 in the fix,
+    not only the journal rows the agent chose to write, so three such passes park the finding.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_three_confirming_passes_park_a_finding_with_no_journal_row:
+    baseline 023a1b5 (`cycles` counted journal rows only); failed
+    `assert set() == {'F-1'}` at `fr.parked(...)`."""
+    run = _app_run(git_repo, "STANDARD")
+    for k in (1, 2, 3):
+        if k > 1:
+            _edit_and_test(git_repo, "app.py", f"x = {k + 1}\n")
+        _verdicts(git_repo, k, [_fa(f"FA-{k}-1", line=50)])
+        assert fr.record(git_repo) != []
+    assert fr.parked(git_repo, run) == {"F-1"}
+    assert fr.cycles(git_repo, run) == {"F-1": 3}
+    assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]

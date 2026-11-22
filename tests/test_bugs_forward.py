@@ -343,3 +343,24 @@ def test_a_non_dict_proof_entry_excuses_no_p2(tmp_path):
     _, doc = rows_for(_approve_both(rec, "P2"), MERGE)
     assert doc.evidence["red_proof"] == ABSENT
     assert doc.tier == "historical"
+
+
+def test_a_fix_audit_proof_does_not_orphan_the_run(tmp_path):
+    """Invariant (DAT-001, BUG-001): a fix audit repair's proof, keyed `FA-<k>-<n>` as Step 5.6
+    tells the agent to write it, is claimed by no L4 entry by design, so it leaves a P2 with no
+    proof entry not_required; a proof of any other unclaimed id still orphans the run (the test
+    above).
+    Failure caught: every P2 and P3 of a run with a fix audit repair landed in the append-only
+    ledger as red_proof absent, tier historical.
+    Red 2026-11-22, tests/test_bugs_forward.py::test_a_fix_audit_proof_does_not_orphan_the_run:
+    baseline 023a1b5 (forward.py counted the FA proof as orphaned); failed
+    `assert doc.evidence["red_proof"] == NOT_REQUIRED` ('absent' != 'not_required'). This is the
+    auditor's probe probe_forward.py made a test."""
+    rec = make_record(tmp_path, proofs=[
+        {"finding": "FIX-001", "nodeid": "t::a", "verdict": "RED"},
+        {"finding": "FA-1-1", "nodeid": "t::b", "verdict": "RED",
+         "snapdir": ".claude/audits/.fixaudit_snapshot/pass-1"}])
+    bug, doc = rows_for(_approve_both(rec, "P2"), MERGE)
+    assert bug.evidence["red_proof"] == EVIDENCED
+    assert doc.evidence["red_proof"] == NOT_REQUIRED
+    assert doc.tier == "proved"
