@@ -1439,6 +1439,203 @@ def _join(directory: pathlib.Path | None, field: tuple[str, bool]) -> pathlib.Pa
     return path
 
 
+# --- pathname expansion ---------------------------------------------------------------
+#
+# `cd chil*` moves into `child`, so a target read as the literal `chil*` is judged in a
+# path that does not exist (FIX-SEC-005). Expansion runs only where a directory is
+# decided (`_Walk._expand`), because elsewhere a pattern only names arguments and reading
+# the disk for them costs time the hook does not have: past its 60 s timeout the hook
+# lets the commit through, and run 20261120T223924Z measured `ls /*/*/*/*` at 265 s.
+
+_MAX_GLOB_ENTRIES = 4096  # directory entries one command's expansions may read
+_MAX_GLOB_PATHS = 64      # paths one pattern may name before it counts as unknown
+
+
+class _Unknowable(Exception):
+    """A pathname expansion this hook cannot know: past a bound, or a rule not modelled."""
+
+
+class _Field(tuple):
+    """A field `(text, unknown)` holding a character bash may expand to pathnames.
+
+    `pattern` is the field's text as `(chunk, unquoted)` pairs, because only an unquoted
+    `*`, `?` or `[` is a pattern character: `'a*'/x*` expands the second star alone. It
+    compares equal to the plain pair, so code that does not expand reads it as one.
+    """
+
+    pattern: tuple = ()
+
+
+def _ps_wildcard(text: str) -> list:
+    """`text` as `(char, active)` pairs under PowerShell's wildcard rules: a backtick escapes."""
+    chars, i = [], 0
+    while i < len(text):
+        if text[i] == "`" and i + 1 < len(text):
+            chars.append((text[i + 1], False))
+            i += 2
+        else:
+            chars.append((text[i], True))
+            i += 1
+    return chars
+
+
+def _glob_tokens(component: list, ps: bool) -> list | None:
+    """One path component as tokens for `_glob_match`, or None when it holds no pattern.
+
+    A token is `"*"`, or `(ranges, negate)` for one character, `ranges` None for any. A
+    quoted `]` does not close a bracket expression and a quoted `!` does not negate it
+    (BUG-001).
+    """
+    out, glob, i = [], False, 0
+    while i < len(component):
+        ch, active = component[i]
+        if active and ch == "\\" and not ps:
+            raise _Unknowable("a backslash from an expansion escapes the pattern")
+        if active and ch in "*?":
+            out.append("*" if ch == "*" else (None, False))
+            glob = True
+            i += 1
+            continue
+        if not (active and ch == "["):
+            out.append((((ch, ch),), False))
+            i += 1
+            continue
+        j = i + 1
+        negate = not ps and j < len(component) and component[j][1] and component[j][0] in "!^"
+        if negate:
+            j += 1
+        start = j
+        if j < len(component) and component[j][0] == "]":
+            j += 1  # a `]` first in the brackets is a member, not the end
+        while j < len(component) and component[j] != ("]", True):
+            j += 1
+        if j >= len(component):  # no closing `]`: the `[` is literal (`[ "$CI" = x ]`)
+            out.append(((("[", "["),), False))
+            i += 1
+            continue
+        inner = component[start:j]
+        if any(c == "[" for c, _ in inner):
+            raise _Unknowable("a character class this hook does not model")
+        ranges, k = [], 0
+        while k < len(inner):
+            low = inner[k][0]
+            if k + 2 < len(inner) and inner[k + 1] == ("-", True):
+                ranges.append((low, inner[k + 2][0]))
+                k += 3
+            else:
+                ranges.append((low, low))
+                k += 1
+        out.append((tuple(ranges), negate))
+        glob = True
+        i = j + 1
+    return out if glob else None
+
+
+def _changes_globs(args: list) -> bool:
+    """Whether `set`, `shopt` or a shell's command line given `args` may change expansion:
+    `-f`, `noglob`, any `...glob` option, or an argument the walk cannot read."""
+    return any(unknown or "glob" in text or (text[:1] in "-+" and text[1:2] != "-" and "f" in text)
+               for text, unknown in args)
+
+
+def _glob_match(tokens: list, name: str, fold: bool) -> bool:
+    """`name` against `tokens`, keeping one backtrack point (the last `*`).
+
+    In Python, not `re`: a backtracking regex runs in C holding the GIL, where the watchdog
+    thread cannot interrupt it, and `*a*a*a...*b` against a long name ran for minutes
+    (SEC-001). Here the cost is at most the product of the two lengths. With `fold`
+    (PowerShell) a character also matches as its lower and upper case, the rule of
+    re.IGNORECASE, so a range such as `[A-c]` keeps its endpoints.
+    """
+    t = n = 0
+    star, mark = -1, 0
+    while n < len(name):
+        if t < len(tokens) and tokens[t] == "*":
+            star, mark = t, n
+            t += 1
+            continue
+        if t < len(tokens):
+            ranges, negate = tokens[t]
+            chars = (name[n], name[n].lower(), name[n].upper()) if fold else (name[n],)
+            hit = ranges is None or any(low <= c <= high for c in chars for low, high in ranges)
+            if hit != negate:
+                t += 1
+                n += 1
+                continue
+        if star < 0:
+            return False
+        t, mark = star + 1, mark + 1
+        n = mark
+    return all(token == "*" for token in tokens[t:])
+
+
+def _pathnames(pattern: list, base: pathlib.Path | None, ps: bool, budget: list) -> list[str]:
+    """The paths `pattern` names from `base`, spelled as the shell spells them.
+
+    Matched one component at a time against directory entries, as bash does: `*` and `?`
+    never cross a separator, a leading `.` must be matched literally (bash only), and
+    case counts in bash, Git Bash included, but not in PowerShell. Each component leading
+    to the next must be a directory on disk, never by lexical `..`: `'a*'/../x*` names
+    nothing without a directory `a*`. `budget[0]` counts down the entries read and the
+    paths checked, so no pattern shape escapes the bound (PERF-001).
+    """
+    seps = "/\\" if ps else "/"
+    parts, joins = [[]], []
+    for ch, active in pattern:
+        if ch in seps:
+            joins.append(ch)
+            parts.append([])
+        else:
+            parts[-1].append((ch, active))
+    patterns = [_glob_tokens(part, ps) for part in parts]
+    if not any(patterns):
+        return []
+    text = "".join(c for c, _ in pattern)
+    if os.name == "nt" and not ps and text.startswith("/") and not _POSIX_DRIVE.match(text):
+        raise _Unknowable("Git Bash's `/` is its install directory, not a drive root")
+
+    def charge(count: int) -> None:
+        budget[0] -= count
+        if budget[0] < 0:
+            raise _Unknowable("too many directory entries to expand")
+
+    def place(text: str) -> pathlib.Path:
+        path = _join(base, (text or ".", False))
+        if path is None:
+            raise _Unknowable("a relative pattern in an unknown directory")
+        return path
+
+    paths = [""]
+    for n, (part, tokens) in enumerate(zip(parts, patterns, strict=True)):
+        lead = [""]
+        if n:
+            charge(len(paths))
+            lead = [p + joins[n - 1] for p in paths if place(p + joins[n - 1]).is_dir()]
+        if tokens is None:
+            paths = [p + "".join(c for c, _ in part) for p in lead]
+            continue
+        dots = ps or part[:1] and part[0][0] == "."
+        paths = []
+        for p in lead:
+            try:
+                with os.scandir(place(p)) as entries:
+                    for entry in entries:
+                        charge(1)
+                        if (not dots and entry.name.startswith(".")) \
+                                or not _glob_match(tokens, entry.name, ps):
+                            continue
+                        if ps and getattr(entry.stat(follow_symlinks=False),
+                                          "st_file_attributes", 0) & 2:
+                            continue  # PowerShell's wildcard skips a hidden item
+                        paths.append(p + entry.name)
+            except OSError:
+                continue  # bash reads a directory it cannot list as holding no match
+            if len(paths) > _MAX_GLOB_PATHS:
+                raise _Unknowable("too many paths")
+    charge(len(paths))
+    return [p for p in paths if os.path.lexists(place(p))]
+
+
 #: GNU env's long options, for its getopt_long rules: any unambiguous prefix names one.
 _ENV_LONG = ("ignore-environment", "null", "unset", "chdir", "split-string", "block-signal",
              "default-signal", "ignore-signal", "list-signal-handling", "debug", "help",
@@ -1460,15 +1657,17 @@ def _envs_before(names: list) -> list:
 
 
 def _env_directory(fields: list, directory: pathlib.Path | None, end: int,
-                   envs: list) -> pathlib.Path | None:
+                   envs: list, expand) -> pathlib.Path | None:
     """`directory` for `fields[end]` after the last `env` before it, parsed as GNU env does.
 
     `envs` is `_envs_before` of the fields. An option env has but this reader does not
-    know, or an ambiguous abbreviation, makes the directory unknown (None).
+    know, or an ambiguous abbreviation, makes the directory unknown (None). `expand` is
+    `_Walk._expand`, for a `-C` operand that bash expands as a pathname.
     """
     start = envs[end]
     if start is None:
         return directory
+    base = directory  # bash expands every word of the command where it starts
     i = start + 1
     while i < end:
         text, unknown = fields[i]
@@ -1488,8 +1687,9 @@ def _env_directory(fields: list, directory: pathlib.Path | None, end: int,
             if option in _ENV_LONG_VALUE and not eq:
                 if i + 1 >= end:
                     return None
-                value, i = fields[i + 1][0], i + 1
-                if fields[i][1]:
+                field = expand(fields[i + 1], base) if option == "chdir" else fields[i + 1]
+                value, i = field[0], i + 1
+                if field[1]:
                     return None
             if option == "chdir":
                 directory = _join(directory, (value, False))
@@ -1503,9 +1703,12 @@ def _env_directory(fields: list, directory: pathlib.Path | None, end: int,
                 return None
             value = letters[at + 1:]
             if not value:
-                if i + 1 >= end or fields[i + 1][1]:
+                if i + 1 >= end:
                     return None
-                value, i = fields[i + 1][0], i + 1
+                field = expand(fields[i + 1], base) if letter == "C" else fields[i + 1]
+                if field[1]:
+                    return None
+                value, i = field[0], i + 1
             if letter == "C":
                 directory = _join(directory, (value, False))
             break
@@ -1514,14 +1717,15 @@ def _env_directory(fields: list, directory: pathlib.Path | None, end: int,
 
 
 def _git_commit(fields: list, directory: pathlib.Path | None,
-                names: list) -> tuple[bool, pathlib.Path | None]:
+                names: list, expand) -> tuple[bool, pathlib.Path | None]:
     """(True, its directory) when `fields` run `git commit`; the directory is None if unknown.
 
     Any field naming git counts, not only the first, so `sudo git commit`, `xargs git
     commit` and `time git commit` are seen. A program name that cannot be known followed
     by `commit` counts too, and so does a real git whose options or subcommand cannot be.
     So does a git given `-c alias.<x>=...` or `-c help.autocorrect=...`, since either can
-    turn the subcommand it runs into a commit. `names` is `_program` of each field.
+    turn the subcommand it runs into a commit. `names` is `_program` of each field, and
+    `expand` is `_Walk._expand`, for a `-C` operand that bash expands as a pathname.
     """
     envs = _envs_before(names)
     for index, field in enumerate(fields):
@@ -1533,9 +1737,9 @@ def _git_commit(fields: list, directory: pathlib.Path | None,
         def here(index=index, joins=joins):
             # Only once a commit is found: parsing env's options for every field instead
             # made a command quadratic in its words.
-            place = _env_directory(fields, directory, index, envs)
+            place = _env_directory(fields, directory, index, envs, expand)
             for value in joins:
-                place = _join(place, value)
+                place = _join(place, expand(value, directory))
             return place
 
         i = index + 1
@@ -1755,6 +1959,8 @@ class _Walk:
         self.cond = 0         # > 0 while walking code that may or may not run
         self.locals: list[dict] = []  # per function call: the values `local` shadowed
         self.ifs_changed = False      # IFS assigned: unquoted expansions split unknowably
+        self.globs_changed = False    # `set -f` or a glob `shopt`: patterns expand unknowably
+        self.glob_budget = [_MAX_GLOB_ENTRIES]
         self.lastpipe = False         # `shopt` seen: the last pipeline element may persist
         self.piped = False            # walking a PowerShell pipeline element after the first
         self.deadline = time.monotonic() + _DEADLINE_S
@@ -1787,11 +1993,11 @@ class _Walk:
 
     def _scoped(self, run):
         """Run `run()` as a subshell does: nothing it assigns or defines comes back."""
-        saved = dict(self.vars), dict(self.funcs), self.ifs_changed
+        saved = dict(self.vars), dict(self.funcs), self.ifs_changed, self.globs_changed
         try:
             return run()
         finally:
-            self.vars, self.funcs, self.ifs_changed = saved
+            self.vars, self.funcs, self.ifs_changed, self.globs_changed = saved
 
     def _maybe(self, run):
         """Run `run()` as code that may not run at all (a branch, `&&`, a loop body)."""
@@ -1814,6 +2020,7 @@ class _Walk:
         """Code the walk cannot see ran in this shell: every variable may have changed."""
         self.vars = dict.fromkeys(self.vars)
         self.opaque = self.opaque or permanent
+        self.globs_changed = True  # and any glob option (STAKES-003)
 
     def _maybe_commit(self, *directories: pathlib.Path | None) -> None:
         """Text that may run a commit the walk cannot see: judge where it starts, and MAYBE."""
@@ -2065,25 +2272,36 @@ class _Walk:
         return None
 
     def _fields(self, word: _Word, state: tuple, split: bool = True) -> list[tuple[str, bool]]:
-        """The fields `word` expands to, each `(text, unknown)`."""
+        """The fields `word` expands to, each `(text, unknown)`.
+
+        With `split` (bash words), a field holding an unquoted `*`, `?` or `[` is a
+        `_Field` that keeps which of its characters were quoted, for `_expand`.
+        """
         fields: list[tuple[str, bool]] = []
         text: list[str] = []
+        chunks: list[tuple[str, bool]] = []  # (text, unquoted) of the field so far
         unknown = False
         started = False
 
         def flush():
-            nonlocal text, unknown, started
+            nonlocal text, chunks, unknown, started
             if started:
                 self.expanded += sum(map(len, text))
                 if self.expanded > _MAX_EXPANDED:
                     raise RuntimeError("command too complex to model")
-                fields.append(("".join(text), unknown))
-            text, unknown, started = [], False, False
+                field = ("".join(text), unknown)
+                if split and not unknown and any(
+                        active and any(c in chunk for c in "*?[") for chunk, active in chunks):
+                    field = _Field(field)
+                    field.pattern = tuple(chunks)
+                fields.append(field)
+            text, chunks, unknown, started = [], [], False, False
 
         for part in word.parts:
             kind = part[0]
             if kind == "lit":
                 text.append(part[1])
+                chunks.append((part[1], not part[2]))
                 started = True
                 continue
             if kind == "tilde":
@@ -2096,6 +2314,7 @@ class _Walk:
                 continue
             if not split or kind == "tilde" or part[-1]:
                 text.append(value)
+                chunks.append((value, False))  # quoted, or a tilde, which POSIX never globs
                 started = True
                 continue
             if self.ifs_changed or self.opaque or "IFS" in self.untrusted:
@@ -2115,6 +2334,7 @@ class _Walk:
                 if n:
                     flush()
                 text.append(piece)
+                chunks.append((piece, True))  # an unquoted expansion is globbed too
                 started = True
             if pieces and value[-1:].isspace():
                 flush()
@@ -2126,6 +2346,38 @@ class _Walk:
     def _home(self, state: tuple) -> pathlib.Path | None:
         home = self._value("HOME", state)
         return None if home is None else _join(state[0], (home, False))
+
+    def _expand(self, field: tuple, base: pathlib.Path | None, ps: bool = False) -> tuple:
+        """`field` after pathname expansion in `base`, as one field.
+
+        Called only where a directory or the program is decided. No match leaves the
+        word as typed, as bash does without nullglob. A pattern this hook cannot expand,
+        or one naming several paths, is unknown: the shell would pass several words, which
+        `cd`, `git -C` and Set-Location each refuse or read as the next argument, and that
+        is not modelled. `ps` reads the text with PowerShell's wildcard rules. The field
+        itself comes back when nothing was expanded.
+        """
+        if field[1]:
+            return field
+        if ps:
+            pattern = _ps_wildcard(field[0])
+        else:
+            pattern = [(c, active) for chunk, active in getattr(field, "pattern", ())
+                       for c in chunk]
+        if not any(active and c in "*?[" for c, active in pattern):
+            return field
+        try:
+            # GLOBIGNORE removes matches and turns on dotglob (SEC-002), and code the walk
+            # cannot see may have set any glob option (STAKES-003).
+            if not ps and (self.globs_changed or self.opaque or "GLOBIGNORE" in self.vars
+                           or "GLOBIGNORE" in self.untrusted):
+                raise _Unknowable("glob options this walk does not track")
+            paths = _pathnames(pattern, base, ps, self.glob_budget)
+        except _Unknowable:
+            return (_UNKNOWN, True)
+        if not paths:
+            return field
+        return (paths[0], False) if len(paths) == 1 else (_UNKNOWN, True)
 
     # -- simple commands -------------------------------------------------------------
 
@@ -2169,6 +2421,8 @@ class _Walk:
                 # `D=v cmd`: a function or `eval` sees D=v and an external program does not,
                 # and bash restores D after. Rather than model which, D is unknown from here.
                 self.untrusted.update(self._assignment(w, state)[0] for w in assigns)
+                # The program word is expanded too: `gi?` beside a file `git` runs git.
+                fields[0] = self._expand(fields[0], state[0])
                 return self._run(fields, state)
             for word in assigns:
                 name, value = self._assignment(word, state)
@@ -2282,6 +2536,10 @@ class _Walk:
                     self.vars[args[at + 1][0]] = None
         if name == "shopt" and any(u or "lastpipe" in t for t, u in args):
             self.lastpipe = True
+        if name is None or (name in ("set", "shopt") and _changes_globs(args)):
+            # nocaseglob, nullglob, dotglob, `set -f`, ...; and a program the walk cannot
+            # name may be `set` or `shopt` (STAKES-003).
+            self.globs_changed = True
         self._programs(fields, state)
         return {state[:3] + ("?",)}
 
@@ -2292,7 +2550,7 @@ class _Walk:
             # The fields after them are still read, for a commit or shell they name.
             self._maybe_commit(state[0])
         names = [_program(field) for field in fields]
-        found, directory = _git_commit(fields, state[0], names)
+        found, directory = _git_commit(fields, state[0], names, self._expand)
         if found:
             self.commits.append(directory)
         envs = _envs_before(names)
@@ -2300,13 +2558,22 @@ class _Walk:
             if program in _POSIX_SHELLS:
                 script = _shell_script(fields[index + 1:])
                 if script is not None:
-                    start = _env_directory(fields, state[0], index, envs)
-                    self._nested(script, "bash" if program == "bash" else "sh", start, state)
+                    start = _env_directory(fields, state[0], index, envs, self._expand)
+                    at = next(k for k in range(index + 1, len(fields)) if fields[k] is script)
+                    saved = self.globs_changed
+                    # `bash -f -c`, `-o noglob`, `-O nocaseglob`: the child expands otherwise
+                    self.globs_changed = saved or _changes_globs(fields[index + 1:at])
+                    try:
+                        self._nested(script, "bash" if program == "bash" else "sh", start,
+                                     state)
+                    finally:
+                        self.globs_changed = saved
             elif program in ("pwsh", "powershell"):
                 script, workdir = _pwsh_script(fields[index + 1:], program == "powershell")
                 if script is not None:
-                    start = _env_directory(fields, state[0], index, envs)
-                    where = start if workdir is None else _join(start, workdir)
+                    start = _env_directory(fields, state[0], index, envs, self._expand)
+                    where = start if workdir is None else _join(
+                        start, self._expand(workdir, state[0]))  # bash expands it (BUG-004)
                     self._nested(script, "ps", where, state)
 
     def _leave(self, name: str, args: list, state: tuple) -> set:
@@ -2354,14 +2621,18 @@ class _Walk:
             if args[i - 1][0] == "--":
                 break
         rest = args[i:]
+        certain = len(rest) <= 1
         if not rest:
             target = self._home(state)
         elif rest[0] == ("-", False):
             # bash goes to $OLDPWD: unknown once assigned or written where the walk cannot see
             target = None if self._value("OLDPWD", state) is None else old
         else:
-            target = self._cdpath(cwd, rest[0], state)
-        return self._move(state, target, stack, certain=len(rest) <= 1)
+            expanded = self._expand(rest[0], cwd)
+            target = self._cdpath(cwd, expanded, state)
+            # A match read before the command runs may not be the shell's (SEC-003).
+            certain = certain and expanded is rest[0]
+        return self._move(state, target, stack, certain=certain)
 
     def _cdpath(self, cwd: pathlib.Path | None, field: tuple, state: tuple):
         """`cd`'s target: a plain relative name is looked up along CDPATH first, as bash does.
@@ -2390,16 +2661,18 @@ class _Walk:
         cwd, old, stack, _ = state
         args = [a for a in args if a != ("--", False)]
         if args and args[0] == ("-n", False):
-            pushed = (_join(cwd, args[1]),) if len(args) > 1 else ()
+            pushed = (_join(cwd, self._expand(args[1], cwd)),) if len(args) > 1 else ()
             return {(cwd, old, pushed + stack, "S")}
         if not args:
             if not stack:
                 return {state[:3] + ("F",)}
             return self._move(state, stack[0], (cwd,) + stack[1:])
-        text, unknown = args[0]
+        target = self._expand(args[0], cwd)
+        text, unknown = target
         if unknown or (text[:1] in "+-" and text[1:].isdigit()):
             return {(None, cwd, (cwd,) + stack, "?")}
-        return self._move(state, _join(cwd, args[0]), (cwd,) + stack)
+        return self._move(state, _join(cwd, target), (cwd,) + stack,
+                          certain=target is args[0])  # SEC-003, as in `_cd`
 
     def _popd(self, args: list, state: tuple) -> set:
         cwd, old, stack, _ = state
@@ -2491,6 +2764,7 @@ class _Walk:
     def _ps_cd(self, args: list, state: tuple, push: bool) -> set:
         cwd, old, stack, _ = state
         target = None
+        literal = False  # -LiteralPath (alias -PSPath, -LP) takes no wildcards; -Path does
         i = 0
         while i < len(args):
             text, unknown = args[i]
@@ -2500,6 +2774,7 @@ class _Walk:
                 takes_path = name == "lp" or any(
                     full.startswith(name) for full in ("path", "literalpath", "pspath"))
                 if takes_path:
+                    literal = not "path".startswith(name)
                     if colon:
                         target = (value, False)
                     elif i + 1 < len(args):
@@ -2523,7 +2798,9 @@ class _Walk:
             return {(self._home(state), cwd, stack, "S"), state[:3] + ("S",)}
         if target in (("-", False), ("+", False)):
             return {(None, cwd, pushed, "S")}
-        return self._move(state, _join(cwd, target), pushed)
+        expanded = target if literal else self._expand(target, cwd, ps=True)
+        return self._move(state, _join(cwd, expanded), pushed,
+                          certain=expanded is target)  # SEC-003, as in `_cd`
 
 
 def commit_directories(command: str, base: pathlib.Path,

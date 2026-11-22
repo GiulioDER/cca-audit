@@ -13,7 +13,9 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import time
 
 import pytest
 from conftest import findings_output, plan_output, verdicts_output, write_output
@@ -529,8 +531,9 @@ def test_commands_that_do_not_commit_are_not_refused(monkeypatch, tmp_path, comm
     accepting any subcommand (`Git status`, `git status`); `_git_commit` taking every
     word as a candidate program (`grep`). The `[` case, red 2026-11-21: the run's first
     repair (`_GLOB` matching a lone `[`, so the test builtin became an unknown program
-    with an unknown argument), at the same assert. FIX-SEC-005 is parked since, and the
-    case stays as a control.
+    with an unknown argument), at the same assert. Red again 2026-11-22 against
+    FIX-SEC-005's landed fix: mutation `_glob_regex` reading a `[` with no closing `]` as
+    an unknowable pattern, at the same assert (2 == 0).
     """
     repo = _repo(tmp_path)
     ps.start("DEEP", root=repo)
@@ -1067,7 +1070,9 @@ def test_powershell_expressions_are_not_refused(monkeypatch, tmp_path, command):
 
     Red 2026-11-21: the second repair; the three variable and array cases failed at the
     assert below (2 == 0). The two `[Type]` cases failed there too, but only because of
-    the glob reading of the parked FIX-SEC-005; they stay as controls with no live red.
+    the glob reading of FIX-SEC-005's second attempt. The landed fix expands a PowerShell
+    word only as a Set-Location or Push-Location -Path target, so no plausible one-line
+    mutation reaches these: they stay as deliberate controls with no live red.
     """
     assert _run_ps(monkeypatch, _in_run(tmp_path), command) == 0, command
 
@@ -1618,3 +1623,376 @@ def test_git_with_an_unknown_subcommand_is_refused_by_design(monkeypatch, tmp_pa
     """
     run = _run_ps if tool == "PowerShell" else _run
     assert run(monkeypatch, _in_run(tmp_path), command) == 2, command
+
+
+# --- FIX-SEC-005: pathname expansion where a directory or the program is decided ---------
+#
+# Ground truth, measured 2026-11-21 on this workstation in Git Bash 5.3.15 and pwsh: bash
+# matches case-sensitively, `'a*'/../xn*` names nothing without a directory `a*`, and `*`
+# skips a leading dot; Set-Location's wildcard ignores case, skips hidden folders, and
+# refuses (without moving) a pattern that names two containers. Red for the first three
+# tests is the pre-fix guard of this branch (a glob read as a literal word); for the
+# rest, which pass there, a mutation of this fix, each named in its docstring.
+
+
+@pytest.mark.parametrize("tool,command", [
+    ("Bash", "cd chil* && git commit -m x"),
+    ("Bash", "git -C chil? commit -m x"),
+    ("PowerShell", "Set-Location chil*; git commit -m x"),
+    ("Bash", "env -C chil* git commit -m x"),
+    ("Bash", "pushd ch[i]ld && git commit -m x"),
+    ("Bash", "D='chil*'; cd $D && git commit -m x"),
+    ("Bash", "cd ./chil*/ && git commit -m x"),
+    ("PowerShell", "Push-Location CHIL*; git commit -m x"),
+])
+def test_a_pattern_naming_the_directory_is_expanded(monkeypatch, tmp_path, tool, command):
+    """FIX-SEC-005. Invariant: a `cd`, `pushd`, `git -C`, `env -C` or Set-Location target
+    that the shell expands as a pathname is judged in the directory it names. Failure mode:
+    `chil*` was read literally, a path that does not exist, so the run open in the nested
+    checkout `child` was missed (exit 0).
+
+    Red 2026-11-22: the pre-fix guard (d459893); every case failed at the first assert
+    (0 == 2). After `;` the session checkout is judged too, because a matched target may
+    still fail (SEC-003 of run 20261122T121815Z), so the pin allows it beside `child`.
+    """
+    parent, child = _session_and_child(tmp_path)
+    run = _run_ps if tool == "PowerShell" else _run
+    assert run(monkeypatch, parent, command) == 2, command
+    dialect = "ps" if tool == "PowerShell" else "bash"
+    directories = guard.commit_directories(command, parent, dialect)
+    assert child in directories and set(directories) <= {child, parent}, command
+
+
+@pytest.mark.parametrize("tool,command", [
+    ("Bash", "cd chil* && git commit -m x"),
+    ("Bash", "git -C chil? commit -m x"),
+    ("PowerShell", "Set-Location chil* && git commit -m x"),
+])
+def test_a_pattern_naming_a_nested_checkout_leaves_the_enclosing_run_out(
+    monkeypatch, tmp_path, tool, command
+):
+    """FIX-SEC-005, the other direction. Invariant: a commit a pattern moves into the nested
+    checkout `child` is out of scope for a run in the checkout around it. Failure mode: the
+    literal `chil*` does not exist, so the walk up from it reached the enclosing run (2).
+
+    Red 2026-11-22: the pre-fix guard (d459893); every case failed at the assert below
+    (2 == 0). The PowerShell case chains with `&&`: after `;` the enclosing run is judged
+    too, because a matched target may still fail (SEC-003 of run 20261122T121815Z).
+    """
+    run = _run_ps if tool == "PowerShell" else _run
+    assert run(monkeypatch, _enclosing(tmp_path), command) == 0, command
+
+
+def test_the_program_word_is_expanded(monkeypatch, tmp_path):
+    """FIX-SEC-005, the program position. Invariant: bash expands the program word too, and
+    `gi?` beside a file named `git` becomes `git`, which bash then finds on PATH. Failure
+    mode: the program was read as the literal `gi?`, so no commit was seen (0).
+
+    Red 2026-11-22: the pre-fix guard (d459893); failed at the assert below (0 == 2).
+    """
+    repo = _in_run(tmp_path)
+    (repo / "git").write_text("", encoding="utf-8")
+    assert _run(monkeypatch, repo, "gi? commit -m x") == 2
+
+
+@pytest.mark.parametrize("tool,command", [
+    ("Bash", "cd CHIL*; git commit -m x"),
+    ("Bash", "cd 'a*'/../xn*; git commit -m x"),
+    ("Bash", "cd *hid; git commit -m x"),
+    ("PowerShell", "Set-Location -LiteralPath chil*; git commit -m x"),
+])
+def test_a_pattern_the_shell_does_not_match_stays_literal(monkeypatch, tmp_path, tool, command):
+    """FIX-SEC-005, regressions of attempts 2 and 3. Invariant: a pattern the shell matches
+    to nothing leaves the shell where it was, so the commit after `;` runs in the session
+    checkout and its run is judged (2). Failure mode: a match bash does not make (case
+    folded, the quoted `a*` read as a pattern, a dotfile matched by `*`, or a wildcard in
+    -LiteralPath) moved the walk into the nested checkout `xnest`/`child`/`.hid`, out of
+    scope (0).
+
+    Each case passes at d459893. Red 2026-11-22, each a mutation failing at the assert
+    below (0 == 2): `_glob_regex` with re.IGNORECASE for bash too (`CHIL*`); `_fields`
+    marking quoted text unquoted (`'a*'`); `_pathnames` letting `*` match a leading dot
+    (`*hid`); `_ps_cd` expanding -LiteralPath. Since SEC-003 of run 20261122T121815Z an
+    expanded target keeps the state where it fails, which masks those mutations here:
+    `test_a_pattern_the_shell_does_not_match_is_not_entered` carries their red now.
+    """
+    parent = _enclosing(tmp_path)
+    (parent / "a1").mkdir()
+    _repo(parent / "xnest")
+    _repo(parent / ".hid")
+    run = _run_ps if tool == "PowerShell" else _run
+    assert run(monkeypatch, parent, command) == 2, command
+
+
+@pytest.mark.parametrize("tool,command,nested", [
+    ("Bash", "cd CHIL* && git commit -m x", "child"),
+    ("Bash", "cd 'a*'/../xn* && git commit -m x", "xnest"),
+    ("Bash", "cd *hid && git commit -m x", ".hid"),
+    ("PowerShell", "Set-Location -LiteralPath chil* && git commit -m x", "child"),
+])
+def test_a_pattern_the_shell_does_not_match_is_not_entered(
+    monkeypatch, tmp_path, tool, command, nested
+):
+    """FIX-SEC-005. Invariant: a pattern the shell matches to nothing makes the `cd` fail,
+    so nothing after `&&` runs in the nested checkout bash never enters (0). Failure mode: a
+    match bash does not make (case folded, the quoted `a*` read as a pattern, a dotfile
+    matched by `*`, a wildcard in -LiteralPath) judged a commit in that checkout's run.
+
+    Each case passes at the run's Step 4 snapshot. Red 2026-11-22, each a mutation failing
+    at the assert below (2 == 0): `_glob_match` folding case for bash (`CHIL*`); `_fields`
+    marking quoted text unquoted (`'a*'`); `_pathnames` letting `*` match a leading dot
+    (`*hid`); `_ps_cd` expanding -LiteralPath.
+    """
+    parent = _repo(tmp_path)
+    (parent / "a1").mkdir()
+    ps.start("DEEP", root=_repo(parent / nested))
+    run = _run_ps if tool == "PowerShell" else _run
+    assert run(monkeypatch, parent, command) == 0, command
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the hidden attribute is a Windows one")
+def test_set_location_skips_a_hidden_folder(monkeypatch, tmp_path):
+    """FIX-SEC-005. Invariant: Set-Location's wildcard skips a hidden folder, as measured,
+    so the commit runs in the session checkout. Failure mode: the walk moved into the hidden
+    nested checkout, whose run is out of scope (0).
+
+    Passes at d459893. Red 2026-11-22: mutation `_pathnames` keeping a hidden entry; failed
+    at the first assert below (0 == 2). Since SEC-003 of run 20261122T121815Z that assert
+    no longer sees the mutation (the failure state is kept), so the second carries the
+    red: with the run inside the hidden folder, the mutation fails it (2 == 0).
+    """
+    import ctypes
+
+    parent = _enclosing(tmp_path / "one")
+    hidden = _repo(parent / "hidx")
+    assert ctypes.windll.kernel32.SetFileAttributesW(str(hidden), 0x2)
+    assert _run_ps(monkeypatch, parent, "Set-Location hid*; git commit -m x") == 2
+    other = _repo(tmp_path / "two")
+    hidden = _repo(other / "hidx")
+    ps.start("DEEP", root=hidden)
+    assert ctypes.windll.kernel32.SetFileAttributesW(str(hidden), 0x2)
+    assert _run_ps(monkeypatch, other, "Set-Location hid* && git commit -m x") == 0
+
+
+@pytest.mark.parametrize("command,run_in_child", [
+    ("set -f; cd chil*; git commit -m x", False),
+    ("set -o noglob; cd chil*; git commit -m x", False),
+    ("shopt -s nocaseglob; cd CHIL* && git commit -m x", True),
+])
+def test_glob_options_make_an_expansion_unknown(monkeypatch, tmp_path, command, run_in_child):
+    """FIX-SEC-005. Invariant: after an option that changes pathname expansion, a pattern
+    target is an unknown directory, judged against every open run. Failure mode: the walk
+    expanded as if the options were the defaults; with `set -f` bash reads `chil*` literally
+    and commits in the session checkout, with nocaseglob `CHIL*` names `child`.
+
+    The two `set` cases pass at d459893 (it never expands); the `shopt` case failed there
+    at the assert below (0 == 2). Red 2026-11-22 for all three: mutation `_expand`
+    ignoring `globs_changed`, at the same assert (0 == 2). Since SEC-003 of run
+    20261122T121815Z the `set` cases are also refused through the kept failure state, so
+    that mutation is red only for the `shopt` case and for the child-shell `-O nocaseglob`
+    case of `test_a_child_shell_started_with_glob_options`.
+    """
+    parent = _session_and_child(tmp_path)[0] if run_in_child else _enclosing(tmp_path)
+    assert _run(monkeypatch, parent, command) == 2, command
+
+
+def test_an_expansion_past_its_bound_is_unknown(monkeypatch, tmp_path):
+    """FIX-SEC-005, the regression of attempt 1 (`ls /*/*/*/*` took 265 s, past the hook's
+    60 s timeout, which lets the commit through). Invariant: once one command has read
+    `_MAX_GLOB_ENTRIES` directory entries, a further pattern is unknown (None), never a
+    guess. Failure mode: the expansion read on without limit.
+
+    Not red at d459893 in a valid way (`_MAX_GLOB_ENTRIES` does not exist there). Red
+    2026-11-22: mutation `_pathnames` without its entry bound; failed at the assert below
+    (`[.../child] == [None]`).
+    """
+    parent, _ = _session_and_child(tmp_path)
+    for n in range(10):
+        (parent / f"d{n}").mkdir()
+    monkeypatch.setattr(guard, "_MAX_GLOB_ENTRIES", 3)
+    assert guard.commit_directories("cd chil* && git commit -m x", parent) == [None]
+
+
+def test_a_pattern_outside_a_directory_target_is_not_read(monkeypatch, tmp_path):
+    """FIX-SEC-005, the regression of attempt 1. Invariant: an argument pattern is never
+    expanded, so `ls /*/*/*/*` costs no disk reads. Failure mode: every word was expanded.
+
+    Passes at d459893. Red 2026-11-22: mutation `_simple` expanding every field, not only
+    the program word; failed at the assert below (an unknown directory added, because the
+    forbidden scandir raised inside the walk). The pattern is relative: on Windows a
+    pattern under a bare `/` is unknown before any read (ENV-003 of run 20261122T121815Z).
+    """
+    repo = _in_run(tmp_path)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("os.scandir called")
+
+    monkeypatch.setattr(guard.os, "scandir", forbidden)
+    assert guard.commit_directories("git commit -m x; ls */*/*/*", repo) == [repo]
+
+
+@pytest.mark.parametrize("command,code", [
+    ("ls *.py commit", 0),
+    ("sudo g{i..i}t commit -m x", 2),
+])
+def test_argument_patterns_are_not_candidate_programs(monkeypatch, tmp_path, command, code):
+    """FIX-SEC-005, regressions of attempts 2 and 3. Invariant: a pattern among the
+    arguments is not an unknown program, and a brace-expanded program after a wrapper still
+    is. Failure mode: `*.py`, naming two files, became an unknown program followed by
+    `commit` (2); the rule meant to stop that dropped `g{i..i}t` after `sudo` (0).
+
+    Both pass at d459893. Red 2026-11-22, each a mutation failing at the assert below:
+    `_simple` expanding every field (`ls`, 2 == 0); `_git_commit` taking an unknown field
+    as a program only at index 0, attempt 3's rule (`sudo`, 0 == 2).
+    """
+    repo = _in_run(tmp_path)
+    (repo / "a.py").write_text("", encoding="utf-8")
+    (repo / "b.py").write_text("", encoding="utf-8")
+    assert _run(monkeypatch, repo, command) == code, command
+
+
+# --- audit fixes of run 20261122T121815Z (the CCA audit of FIX-SEC-005) ------------------
+#
+# Each failure mode below was confirmed by fp-check against Git Bash 5.3.15 and the guard.
+# Red for every test is the pre-fix guard of that run (FIX-SEC-005 as first written, the
+# run's Step 4 snapshot), recorded with the run's Step 5.6 proof.
+
+
+def test_a_pattern_is_matched_in_linear_time(tmp_path):
+    """SEC-001, STAKES-001. Invariant: matching a pattern against a name costs time linear
+    in both, in Python, where the 45 s watchdog can still interrupt it. Failure mode: each
+    `*` became a backtracking `.*` run by `re` in C, which holds the GIL: `*a*a*...*b`
+    against a long name ran for minutes, the watchdog never fired, and the 60 s hook
+    timeout let the commit through.
+    """
+    repo = _in_run(tmp_path)
+    (repo / ("a" * 60)).mkdir()
+    command = "cd " + "*a" * 7 + "*b; git commit -m x"
+    start = time.monotonic()
+    directories = guard.commit_directories(command, repo)
+    assert time.monotonic() - start < 2.0
+    assert repo in directories  # nothing matches, so bash stays and commits here
+
+
+@pytest.mark.parametrize("command,run_in_child", [
+    ("GLOBIGNORE=child; cd chil*; git commit -m x", False),
+    ("export GLOBIGNORE=child; cd chil*; git commit -m x", False),
+    ("GLOBIGNORE=x; cd *hid && git commit -m x", True),
+])
+def test_globignore_makes_an_expansion_unknown(monkeypatch, tmp_path, command, run_in_child):
+    """SEC-002, STAKES-002, ENV-001 (with BUG-002), DOC-001. Invariant: once the command
+    assigns GLOBIGNORE, a pattern target is an unknown directory. Failure mode: GLOBIGNORE
+    filters names out and turns on dotglob, but the walk expanded with the defaults, so
+    `cd chil*` became a certain move into `child` while bash stays (the enclosing run went
+    unjudged), and `*hid` stayed literal while bash enters `.hid`.
+    """
+    if run_in_child:
+        parent = _repo(tmp_path)
+        ps.start("DEEP", root=_repo(parent / ".hid"))
+    else:
+        parent = _enclosing(tmp_path)
+    assert _run(monkeypatch, parent, command) == 2, command
+
+
+@pytest.mark.parametrize("prefix", ["$(echo set) -f; ", ". ./f.sh; "])
+def test_glob_options_set_unseen_make_an_expansion_unknown(monkeypatch, tmp_path, prefix):
+    """STAKES-003, BUG-002. Invariant: after code the walk cannot see (an unknown program
+    word, a sourced file), a pattern target is not trusted as a certain move. Failure mode:
+    `set -f` run that way left `globs_changed` unset, so `cd chil*` moved into `child` for
+    certain while bash reads it literally, fails, and commits in the enclosing run.
+    """
+    parent = _enclosing(tmp_path)
+    (parent / "f.sh").write_text("set -f\n", encoding="utf-8")
+    command = prefix + "cd chil*; git commit -m x"
+    assert _run(monkeypatch, parent, command) == 2, command
+
+
+@pytest.mark.parametrize("command,run_in_child", [
+    ("bash -f -c 'cd chil*; git commit -m x'", False),
+    ("bash -o noglob -c 'cd chil*; git commit -m x'", False),
+    ("bash -O nocaseglob -c 'cd CHIL* && git commit -m x'", True),
+])
+def test_a_child_shell_started_with_glob_options(monkeypatch, tmp_path, command, run_in_child):
+    """ENV-002. Invariant: a shell started with a glob option (`-f`, `-o noglob`, `-O
+    nocaseglob`) expands its patterns unknowably. Failure mode: the child's script was
+    walked with the default rules, so it moved where the child shell does not.
+    """
+    parent = _session_and_child(tmp_path)[0] if run_in_child else _enclosing(tmp_path)
+    assert _run(monkeypatch, parent, command) == 2, command
+
+
+@pytest.mark.parametrize("command,run_in", [
+    ("cd [b']'; git commit -m x", "parent"),
+    ("cd ['!'b] && git commit -m x", "b"),
+])
+def test_a_quoted_bracket_delimiter_is_a_member(monkeypatch, tmp_path, command, run_in):
+    """BUG-001. Invariant: a quoted `]` does not close a bracket expression and a quoted
+    `!` does not negate it, as in bash. Failure mode: `[b']'` was read as `[b]` and moved
+    into `b`, while bash reads it literally and stays; `['!'b]` was read as `[^b]`.
+    """
+    parent = _repo(tmp_path)
+    b = _repo(parent / "b")
+    ps.start("DEEP", root=parent if run_in == "parent" else b)
+    assert _run(monkeypatch, parent, command) == 2, command
+
+
+def test_an_expanded_target_may_still_fail(monkeypatch, tmp_path):
+    """SEC-003. Invariant: a `cd` to an expanded pattern keeps the state where it fails,
+    because the match is read before the command runs. Failure mode: `mkdir chilB; cd
+    chil?` matched only `chilA` when the hook ran, so the move was certain, while bash
+    sees two matches, refuses the `cd` and commits in the enclosing run.
+    """
+    parent = _repo(tmp_path)
+    _repo(parent / "chilA")
+    ps.start("DEEP", root=parent)
+    assert _run(monkeypatch, parent, "mkdir chilB; cd chil?; git commit -m x") == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Git Bash's `/` is not the drive root on Windows")
+def test_a_pattern_under_the_git_bash_root_is_unknown(tmp_path):
+    """ENV-003. Invariant: on Windows a bash pattern under a bare `/` (not `/c/`) is
+    unknown, because Git Bash's `/` is its install directory, not the drive root. Failure
+    mode: `/U*` was matched against `C:\\`, naming `C:\\Users`, which bash never enters.
+    """
+    repo = _in_run(tmp_path)
+    assert guard.commit_directories("cd /U* && git commit -m x", repo) == [None]
+    # A word with no pattern in it (an unclosed `[` is literal) is not made unknown.
+    assert None not in guard.commit_directories("cd /x[; git commit -m x", repo)
+
+
+def test_a_pwsh_working_directory_pattern_is_expanded(monkeypatch, tmp_path):
+    """BUG-004. Invariant: bash expands the `-WorkingDirectory` operand of a pwsh it starts.
+    Failure mode: it was joined literally, so the run open in `b` was missed.
+    """
+    parent = _repo(tmp_path)
+    ps.start("DEEP", root=_repo(parent / "b"))
+    assert _run(monkeypatch, parent, "pwsh -WorkingDirectory b* -c 'git commit -m x'") == 2
+
+
+def test_a_powershell_range_keeps_its_endpoints(monkeypatch, tmp_path):
+    """SEC-001, its L5.5 repair. Invariant: PowerShell's case-blind match keeps a range's
+    endpoints, as re.IGNORECASE does: `[A-c]` covers `_`, which lies between `Z` and `a`.
+    Failure mode: folding the endpoints to `[a-c]` missed `_x`, where pwsh moves.
+
+    Passes at the run's Step 4 snapshot. Red 2026-11-22: mutation `_glob_match` folding
+    the endpoints (the L5.5 attempt 1); failed at the assert below (0 == 2).
+    """
+    parent = _repo(tmp_path)
+    ps.start("DEEP", root=_repo(parent / "_x"))
+    assert _run_ps(monkeypatch, parent, "Set-Location [A-c]* && git commit -m x") == 2
+
+
+def test_every_disk_check_of_an_expansion_is_bounded(tmp_path):
+    """PERF-001. Invariant: every directory check an expansion makes counts against
+    `_MAX_GLOB_ENTRIES`, so one pattern cannot run past the walk's deadline. Failure mode:
+    only listed entries counted, so 64 matches followed by many `.` components made
+    tens of thousands of uncounted `is_dir` calls (23 s measured for 1,500 components).
+    """
+    repo = _in_run(tmp_path)
+    for n in range(64):
+        (repo / f"d{n:02}").mkdir()
+    command = "cd d*" + "/." * 1000 + " && git commit -m x"
+    start = time.monotonic()
+    directories = guard.commit_directories(command, repo)
+    assert time.monotonic() - start < 2.0
+    assert directories == [None]
