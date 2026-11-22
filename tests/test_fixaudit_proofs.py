@@ -331,3 +331,78 @@ def test_a_proof_with_more_than_three_elements_is_rejected(run, monkeypatch):
         rejected = True
     assert ran == []
     assert rejected
+
+
+def _strand(monkeypatch, snapdir: Path) -> None:
+    """Leave `snapdir` as a failed restore leaves it: sentinel kept, the fix only in fixed/."""
+    _record_runs(monkeypatch)
+    _restore_writes_junk(monkeypatch, snapdir)
+    with pytest.raises(SystemExit, match="RESTORE FAILED"):
+        tc.verify([("A", LOWERS, snapdir)])
+
+
+def test_a_snapshot_over_a_stranded_verify_is_refused(run, monkeypatch):
+    """Invariant: `snapshot` never deletes a snapshot whose verify left it stranded.
+
+    Failure mode (fix round 2 review): after a failed restore, retaking the snapshot ran
+    rmtree on it, deleting fixed/ (the only copy of the fix) and the sentinel. The directory
+    sits outside .claude/audits, so only the check of the target itself can catch it.
+    Red: tests/test_fixaudit_proofs.py::test_a_snapshot_over_a_stranded_verify_is_refused
+    against 0ae3535, and against the mutation deleting `_refuse_if_stranded(snapdir)` at the
+    top of `cmd_snapshot`, fails the fixed/norm.py assertion (the file is gone).
+    """
+    custom = Path("snaps/custom")
+    tc.cmd_snapshot([Path("norm.py")], custom)
+    _strand(monkeypatch, custom)
+    refused = None
+    try:
+        tc.cmd_snapshot([Path("norm.py")], custom)
+    except SystemExit as exc:
+        refused = str(exc)
+    fixed = custom / "fixed" / "norm.py"
+    assert fixed.is_file() and fixed.read_text(encoding="utf-8") == FIX_AUDIT
+    assert (custom / tc.IN_PROGRESS).exists()
+    assert refused is not None and "did not restore" in refused
+
+
+def test_a_snapshot_is_refused_while_another_snapshot_is_stranded(run, monkeypatch):
+    """Invariant: no snapshot is taken while any snapshot under .claude/audits is stranded.
+
+    Failure mode: a stranded pass 1 left norm.py reverted (or junk); a pass 2 snapshot taken
+    then recorded that tree as the pre-fix content the next proofs are judged against.
+    Red: tests/test_fixaudit_proofs.py::test_a_snapshot_is_refused_while_another_snapshot_is_stranded
+    against 0ae3535, and against the mutation deleting `_refuse_if_any_stranded()` in
+    `cmd_snapshot`, fails `assert not (pass_2 / tc.MANIFEST).exists()`.
+    """
+    _strand(monkeypatch, PASS_1)
+    pass_2 = PASS_1.parent / "pass-2"
+    refused = None
+    try:
+        tc.cmd_snapshot([Path("norm.py")], pass_2)
+    except SystemExit as exc:
+        refused = str(exc)
+    assert not (pass_2 / tc.MANIFEST).exists()
+    assert refused is not None and "pass-1" in refused
+
+
+def test_the_restore_failure_names_the_exception_that_stopped_the_proofs(run, monkeypatch):
+    """Invariant: a restore failure raised during another exception names that exception.
+
+    Failure mode: the SystemExit replaced the exception that stopped the proofs, and a CLI
+    user saw only the restore failure, never why the proofs stopped.
+    Red: tests/test_fixaudit_proofs.py::test_the_restore_failure_names_the_exception_that_stopped_the_proofs
+    against 0ae3535, and against the mutation deleting `in_flight = exc` in
+    `_verify_against`, fails the "RuntimeError('boom')" assertion.
+    """
+    _restore_writes_junk(monkeypatch, tc.DEFAULT_SNAPDIR)
+
+    def run_one(nodeid, extra):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(tc, "_run_one", run_one)
+    refused = None
+    try:
+        tc.verify([("A", LOWERS)])
+    except SystemExit as exc:
+        refused = str(exc)
+    assert refused is not None and "RuntimeError('boom')" in refused

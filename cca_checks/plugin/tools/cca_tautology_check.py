@@ -70,6 +70,9 @@ class ProofResult:
 # ---------------------------------------------------------------- snapshot
 
 def cmd_snapshot(files: list[Path], snapdir: Path) -> int:
+    # The rmtree below would delete fixed/, the only copy of a fix a stranded verify left.
+    _refuse_if_stranded(snapdir)
+    _refuse_if_any_stranded()
     if snapdir.exists():
         shutil.rmtree(snapdir)
     (snapdir / "prefix").mkdir(parents=True)
@@ -199,6 +202,14 @@ def _refuse_if_stranded(snapdir: Path) -> None:
         )
 
 
+def _refuse_if_any_stranded() -> None:
+    # A killed verify of any snapshot (an earlier pass's, say) left its files reverted and
+    # its fix only in its fixed/; stashing or snapshotting the tree now would take that
+    # reverted copy as the fix or as the pre-fix content.
+    for sentinel in sorted(Path(".claude/audits").rglob(IN_PROGRESS)):
+        _refuse_if_stranded(sentinel.parent)
+
+
 def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]],
                     extra: list[str]) -> list[ProofResult]:
     fixed_dir = snapdir / "fixed"
@@ -217,12 +228,18 @@ def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]]
                            encoding="utf-8")
 
     results: list[ProofResult] = []
+    in_flight: BaseException | None = None
     try:
         for rel in live:                                   # revert to pre-fix
             shutil.copy2(snapdir / "prefix" / rel, rel)
         for finding, nodeid in proofs:
             verdict, detail = _run_one(nodeid, extra)
             results.append(ProofResult(finding, nodeid, verdict, detail, snapdir.as_posix()))
+    except BaseException as exc:
+        # Kept for the message: a SystemExit raised below replaces it, and a CLI user would
+        # otherwise never see what stopped the proofs.
+        in_flight = exc
+        raise
     finally:
         bad = []
         for rel in live:                                   # ALWAYS restore
@@ -232,9 +249,10 @@ def _verify_against(snapdir: Path, manifest: dict, proofs: list[tuple[str, str]]
         if bad:
             # Stop here: a later snapshot would stash this tree as the fix, and one sharing
             # this directory would overwrite fixed/, the only copy of it.
-            raise SystemExit(f"\n*** RESTORE FAILED for {bad}; the fix is only in {fixed_dir}. "
-                             f"Recover it with:\n***   cp -r {fixed_dir}/. .\n*** then delete "
-                             f"{in_progress} and run verify again")
+            during = f" after {in_flight!r} stopped the proofs" if in_flight else ""
+            raise SystemExit(f"\n*** RESTORE FAILED for {bad}{during}; the fix is only in "
+                             f"{fixed_dir}. Recover it with:\n***   cp -r {fixed_dir}/. .\n"
+                             f"*** then delete {in_progress} and run verify again")
         in_progress.unlink()
     return results
 
@@ -261,10 +279,7 @@ def verify(proofs: list[tuple[str, str] | tuple[str, str, Path | None]],
         groups[Path(snapdir).resolve()] = (Path(snapdir), [])
     # Every snapshot is checked before any file is reverted, so a refusal never strands one.
     manifests = {key: _checked_manifest(where) for key, (where, _) in groups.items()}
-    # A killed verify of any snapshot (an earlier pass's, say) left its files reverted and
-    # its fix only in its fixed/; stashing the tree now would take that copy as the fix.
-    for sentinel in sorted(Path(".claude/audits").rglob(IN_PROGRESS)):
-        _refuse_if_stranded(sentinel.parent)
+    _refuse_if_any_stranded()
     ordered: dict[int, ProofResult] = {}
     # One snapshot at a time, each restored before the next stashes the tree: a crash then
     # leaves no other snapshot's files reverted, and a file two snapshots share is stashed
