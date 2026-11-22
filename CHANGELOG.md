@@ -18,7 +18,11 @@ directory a `git commit` in it could run in: through `cd`, `pushd`, `env -C`, `g
 `eval`, command substitution, `bash -c`, `sh -c` (read both as bash and as dash) and variables.
 A value the walk cannot model (written by arithmetic, `read`, `printf -v`, a prefix assignment, an
 unexported name in a child shell) is unknown, and a commit in an unknown directory is judged against
-every open run. Text that names `git` and `commit` but that no modelled command runs is judged
+every open run. A wildcard in a `cd`, `pushd`, `git -C`, `env -C`, `pwsh -WorkingDirectory` or
+Set-Location target, or in the program word, is expanded as the shell would expand it
+(case-sensitive in bash, not in PowerShell), reading or checking at most 4,096 directory entries
+per command; past that, when the pattern names several paths, or after the command sets `set -f`,
+a glob `shopt` or `GLOBIGNORE`, the directory is unknown. Text that names `git` and `commit` but that no modelled command runs is judged
 inside the session checkout. A 45 s watchdog refuses a command it could not judge in time while a
 run is open; the hook timeout stays 60 s. Ordinary commands are not refused, but with a run open
 `git $unknown` is, since its subcommand may be `commit`.

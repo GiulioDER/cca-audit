@@ -133,7 +133,12 @@ Where CCA-Audit is blind. Most of these limits are asserted by tests.
   - a nested `sh -c` script, also read as dash would read it, still runs `pushd` and `popd`, which
     dash does not have;
   - `local PWD` or `local OLDPWD` in a function, then `cd -`;
-  - a wildcard in a `cd` or `git -C` target is not expanded.
+  - a wildcard the walk does not expand, or expands with the wrong options. Only a `cd`,
+    `pushd`, `git -C`, `env -C`, `pwsh -WorkingDirectory` or Set-Location target and the first
+    word are expanded, so `sudo gi? commit` (beside a file `git`), `git comm?t` (beside a file
+    `commit`) and `for d in chil*; do cd "$d" && git commit; done` are not; and a glob option
+    such as `nocaseglob` set by the shell's startup files is not seen. A `set -f`, glob `shopt`
+    or `GLOBIGNORE` in the command itself makes the expansion unknown.
 
   The first three are weaker than the 0.16.0 guard, which matched text; the
   [changelog](../CHANGELOG.md) records the fix proposed for each.
