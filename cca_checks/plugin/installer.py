@@ -391,6 +391,47 @@ def _short_guard_timeouts(root: pathlib.Path) -> list[str]:
     return found
 
 
+def _shell_matcher_covers(matcher: str, tool: str) -> bool:
+    """Whether a PreToolUse matcher selects `tool` (empty and `*` select every tool)."""
+    if matcher in ("", "*"):
+        return True
+    try:
+        return re.fullmatch(matcher, tool) is not None
+    except re.error:
+        return matcher == tool
+
+
+def _guards_missing_powershell(root: pathlib.Path) -> list[str]:
+    """Settings files that wire the commit guard to no matcher covering the PowerShell tool.
+
+    Until 0.17 the snippet printed `"matcher": "Bash"`, so a commit run through the
+    PowerShell tool never reached the guard, and `_registered_guards`, which only sees that
+    the guard is named, counts such an entry as armed.
+    """
+    candidates = [
+        root / ".claude" / "settings.json",
+        root / ".claude" / "settings.local.json",
+        pathlib.Path.home() / ".claude" / "settings.json",
+    ]
+    found: list[str] = []
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        events = data.get("hooks") if isinstance(data, dict) else None
+        groups = events.get("PreToolUse") if isinstance(events, dict) else None
+        matchers = []
+        for group in groups if isinstance(groups, list) else ():
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            if any(isinstance(h, dict) and _GUARD_NAME in str(h.get("command", ""))
+                   for h in (hooks if isinstance(hooks, list) else ())):
+                matchers.append(str(group.get("matcher", "")))
+        if matchers and not any(_shell_matcher_covers(m, "PowerShell") for m in matchers):
+            found.append(f"{_GUARD_NAME} in {path} (matcher {', '.join(matchers)})")
+    return found
+
+
 def hook_snippet(target: str | pathlib.Path = ".") -> str:
     """The settings.json fragment arming the commit guard, its L1 launch check, the stop guard."""
     hooks_dir = pathlib.Path(target).resolve() / ".claude" / "hooks"
@@ -401,7 +442,9 @@ def hook_snippet(target: str | pathlib.Path = ".") -> str:
             "hooks": {
                 "PreToolUse": [
                     {
-                        "matcher": "Bash",
+                        # A commit can run through either shell tool; the guard reads each
+                        # command in its own shell's syntax.
+                        "matcher": "Bash|PowerShell",
                         "hooks": [
                             {
                                 "type": "command",
@@ -543,6 +586,11 @@ def install(target: str | pathlib.Path = ".") -> InstallResult:
             f"{entry} is below {_HOOK_TIMEOUT_S} s; the guard can now take up to 30 s and a "
             "hook that times out lets the commit through. Replace the entry with the "
             "output of `cca-audit install --print-hook`"
+        )
+    for entry in _guards_missing_powershell(root):
+        result.warnings.append(
+            f"{entry} does not cover the PowerShell tool, so a commit run through it is not "
+            "checked. Replace the entry with the output of `cca-audit install --print-hook`"
         )
 
     return result

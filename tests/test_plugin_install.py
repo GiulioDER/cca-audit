@@ -278,6 +278,40 @@ def test_hook_snippet_arms_the_l1_launch_check(tmp_path):
     assert agent[0]["hooks"][0]["timeout"] > 30
 
 
+def test_hook_snippet_routes_both_shell_tools_through_the_commit_guard(tmp_path):
+    """BUG-002. Invariant: a commit run through the PowerShell tool reaches the guard too.
+
+    Red 2026-11-20: baseline 1db5bbe (`"matcher": "Bash"`); failed at `assert shells`
+    for "PowerShell" ([] is falsy).
+    """
+    import re
+    snippet = json.loads(plugin.hook_snippet(tmp_path))["hooks"]
+    for tool in ("Bash", "PowerShell"):
+        shells = [e for e in snippet["PreToolUse"] if re.fullmatch(e.get("matcher", ""), tool)]
+        assert shells, tool
+        assert "cca_pipeline_guard.py" in shells[0]["hooks"][0]["command"]
+
+
+def test_install_warns_about_a_commit_guard_wired_to_bash_only(tmp_path, monkeypatch):
+    """DEPLOY-001. Invariant: an armed commit guard whose matchers do not cover the
+    PowerShell tool is reported; one that does is not.
+    Failure mode: a settings file written from the 0.16 snippet (`"matcher": "Bash"`)
+    counted as armed, so a commit through the PowerShell tool stayed unchecked with no
+    warning.
+    """
+    monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    snippet = json.loads(plugin.hook_snippet(tmp_path))
+    snippet["hooks"]["PreToolUse"][0]["matcher"] = "Bash"
+    settings.write_text(json.dumps(snippet), encoding="utf-8")
+    warnings = plugin.install(tmp_path).warnings
+    assert any("does not cover the PowerShell tool" in w for w in warnings), warnings
+    settings.write_text(plugin.hook_snippet(tmp_path), encoding="utf-8")
+    warnings = plugin.install(tmp_path).warnings
+    assert not any("does not cover the PowerShell tool" in w for w in warnings), warnings
+
+
 def test_hook_snippet_timeouts_exceed_the_fingerprint_bound(tmp_path):
     """Review Focus 5. A hook that times out fails open. Baseline d2317de: 15 s. Red there.
 

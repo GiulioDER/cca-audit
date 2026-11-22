@@ -122,8 +122,18 @@ Where CCA-Audit is blind. Most of these limits are asserted by tests.
   whether a value the caller controls can reach it: `.unwrap()` on a value built two lines above is
   correct code. Like `taint`, these two refute a false premise and inform adjudication, and a
   confirmation has to come from a repro that actually panics.
-- **The commit guard does not inspect command substitution or `$'...'` quoting.** A command such as
-  `git commit -am "$(<edit>)msg"` runs the edit before git and commits it unjudged. Both gaps were
-  parked after three repair cycles each, and the
-  [changelog](../CHANGELOG.md) records where a fix
-  should start.
+- **The commit guard reads bash and PowerShell closely, not exactly.** It parses the command and
+  walks it to find every directory a `git commit` in it could run in; a value it cannot know makes
+  the directory unknown, and an unknown directory is judged against every open run. These commands
+  still commit in an open run's checkout unjudged:
+  - an `export` made inside a subshell, a pipe, a background job, a condition or a function's
+    `local` scope still counts as exported, and `unset -f` is not followed;
+  - past 64 alternative states the walk merges them into one that has lost the `pushd` stack, so a
+    later `popd && git commit` is skipped;
+  - a nested `sh -c` script, also read as dash would read it, still runs `pushd` and `popd`, which
+    dash does not have;
+  - `local PWD` or `local OLDPWD` in a function, then `cd -`;
+  - a wildcard in a `cd` or `git -C` target is not expanded.
+
+  The first three are weaker than the 0.16.0 guard, which matched text; the
+  [changelog](../CHANGELOG.md) records the fix proposed for each.
