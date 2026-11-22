@@ -15,7 +15,7 @@ WHAT CHANGED FROM 0.10.x, and why each change exists:
   * order is checked by a monotonic `seq`, and every verdict from L5 onward
     carries the fingerprint it judged, so an edit after a verdict makes it stale.
   * only `done` satisfies a required layer; 0.10.x let `--status n/a` pass.
-  * L2.6 and L5.6 must be recorded by their tools.
+  * L2.6, L5.4 and L5.6 must be recorded by their tools.
 
 A run whose state lacks `"schema": 2` was started by 0.10.x and is judged by the
 0.10.x rules, verbatim (`legacy_commit_reasons`).

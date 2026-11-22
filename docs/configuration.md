@@ -119,6 +119,27 @@ output. The agents of later layers may **optionally** write a human-readable tra
 | `FIXES.md` | Consolidated fix plan |
 | `EXECUTION_LOG.md` | Run history |
 
+### Fix audit files (L5.4)
+
+The fix audit layer writes these files, and its tool reads them back, so unlike the trail above
+they are part of the run. Paths are relative to `.claude/audits/`.
+
+| File | Written by | Content |
+|------|------------|---------|
+| `runs/<run_id>/fixaudit.json` | `fixaudit check` | The deterministic report at one tree: fix hunks, sibling hits, mechanism flags, sizes, the auditors to dispatch, and the hunks changed since the last pass |
+| `runs/<run_id>/fixaudit-pass-<k>.json` | `fixaudit record` | Each auditor pass's verdict file as kept; the next pass's delta and its `RESOLVED` rows are measured from it |
+| `runs/<run_id>/fixaudit-journal.jsonl` | `fixaudit journal` | Append-only, one row per repair cycle; the 3-cycle cap is counted from it |
+| `runs/<run_id>/fixaudit-appended.json` | `fixaudit record` | The pass numbers whose verdicts already reached the side ledger, so a retry appends none twice |
+| `runs/<run_id>/L5.4-siblings.json` | `fixaudit record` | The run's copy of the sibling dispositions it recorded with |
+| `.fixaudit_snapshot/pass-<k>/` | `tautology snapshot --snapdir` | The files pass `k`'s repairs edit, as that pass audited them: the baseline of each fix audit finding's red proof (`--proof FA-<k>-<n>=<node>@<snapdir>`) |
+| `out/L5.4.json` | the auditor pass | The verified verdict file of the current pass (STANDARD and DEEP) |
+| `out/L5.4-siblings.json` | the agent | One disposition per sibling hit: `not_applicable` with a reason |
+| `FIXAUDIT_LEDGER.jsonl` | `fixaudit record` | Append-only, one row per fix audit verdict across runs; kept apart from the disposition ledger |
+
+The prefix tree and every audited tree are also pinned as git refs, `refs/cca/<run_id>/prefix`
+and `refs/cca/<run_id>/pass-<k>`, so `git gc` cannot prune them while the run is open. `pipeline
+close` and `pipeline abort` delete them.
+
 ## Recovering anchors from older runs
 
 Older ledger rows may have no finding anchors. Recover them from local archived runs and

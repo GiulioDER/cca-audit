@@ -245,3 +245,29 @@ install time.
 - On FAST the three checks block; there is no auditor pass and no cap.
 - The size threshold is set from measured past fixes, not guessed.
 - Only runs started after the change owe L5.4.
+
+## Deviations recorded during the build (2026-11-22)
+
+Appended after the build; the text above is the design as approved and is not rewritten.
+
+- **R1, automatic sibling patterns are call heads, not whole lines.** From each removed non-test
+  line, and from the context line above a block that only adds lines (where a new guard attaches),
+  each call whose first argument holds a string literal becomes the pattern `callee(first-arg`,
+  with any dotted prefix dropped, searched tolerant of spacing. Why: SEC-001's fix only added
+  lines after `exe = resolve_tool("git", ...)`, and its siblings are written differently, so a
+  whole line never matches them. Cost if wrong: more hits, each needing a reason.
+- **R3, a sibling edited by the fix is not a hit, and `fixed` is refused.** The design said a hit
+  marked `fixed` is checked by no longer matching. A correct fix of a sibling often still matches
+  its call head (`read_text(encoding="utf-8"` survives adding `errors="replace"`), so that check
+  would reject real fixes. Instead a site on any added line of the fix diff is not listed at all,
+  and a listed hit can be cleared only as `not_applicable` with a reason.
+- **Red proof baseline: a per proof `@SNAPDIR`, not `--baseline-tree`.** `tautology verify` takes
+  `--proof FA-<k>-<n>=<node>@.claude/audits/.fixaudit_snapshot/pass-<k>`, a snapshot taken with
+  `tautology snapshot --snapdir` before the first repair of pass k. It restores the same content
+  the design names (what pass k audited) through the existing snapshot mechanism.
+- **The side ledger has a marker file.** `fixaudit record` never reads `FIXAUDIT_LEDGER.jsonl`;
+  the passes already appended are listed in `runs/<run_id>/fixaudit-appended.json`, so one bad
+  line from any run cannot block this one and a retry appends no pass twice.
+- **G1, fix audit P3 and OUT_OF_SCOPE findings do not reach `pipeline deferred`'s pool.** The
+  design sends them to the deferred pool; the code does not. They survive in the kept pass files,
+  the side ledger and the commit message, and a later deferred pass does not pick them up.
