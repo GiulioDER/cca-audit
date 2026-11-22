@@ -38,7 +38,9 @@ flowchart TD
     E --> F["Step 4: Implement Fixes (P1 red→green)"]
 
     F --> G["Step 5: Re-verify (tests + lint)"]
-    G --> R["Step 5.5: Regression Diff (anti-regression)"]
+    G --> FA["Step 5.4: Fix Audit (siblings, new mechanisms, size; auditors on the fix hunks)"]
+    FA -->|"confirmed P1/P2 in fix code, or an unresolved sibling"| F
+    FA --> R["Step 5.5: Regression Diff (anti-regression)"]
     R --> H{"Step 6: Architect Gate + fix→finding map"}
 
     H -->|"APPROVED"| I["Step 7: Commit"]
@@ -47,7 +49,7 @@ flowchart TD
 ```
 
 The **FAST** tier runs only the 3 core auditors (security, bug, code), verifies P1 findings in
-Step 2.5, and skips Step 5.5. On FAST, P2 and P3 findings are recorded DEFERRED rather than fixed, and offered to the deferred pass.
+Step 2.5, runs only the deterministic checks of Step 5.4 (no auditor pass), and skips Step 5.5. On FAST, P2 and P3 findings are recorded DEFERRED rather than fixed, and offered to the deferred pass.
 
 ## Step-by-Step
 
@@ -151,6 +153,18 @@ CONFIRMED P1 follows **red→green**: write a failing test that reproduces the b
 
 Runs the detected test and lint commands — baseline plus any new P1 tests must pass; linter clean on
 changed files. If tests fail: diagnose, fix, re-run.
+
+### Step 5.4: Fix Audit
+
+The fixes are code too, and until here nothing has hunted bugs in them. `python -m cca_checks fixaudit
+check` takes the fix diff (the working tree against the tree stored when Step 3 was recorded) and
+lists, per fix: every other site of the pattern it changed (each one fixed, or justified
+`not_applicable`), every new mechanism it adds (a process launch, a lock, a timeout, a parser, a file
+write; each needs a test of its own failure), and whether it is much larger than its finding needs
+(then it says why). On STANDARD/DEEP, up to 4 auditors then read only the fix hunks, `fp-check`
+verifies what they report, and a confirmed P1/P2 goes back to Step 4. The loop is capped at 3 cycles
+per finding, counted by code; a finding at the cap has its fix reverted and goes to a human.
+`python -m cca_checks fixaudit record` records the layer only when every check holds.
 
 ### Step 5.5: Regression Diff (anti-regression) — STANDARD / DEEP
 

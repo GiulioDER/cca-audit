@@ -759,6 +759,7 @@ def test_tautology_subcommand_records_l5_6_with_no_proofs(capsys, git_repo, monk
     (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(git_repo), root=git_repo)
     ps.record("L5", root=git_repo)
+    ps.record("L5.4", source="tool", root=git_repo)
     monkeypatch.chdir(git_repo)
     assert main(["tautology", "verify", "--no-proofs", "--record"]) == 0
     state = ps.load(git_repo)

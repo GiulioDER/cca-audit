@@ -33,6 +33,20 @@ should see every parent name as unknown and every function as possibly defined, 
 exports; a merged state should mark the `pushd` stack unknown instead of empty; `pushd` and `popd`
 should fail in the dash reading.
 
+**Fix audit layer, L5.4.** A run's own fixes are now audited before it commits. Runs started by
+this version owe L5.4 after L5 on every tier; a run started earlier keeps its old requirements.
+`pipeline record L3` stores `prefix_tree`, the tree before any fix, and `python -m cca_checks
+fixaudit check` writes the deterministic report over the fix diff from it: a sibling sweep (every
+other site of a pattern a fix changed, each to be disposed), new mechanism flags (process launch,
+lock, timeout, parser, file write, and shell rows) that need a `failure_test`, and a size check
+against a threshold of 140 changed lines set from past fixes. On STANDARD and DEEP an auditor pass
+over the fix hunks is verified and kept per pass; a confirmed P1 or P2 sends the fix back to L4
+under a 3-cycle cap counted in code (`fixaudit journal`). `fixaudit record` records L5.4 only when
+every check holds. Verdicts go to their own append-only `.claude/audits/FIXAUDIT_LEDGER.jsonl`.
+The prefix tree and each audited tree are pinned under `refs/cca/<run_id>/` until the run closes
+or aborts. Design: `docs/superpowers/specs/2026-11-22-fix-audit-loop-design.md`; files:
+[configuration](docs/configuration.md#fix-audit-files-l54).
+
 ## [0.16.0] - 2026-11-12
 
 **Upgrade note: the TypeScript backend needs its own toolchain.** Nothing changes for Python or

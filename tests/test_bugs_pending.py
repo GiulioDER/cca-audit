@@ -23,6 +23,7 @@ def _finish_run_with_a_fix(repo):
     l4 = write_output(repo, [{"fix_id": "FIX-001", "finding": "BUG-001", "files": ["app.py"]}])
     ps.record("L4", fixes=1, output=l4, root=repo)
     ps.record("L5", root=repo)
+    ps.record("L5.4", source="tool", root=repo)
     ps.record("L5.5", root=repo)
     ps.record("L5.6", source="tool", root=repo)
     ps.record("L6", detail="APPROVED", root=repo)

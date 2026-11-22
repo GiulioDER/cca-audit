@@ -18,6 +18,7 @@ def _through_l5(repo):
     (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(repo), root=repo)
     ps.record("L5", root=repo)
+    ps.record("L5.4", source="tool", root=repo)
     return state
 
 

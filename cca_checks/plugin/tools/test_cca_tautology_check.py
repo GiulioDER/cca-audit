@@ -117,7 +117,7 @@ def test_a_rerun_after_an_interrupted_verify_keeps_the_fix(proj, monkeypatch):
         return real_copy(src, dst, *a, **k)
 
     monkeypatch.setattr(tc.shutil, "copy2", copy2)
-    with pytest.raises(PermissionError):
+    with pytest.raises(SystemExit, match="RESTORE FAILED"):
         tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
     broken["on"] = False
     assert (proj / "money.py").read_text(encoding="utf-8") == BUGGY  # left reverted
@@ -298,6 +298,7 @@ def test_no_proofs_record_needs_no_snapshot(git_repo, monkeypatch):
     (git_repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=out, root=git_repo)
     ps.record("L5", root=git_repo)
+    ps.record("L5.4", source="tool", root=git_repo)
     monkeypatch.chdir(git_repo)
     monkeypatch.setattr(
         "sys.argv", ["cca_tautology_check.py", "verify", "--no-proofs", "--record"])

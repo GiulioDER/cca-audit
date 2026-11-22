@@ -50,7 +50,13 @@ Review the full diff and assess:
    `.claude/audits/FIX_JOURNAL.md` (orchestrator-maintained), so your feedback does not repeat or
    contradict an edit already tried and rejected — a finding already at `attempts=3` must NOT be REVISEd
    again: return it BLOCKED (needs human), per the shared per-finding attempt budget
-2. Read the full diff of changes (`git diff` or `git diff HEAD~N`)
+2. Read the full diff of changes (`git diff` or `git diff HEAD~N`). In a run with a fix audit
+   (Layer 5.4) you are also handed each fix's L4 entry, the fix audit's sibling list and its kept
+   passes. A sibling edit (a fix's change applied to a site matching that fix's patterns, in a file
+   the fix lists) is in scope of that fix's finding: map it there, it is not a phantom fix. A repair
+   of a fix audit finding (`FA-<k>-<n>`) maps to the fix it names, and its Step 5.6 proof must be
+   RED, or REVISE. For each fix the fix audit flagged for a new mechanism, judge whether its
+   `failure_test` really exercises that mechanism's failure.
 3. For each P1/P2 fix, verify:
    - The fix addresses the root cause (not just the symptom)
    - No new issues were introduced

@@ -15,7 +15,7 @@ WHAT CHANGED FROM 0.10.x, and why each change exists:
   * order is checked by a monotonic `seq`, and every verdict from L5 onward
     carries the fingerprint it judged, so an edit after a verdict makes it stale.
   * only `done` satisfies a required layer; 0.10.x let `--status n/a` pass.
-  * L2.6 and L5.6 must be recorded by their tools.
+  * L2.6, L5.4 and L5.6 must be recorded by their tools.
 
 A run whose state lacks `"schema": 2` was started by 0.10.x and is judged by the
 0.10.x rules, verbatim (`legacy_commit_reasons`).
@@ -38,7 +38,7 @@ import time
 from datetime import datetime, timezone
 
 SCHEMA = 2
-LAYERS = ("L0.4", "L1", "L2", "L2.5", "L2.6", "L3", "L4", "L5", "L5.5", "L5.6", "L6")
+LAYERS = ("L0.4", "L1", "L2", "L2.5", "L2.6", "L3", "L4", "L5", "L5.4", "L5.5", "L5.6", "L6")
 TIERS = ("FAST", "STANDARD", "DEEP")
 MODES = ("DIFF", "HUNT", "DEFERRED")
 APPROVING_VERDICT = "APPROVED"
@@ -46,13 +46,14 @@ APPROVING_VERDICT = "APPROVED"
 #: stale `.claude/tools/` from an older install can never be the one that runs.
 TOOL_LAYERS = {
     "L2.6": "python -m cca_checks scorecard --json --record",
+    "L5.4": "python -m cca_checks fixaudit record",
     "L5.6": "python -m cca_checks tautology verify --proof ... --record",
 }
-FIX_VERDICT_LAYERS = ("L5", "L5.5", "L5.6", "L6")
+FIX_VERDICT_LAYERS = ("L5", "L5.4", "L5.5", "L5.6", "L6")
 HEADINGS = {
     "L0.4": "Step 0.4", "L1": "Step 1", "L2": "Step 2", "L2.5": "Step 2.5",
     "L2.6": "Step 2.6", "L3": "Step 3", "L4": "Step 4", "L5": "Step 5",
-    "L5.5": "Step 5.5", "L5.6": "Step 5.6", "L6": "Step 6",
+    "L5.4": "Step 5.4", "L5.5": "Step 5.5", "L5.6": "Step 5.6", "L6": "Step 6",
 }
 STOP_REFUSAL_CAP = 3
 #: Layers whose work is written to disk at record time, and what the file holds. A run
@@ -395,6 +396,8 @@ def required_layers(state: dict, owed: bool) -> tuple[str, ...]:
         req.append("L3")
         if owed:
             req += ["L4", "L5"]
+            if state.get("fix_audit"):
+                req.append("L5.4")
             if _std(state):
                 req += ["L5.5", "L5.6"]
         req.append("L6")
@@ -403,9 +406,11 @@ def required_layers(state: dict, owed: bool) -> tuple[str, ...]:
 
 def predecessors(layer: str, state: dict, owed: bool) -> tuple[str, ...]:
     std = _std(state)
+    audited = bool(state.get("fix_audit"))
     if layer == "L6":
         if owed:
-            return ("L5", "L5.5", "L5.6") if std else ("L5",)
+            tail = ("L5", "L5.4") if audited else ("L5",)
+            return tail + ("L5.5", "L5.6") if std else tail
         return ("L3",)
     table = {
         "L0.4": (),
@@ -416,8 +421,9 @@ def predecessors(layer: str, state: dict, owed: bool) -> tuple[str, ...]:
         "L3": ("L2.5", "L2.6") if std else ("L2.5",),
         "L4": ("L3",),
         "L5": ("L4",),
-        "L5.5": ("L5",),
-        "L5.6": ("L5",),
+        "L5.4": ("L5",),
+        "L5.5": ("L5.4",) if audited else ("L5",),
+        "L5.6": ("L5.4",) if audited else ("L5",),
     }
     return table[layer]
 

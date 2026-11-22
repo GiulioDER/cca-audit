@@ -38,7 +38,7 @@ Map Claude specific terms in the canonical pipeline as follows:
 | Agent or `subagent_type` call | Spawn a Codex subagent with the matching role prompt |
 | Agent return value | The subagent final response returned to the primary agent |
 | Launch in a SINGLE message, or in ONE message (parallel) | Dispatch through the six slot queue under "Respect the six subagent limit" |
-| `python -m cca_checks scorecard` and `python -m cca_checks tautology` | Run exactly as written, from the installed package; they record L2.6 and L5.6. This skill's `scripts/` copies are for reading only |
+| `python -m cca_checks scorecard`, `python -m cca_checks fixaudit` and `python -m cca_checks tautology` | Run exactly as written, from the installed package; they record L2.6, L5.4 and L5.6. This skill's `scripts/` copies are for reading only |
 | Optional `.claude/audits/` trail | Omit unless the user explicitly requests persistent audit files |
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
@@ -50,7 +50,10 @@ trail. Every `recall_records` answer and the `bugs match-fp` result are saved un
 close` read them. On STANDARD and DEEP it must
 also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_SCORECARD.jsonl`,
 carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
-Step 2.6 scorecard reads them. Neither is optional trail.
+Step 2.6 scorecard reads them. Neither is optional trail. The same holds for Step 5.4:
+`.claude/audits/out/L5.4-siblings.json` (the sibling dispositions) and, on STANDARD and DEEP,
+`.claude/audits/out/L5.4.json` (the verdict file) are read by `fixaudit record`, and the
+`fixaudit journal` rows are what the repair cap counts.
 
 Resolve the selected skill directory from this `SKILL.md` path, and use absolute paths when reading
 its references. Never run the bundled `scripts/cca_*.py` to record a layer: an older install can leave
@@ -236,9 +239,26 @@ Keep workspace writes under primary agent control. Delegate a repair only when i
 disjoint from every other active repair, give it exactly one confirmed finding, and review its diff
 before accepting it. Use the canonical red then green regression proof for every P1.
 
-Run the detected tests and linters after repairs. Then dispatch the read only differential reviewer
-and architect reviewer. Repeat the canonical revise loop when required. Respect `no-fix` as an
-absolute prohibition on edits and commits.
+Snapshot only the production files a fix changes, never a test file you add or edit: `tautology
+verify` restores a snapshotted test to its pre-fix content, or deletes it when new, so its proof
+reads INCONCLUSIVE. The same holds for the pass snapshot. Before the first edit of a sibling file
+that is not already in the Step 4 snapshot, run `python -m cca_checks tautology snapshot --snapdir
+.claude/audits/.fixaudit_snapshot/siblings <files>`, and name it in a sibling's red proof with
+`--proof <FINDING>=<nodeid>@.claude/audits/.fixaudit_snapshot/siblings`. Siblings added later go in a
+new directory (`siblings-2`, ...), since a snapshot replaces its directory.
+
+Run the detected tests and linters after repairs. Then run the canonical Step 5.4 fix audit before
+any reviewer: `python -m cca_checks fixaudit check` in the primary agent, the sibling dispositions,
+and on FAST `python -m cca_checks fixaudit record` with no `--audit`. On STANDARD and DEEP, dispatch
+the auditors the report names (at most four; `bug-auditor:DAT` is the bug auditor role given the
+canonical DAT- scope; the bug auditor when it names none) as read only subagents through the six slot queue, then one `fp-check` subagent
+in MODE=FIXAUDIT over their findings, write `.claude/audits/out/L5.4.json`, and record with
+`fixaudit record --audit .claude/audits/out/L5.4.json`. A confirmed P1 or P2 in the fix code goes
+back to repair through `fixaudit journal`, as the canonical loop says: the repair takes the pass
+snapshot, never a second Step 4 snapshot. Then dispatch the read only
+differential reviewer and architect reviewer, handing both the sibling list as the canonical Steps
+5.5 and 6 say. Repeat the canonical revise loop when required. Respect `no-fix` as an absolute
+prohibition on edits and commits.
 
 The canonical final commit is authorized only by an `audit+fix` invocation that permits fixes and
 only after the architect returns `APPROVED`. Never include unrelated preexisting changes.
