@@ -239,6 +239,14 @@ Keep workspace writes under primary agent control. Delegate a repair only when i
 disjoint from every other active repair, give it exactly one confirmed finding, and review its diff
 before accepting it. Use the canonical red then green regression proof for every P1.
 
+Snapshot only the production files a fix changes, never a test file you add or edit: `tautology
+verify` restores a snapshotted test to its pre-fix content, or deletes it when new, so its proof
+reads INCONCLUSIVE. The same holds for the pass snapshot. Before the first edit of a sibling file
+that is not already in the Step 4 snapshot, run `python -m cca_checks tautology snapshot --snapdir
+.claude/audits/.fixaudit_snapshot/siblings <files>`, and name it in a sibling's red proof with
+`--proof <FINDING>=<nodeid>@.claude/audits/.fixaudit_snapshot/siblings`. Siblings added later go in a
+new directory (`siblings-2`, ...), since a snapshot replaces its directory.
+
 Run the detected tests and linters after repairs. Then run the canonical Step 5.4 fix audit before
 any reviewer: `python -m cca_checks fixaudit check` in the primary agent, the sibling dispositions,
 and on FAST `python -m cca_checks fixaudit record` with no `--audit`. On STANDARD and DEEP, dispatch

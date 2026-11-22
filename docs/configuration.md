@@ -132,6 +132,7 @@ they are part of the run. Paths are relative to `.claude/audits/`.
 | `runs/<run_id>/fixaudit-appended.json` | `fixaudit record` | The pass numbers whose verdicts already reached the side ledger, so a retry appends none twice |
 | `runs/<run_id>/L5.4-siblings.json` | `fixaudit record` | The run's copy of the sibling dispositions it recorded with |
 | `.fixaudit_snapshot/pass-<k>/` | `tautology snapshot --snapdir` | The files pass `k`'s repairs edit, as that pass audited them: the baseline of each fix audit finding's red proof (`--proof FA-<k>-<n>=<node>@<snapdir>`) |
+| `.fixaudit_snapshot/siblings/` (then `siblings-2`, ...) | `tautology snapshot --snapdir` | The sibling files a fix edits after the Step 4 snapshot, taken before their first edit: the baseline of a sibling's red proof (`--proof <FINDING>=<node>@<snapdir>`) |
 | `out/L5.4.json` | the auditor pass | The verified verdict file of the current pass (STANDARD and DEEP) |
 | `out/L5.4-siblings.json` | the agent | One disposition per sibling hit: `not_applicable` with a reason |
 | `FIXAUDIT_LEDGER.jsonl` | `fixaudit record` | Append-only, one row per fix audit verdict across runs; kept apart from the disposition ledger |

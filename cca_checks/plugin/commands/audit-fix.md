@@ -968,15 +968,26 @@ journal (it has no L5.5/L6 mapping loop).
 
 ## Step 4: Layer 4 — Implement Fixes
 
-**Before the first edit**, snapshot the pre-fix content of every file you are about to change. The
+**Before the first edit**, snapshot the pre-fix content of every production file a fix changes. The
 red-state proof at Step 5.6 needs it, and it becomes unrecoverable the moment the fixes land. Take it
 once per run, before the first L4 edit, and never again: `snapshot` replaces its directory, so a
 second one would store already fixed content as the pre-fix state, and every proof judged against
 it would read TAUTOLOGICAL:
 
 ```bash
-python -m cca_checks tautology snapshot <every file you will edit>
+python -m cca_checks tautology snapshot <every production file a fix changes>
 ```
+
+Never snapshot a test file you add or edit: `tautology verify` restores every snapshotted file to its
+pre-fix content, or deletes it when it is new, so the proof's own test would vanish and read
+INCONCLUSIVE.
+
+A sibling file (one `fixaudit check` lists, fixed after this snapshot) that is not already in it needs
+its own snapshot before its first edit, or its red proof would be judged with the sibling already
+fixed: `python -m cca_checks tautology snapshot --snapdir .claude/audits/.fixaudit_snapshot/siblings <files>`.
+A red proof aimed at a sibling site names that directory:
+`--proof <FINDING>=<nodeid>@.claude/audits/.fixaudit_snapshot/siblings`. Siblings added later go in a
+new directory (`siblings-2`, ...), since a snapshot replaces its directory.
 
 Per fix: Read current file → apply via Edit → note which finding ID it resolves.
 
@@ -1238,7 +1249,8 @@ the run directory. That ledger and the journal below are append-only: never edit
    confirmed no P1 or P2 in that fix, a second row for the same finding and pass, and a pass at the
    tree an earlier confirmed pass of that finding already audited (a cycle needs a repair in
    between). Append the FIX_JOURNAL.md row too, with gate `L5.4`, and increment `attempts[FIX-id]`.
-2. Before the first repair edit for pass k, snapshot every file the repairs of this pass will edit:
+2. Before the first repair edit for pass k, snapshot every production file the repairs of this pass will change (never a test file, for the
+   reason Step 4 gives):
    `python -m cca_checks tautology snapshot --snapdir .claude/audits/.fixaudit_snapshot/pass-<k> <files>`.
    Take it once per pass: a second snapshot into the same directory replaces the first.
 3. Go back to § Step 4 for the repair and follow its rules, but never re-take its snapshot: the

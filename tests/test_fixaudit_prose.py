@@ -276,3 +276,46 @@ def test_fast_cue_follows_its_record_and_a_new_failure_test_reruns_step_5():
 def test_the_fix_attempt_budget_line_has_no_dash_punctuation():
     budget = _section(PIPELINE, "## Fix Attempt Budget", "- `attempts[FIX-id]`")
     assert "—" not in budget
+
+
+# Task 10 (2026-11-22). Red: each test below failed on its `assert` against 6fae059's prose, which
+# snapshotted "every file you will edit" and said nothing of siblings (targets: audit-fix.md Step 4
+# and Step 5.4 loop step 2, the Codex SKILL.md "Apply fixes safely").
+
+SIBLINGS_DIR = ".claude/audits/.fixaudit_snapshot/siblings"
+
+
+def test_step_4_snapshot_is_production_files_only_and_says_why():
+    """Failure caught: a snapshotted new test is deleted by `tautology verify`, INCONCLUSIVE."""
+    step4 = _flat(_section(PIPELINE, "## Step 4:", "## Step 5: "))
+    assert "every production file a fix changes" in step4
+    assert "Never snapshot a test file you add or edit" in step4
+    assert "or deletes it when it is new" in step4
+    assert "every file you will edit" not in step4
+
+
+def test_pass_snapshot_is_production_files_only():
+    loop = _flat(_step_54())
+    assert "every production file the repairs of this pass will change" in loop
+    assert "never a test file" in loop
+
+
+@pytest.mark.parametrize("text", [PIPELINE, CODEX], ids=["audit-fix.md", "SKILL.md"])
+def test_siblings_get_their_own_snapshot_before_their_first_edit(text):
+    """Failure caught: a sibling edited after the Step 4 snapshot is judged already fixed."""
+    flat = _flat(text)
+    assert f"tautology snapshot --snapdir {SIBLINGS_DIR} <files>" in flat
+    assert f"--proof <FINDING>=<nodeid>@{SIBLINGS_DIR}" in flat
+    assert "siblings-2" in flat
+    assert "since a snapshot replaces its directory" in flat
+
+
+@pytest.mark.parametrize("text", [PIPELINE, CODEX], ids=["audit-fix.md", "SKILL.md"])
+def test_both_clients_keep_test_files_out_of_snapshots(text):
+    flat = _flat(text)
+    assert "never a test file" in flat.lower() or "never snapshot a test file" in flat.lower()
+
+
+def test_configuration_lists_the_siblings_snapshot_dir():
+    cfg = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
+    assert ".fixaudit_snapshot/siblings/" in cfg
