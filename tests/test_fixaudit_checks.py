@@ -141,6 +141,7 @@ def test_a_fix_over_the_threshold_needs_a_size_reason():
     assert reasoned["over"] and reasoned["has_reason"]
 
 
+
 def _fix_hunks_of(repo, edit):
     """Hunks of the change `edit()` makes to the working tree, from a fingerprint taken before."""
     _git(repo, "add", "-A")
@@ -152,52 +153,168 @@ def _fix_hunks_of(repo, edit):
     return hunks
 
 
-def _spaced(line):
-    """One line followed by padding, so no sibling falls in the fix's own hunk context."""
-    return line + "\n" + "\n".join(f"# pad {i}" for i in range(8)) + "\n"
-
-
 def _fix(**extra):
     return {"fix_id": "F1", "files": ["a.py"], "sibling_patterns": [], "sibling_reason": "auto only",
             **extra}
 
 
+# Real lines of cca_checks/bugs at 191d9c5 (store.py, resolve.py), with their own surroundings.
+_STORE = '''    if not ledger.exists():
+        return set()
+    ids: set[str] = set()
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            value = json.loads(line)
+            ids.add(value["bug_id"] if "bug_id" in value else value["id"])
+        except (ValueError, KeyError):
+            continue
+    return ids
+
+
+def rows(ledger):
+    annotations = caused_by_annotations(ledger.parent)
+    recovered = anchor_log.read(ledger.parent)
+    rows = []
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            value = json.loads(line)
+'''
+_RESOLVE = '''    def __init__(self, ledger: Path):
+        self.taken: dict[tuple, set[int]] = defaultdict(set)
+        self.own: dict[tuple, list[int]] = defaultdict(list)
+        if ledger.exists():
+            for line in ledger.read_text(encoding="utf-8").splitlines():
+                try:  # as tolerant as store.existing_ids
+                    row = json.loads(line)
+
+
+    def __init__(self, ledger: Path):
+        self.ids: dict[tuple[str, str], set[str]] = defaultdict(set)
+        if ledger.exists():
+            for line in ledger.read_text(encoding="utf-8").splitlines():
+                try:
+                    row = json.loads(line)
+'''
+
+
 def test_bug001_shape_lists_the_other_readers(git_repo):
-    """Invariant: a fix that changes one of N identical lines lists the other N-1 as siblings.
+    """Invariant: a fix that adds errors="replace" to one of four ledger readers lists the other
+    three, found through the call head `read_text(encoding="utf-8"` of its removed line.
 
     Node: tests/test_fixaudit_checks.py::test_bug001_shape_lists_the_other_readers.
-    Red 2026-11-22: skeleton baseline (NotImplementedError at sibling_hits). Mutation: disabling
-    the own-hunk exclusion in sibling_hits listed a.py in the declared-pattern assert
-    (`['a.py', 'b.py', 'c.py', 'd.py'] == ['b.py', 'c.py', 'd.py']`).
+    Red 2026-11-22: mutating `_call_heads` so that `heads.append(...)` is never reached failed
+    `assert sorted(...) == [('resolve.py', 5), ...]` with `[] == [...]`.
     """
-    line = '    return p.read_text(encoding="utf-8")'
-    for name in "abcd":
-        _write(git_repo, f"{name}.py", _spaced(line))
-    fixed = line.replace('"utf-8")', '"utf-8", errors="replace")')
-    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", _spaced(fixed)))
-    hits = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
-    assert sorted(h["path"] for h in hits) == ["b.py", "c.py", "d.py"]
-    assert {h["fix_id"] for h in hits} == {"F1"}
-    assert [h["hit_id"] for h in hits] == ["S-1", "S-2", "S-3"]
-    assert all(h["text"] == line.strip() and h["pattern"] == line.strip() for h in hits)
-    # the fixed line still contains this declared pattern; being inside the fix's own hunk, it is no sibling
-    declared = fixaudit.sibling_hits(git_repo, hunks, [_fix(sibling_patterns=['read_text(encoding="utf-8"'])])
-    assert sorted(h["path"] for h in declared) == ["b.py", "c.py", "d.py"]
+    _write(git_repo, "store.py", _STORE)
+    _write(git_repo, "resolve.py", _RESOLVE)
+    fixed = _STORE.replace('"utf-8").splitlines():\n        try:\n            value = json.loads(line)\n            ids',
+                           '"utf-8", errors="replace").splitlines():\n        try:\n            value = json.loads(line)\n            ids')
+    assert fixed != _STORE
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "store.py", fixed))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix(files=["store.py"])])
+    assert sorted((h["path"], h["line"]) for h in sweep.hits) == [
+        ("resolve.py", 5), ("resolve.py", 13), ("store.py", 17)]
+    assert {h["pattern"] for h in sweep.hits} == {'read_text(encoding="utf-8"'}
+    assert sweep.too_broad == []
 
 
-def test_sec001_shape_lists_the_other_bare_git_launches(git_repo):
-    """Invariant: the other copies of a changed process launch line are listed.
+_GITREAD = '''def git(clone: Path, *args: str) -> str:
+    # Resolved, never bare: Windows looks for a bare `git` in the working directory first.
+    exe = resolve_tool("git", os.getcwd())
+    proc = subprocess.run(
+        [exe, "-C", str(clone), *args], capture_output=True,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        raise GitError(f"git {' '.join(args)} failed in {clone}: {proc.stderr.strip()}")
+    return proc.stdout
+'''
+_GUARD = '''    if exe is not None and _is_inside(os.path.normcase(os.path.realpath(exe)),
+                                      os.path.normcase(os.path.realpath(clone))):
+        exe = None
+    if exe is None:
+        raise GitError("no trusted git executable on PATH")
+'''
+_HOLDOUT = '''def project_root() -> Path:
+    """The Git top level of the working directory, else the working directory itself."""
+    exe = resolve_tool("git", os.getcwd())  # never a bare `git` found in the audited cwd
+    if exe is None:
+        return Path(".")
+'''
+_GITHUB = '''def gh(args: list[str]) -> str:
+    exe = resolve_tool("gh", os.getcwd())  # never a bare `gh` found in the working directory
+    if exe is None:
+'''
 
-    Node: tests/test_fixaudit_checks.py::test_sec001_shape_lists_the_other_bare_git_launches.
-    Red 2026-11-22: skeleton baseline (NotImplementedError at sibling_hits).
+
+def test_sec001_shape_a_guard_added_after_a_call_lists_the_other_callers(git_repo):
+    """Invariant: a fix that only ADDS lines (a guard after `exe = resolve_tool("git", ...)`) is
+    swept through the call head of the context line it attaches to, and neither that anchor line
+    nor the added lines are hits. `resolve_tool("gh"` is a different head: a declared pattern.
+
+    Node: tests/test_fixaudit_checks.py::test_sec001_shape_a_guard_added_after_a_call_lists_the_other_callers.
+    Red 2026-11-22: mutating `auto_patterns` to skip `h.anchors` failed
+    `assert [h["path"] ...] == ["holdout.py"]` with `[] == ['holdout.py']`.
     """
-    line = '    out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True)'
-    for name in ("one", "two", "three"):
-        _write(git_repo, f"{name}.py", _spaced(line))
-    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "one.py",
-                                                   _spaced(line.replace('"git"', "GIT"))))
-    hits = fixaudit.sibling_hits(git_repo, hunks, [_fix(files=["one.py"])])
-    assert sorted(h["path"] for h in hits) == ["three.py", "two.py"]
+    _write(git_repo, "gitread.py", _GITREAD)
+    _write(git_repo, "holdout.py", _HOLDOUT)
+    _write(git_repo, "github.py", _GITHUB)
+    guarded = _GITREAD.replace('os.getcwd())\n', "os.getcwd())\n" + _GUARD, 1)
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "gitread.py", guarded))
+    assert [h.removed for h in hunks] == [()]
+    assert [t for _, t in hunks[0].anchors] == ['    exe = resolve_tool("git", os.getcwd())']
+    fix = _fix(files=["gitread.py"])
+    assert [h["path"] for h in fixaudit.sibling_hits(git_repo, hunks, [fix]).hits] == ["holdout.py"]
+    both = _fix(files=["gitread.py"], sibling_patterns=['resolve_tool("gh"'])
+    assert sorted(h["path"] for h in fixaudit.sibling_hits(git_repo, hunks, [both]).hits) == [
+        "github.py", "holdout.py"]
+
+
+def test_a_sibling_on_the_line_right_after_the_fix_is_listed(git_repo):
+    """Invariant: only ADDED lines are the fix's own; an unedited line in the fix's hunk context
+    (here directly below the added guard) is still a sibling.
+
+    Node: tests/test_fixaudit_checks.py::test_a_sibling_on_the_line_right_after_the_fix_is_listed.
+    Red 2026-11-22: mutating the `edited` set in `sibling_hits` to the whole new-side hunk range
+    (`range(h.new_start, h.new_start + h.new_len)`) failed `assert [...] == [("a.py", 4)]` with
+    `[] == [('a.py', 4)]`.
+    """
+    _write(git_repo, "a.py", 'exe = resolve_tool("git", cwd)\nother = resolve_tool("git", cwd)\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(
+        git_repo, "a.py",
+        'exe = resolve_tool("git", cwd)\nif exe is None:\n    raise GitError("x")\n'
+        'other = resolve_tool("git", cwd)\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert [(h["path"], h["line"]) for h in sweep.hits] == [("a.py", 4)]
+
+
+def test_a_pattern_matches_across_internal_spacing(git_repo):
+    """Invariant: patterns are whitespace tolerant: a declared fixed string with single spaces
+    finds a copy with doubled spaces, and a removed line's head finds a reformatted call.
+
+    Node: tests/test_fixaudit_checks.py::test_a_pattern_matches_across_internal_spacing.
+    Red 2026-11-22: mutating `_grep` to search `re.escape(pattern)` (no `_tolerant`) failed `assert [...] == [("b.py", 1), ("b.py", 2)]` with `[] == [...]`.
+    """
+    _write(git_repo, "a.py", 'x = f("a")  # why\n')
+    _write(git_repo, "b.py", 'y = f(  "a" , 2)\nz =  f( "a")\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = f("a", safe=1)  # why\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert [(h["path"], h["line"]) for h in sweep.hits] == [("b.py", 1), ("b.py", 2)]
+    declared = fixaudit.sibling_hits(git_repo, hunks, [_fix(sibling_patterns=['f( "a" , 2'])])
+    assert sorted(h["line"] for h in declared.hits) == [1, 2]
+
+
+def test_a_tracked_binary_file_holding_the_pattern_is_skipped(git_repo):
+    """Invariant: a tracked binary file that contains the pattern is never a hit nor a crash.
+
+    Node: tests/test_fixaudit_checks.py::test_a_tracked_binary_file_holding_the_pattern_is_skipped.
+    Red 2026-11-22: removing `-I` from the `git grep` arguments in `_grep` failed with
+    ValueError (not enough values to unpack) from the "Binary file blob.bin matches" row.
+    """
+    _write(git_repo, "a.py", 'x = f("a")\n')
+    _write(git_repo, "blob.bin", b'\x00\x01 f("a") \x02\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = f("a", 1)\n'))
+    assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits == []
 
 
 def test_num001_shape_needs_a_declared_pattern(git_repo):
@@ -205,28 +322,29 @@ def test_num001_shape_needs_a_declared_pattern(git_repo):
     a `re:` prefix makes a declared pattern a regex, and the default is a fixed string.
 
     Node: tests/test_fixaudit_checks.py::test_num001_shape_needs_a_declared_pattern.
-    Red 2026-11-22: skeleton baseline (NotImplementedError at sibling_hits).
+    Red 2026-11-22: mutating `_grep` to ignore the `re:` prefix (`if False else`) failed
+    `assert [] == ['other.py']` at the `regex` assert.
     """
     old = '    return load(root / "runs" / run_id / "summary.json")'
     _write(git_repo, "a.py", old + "\n")
-    _write(git_repo, "other.py", _spaced('    return json_load(root / "runs" / run_id / "summary.json")'))
+    _write(git_repo, "other.py", '    path = root / "runs" / run_id / "summary.json"\n')
     hunks = _fix_hunks_of(git_repo, lambda: _write(
         git_repo, "a.py", old.replace("summary", "run") + "\n"))
-    assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]) == []
+    assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits == []
     declared = _fix(sibling_patterns=['"runs" / run_id / "summary.json"'])
-    assert [h["path"] for h in fixaudit.sibling_hits(git_repo, hunks, [declared])] == ["other.py"]
+    assert [h["path"] for h in fixaudit.sibling_hits(git_repo, hunks, [declared]).hits] == ["other.py"]
     regex = _fix(sibling_patterns=[r're:"runs" / \w+ / "summary\.json"'])
-    assert [h["path"] for h in fixaudit.sibling_hits(git_repo, hunks, [regex])] == ["other.py"]
+    assert [h["path"] for h in fixaudit.sibling_hits(git_repo, hunks, [regex]).hits] == ["other.py"]
     literal = _fix(sibling_patterns=[r'"runs" / \w+ / "summary\.json"'])
-    assert fixaudit.sibling_hits(git_repo, hunks, [literal]) == []
+    assert fixaudit.sibling_hits(git_repo, hunks, [literal]).hits == []
 
 
 def test_a_fix_without_sibling_patterns_or_reason_is_refused():
     """Invariant: a fix declares sibling_patterns, empty only with a non-empty sibling_reason.
 
     Node: tests/test_fixaudit_checks.py::test_a_fix_without_sibling_patterns_or_reason_is_refused.
-    Red 2026-11-22: skeleton raised NotImplementedError, not FixAuditRefused, so pytest.raises
-    failed.
+    Red 2026-11-22: deleting the validation loop at the top of `sibling_hits` failed with
+    KeyError ('sibling_patterns') for the first fix, not FixAuditRefused.
     """
     from pathlib import Path
     for fix in ({"fix_id": "F1", "files": ["a.py"]},
@@ -236,56 +354,95 @@ def test_a_fix_without_sibling_patterns_or_reason_is_refused():
             fixaudit.sibling_hits(Path("."), [], [fix])
 
 
-def test_fixed_is_rejected_while_the_hit_still_matches(git_repo):
-    """Invariant: "fixed" holds only if the hit's text is gone from its path; "not_applicable"
-    needs a reason; every hit needs a disposition.
+def test_an_unedited_hit_cannot_be_marked_fixed_and_ids_are_stable(git_repo):
+    """Invariant: a listed hit is an unedited site, so only `not_applicable` with a reason clears
+    it; its id is the same on a re-run and changes when its text does.
 
-    Node: tests/test_fixaudit_checks.py::test_fixed_is_rejected_while_the_hit_still_matches.
-    Red 2026-11-22: skeleton baseline (NotImplementedError at check_dispositions).
+    Node: tests/test_fixaudit_checks.py::test_an_unedited_hit_cannot_be_marked_fixed_and_ids_are_stable.
+    Red 2026-11-22: mutating `check_dispositions` to skip the `kind == "fixed"` branch failed
+    `assert [...'must be not_applicable, not fixed'] == [...'marked fixed, but b.py:1 is
+    unedited; ...']` (the generic message came back).
     """
-    _write(git_repo, "b.py", "x = f(1)\n")
-    hit = {"hit_id": "S-1", "fix_id": "F1", "pattern": "f(1)", "path": "b.py", "line": 1,
-           "text": "x = f(1)"}
+    _write(git_repo, "a.py", 'x = f("a")\n')
+    _write(git_repo, "b.py", 'y = f("a")\n')
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", 'x = f("a", 1)\n'))
+    (hit,) = fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits
+    again = fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits[0]
+    assert again["hit_id"] == hit["hit_id"] and hit["hit_id"].startswith("S-")
+    assert len(hit["hit_id"]) == 2 + 10
+    hid = hit["hit_id"]
     check = fixaudit.check_dispositions
-    assert check([hit], {"S-1": {"disposition": "fixed"}}, git_repo) == [
-        "S-1: marked fixed, but 'x = f(1)' still occurs in b.py"]
-    _write(git_repo, "b.py", "x = f(1, safe=True)\n")
-    assert check([hit], {"S-1": {"disposition": "fixed"}}, git_repo) == []
-    assert check([hit], {"S-1": {"disposition": "not_applicable", "reason": "a test double"}},
+    assert check([hit], {hid: {"disposition": "fixed"}}, git_repo) == [
+        f"{hid}: marked fixed, but b.py:1 is unedited; edit it, or mark it not_applicable with a reason"]
+    assert check([hit], {hid: {"disposition": "not_applicable", "reason": "a test double"}},
                  git_repo) == []
-    assert check([hit], {"S-1": {"disposition": "not_applicable", "reason": " "}}, git_repo) == [
-        "S-1: not_applicable needs a reason"]
-    assert check([hit], {}, git_repo) == ["S-1: no disposition"]
-    assert check([hit], {"S-1": {"disposition": "later"}}, git_repo) == [
-        "S-1: disposition must be 'fixed' or 'not_applicable', not 'later'"]
+    assert check([hit], {hid: {"disposition": "not_applicable", "reason": " "}}, git_repo) == [
+        f"{hid}: not_applicable needs a reason"]
+    assert check([hit], {}, git_repo) == [f"{hid}: no disposition"]
+    assert check([hit], {hid: {"disposition": "later"}}, git_repo) == [
+        f"{hid}: disposition must be 'not_applicable', not 'later'"]
+    _write(git_repo, "b.py", 'y = f("a")  \nz = 1\n')  # trailing spaces only: same stripped text
+    assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits[0]["hit_id"] == hid
+    _write(git_repo, "b.py", 'y2 = f("a")\n')
+    assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits[0]["hit_id"] != hid
 
 
-def test_a_pattern_over_50_hits_is_refused(git_repo):
-    """Invariant: a pattern matching more than MAX_HITS_PER_PATTERN sites is refused, never cut.
+def test_a_declared_pattern_over_50_hits_is_refused_an_auto_one_is_dropped(git_repo):
+    """Invariant: a declared pattern over MAX_HITS_PER_PATTERN is refused naming it; an auto
+    pattern over it is dropped into `too_broad` with its count; exactly the limit is accepted.
 
-    Node: tests/test_fixaudit_checks.py::test_a_pattern_over_50_hits_is_refused.
-    Red 2026-11-22: skeleton raised NotImplementedError, not FixAuditRefused.
+    Node: tests/test_fixaudit_checks.py::test_a_declared_pattern_over_50_hits_is_refused_an_auto_one_is_dropped.
+    Red 2026-11-22: (a) mutating the declared branch to `continue` instead of raising failed
+    `pytest.raises(FixAuditRefused)` (DID NOT RAISE); (b) mutating the auto branch (`if pattern in auto:` to `if False:`) failed the first
+    `sibling_hits` call with `FixAuditRefused: F1: pattern 'call("x"' matches 51 sites`.
     """
-    line = "    call(1)"
+    line = '    call("x")'
     many = fixaudit.MAX_HITS_PER_PATTERN + 1
     _write(git_repo, "many.py", "\n".join(line for _ in range(many)) + "\n")
-    _write(git_repo, "a.py", _spaced(line))
-    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", _spaced("    call(2)")))
-    with pytest.raises(FixAuditRefused, match=r"call\(1\).*narrower"):
-        fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    _write(git_repo, "a.py", line + "\n")
+    hunks = _fix_hunks_of(git_repo, lambda: _write(git_repo, "a.py", '    call("x", 2)\n'))
+    sweep = fixaudit.sibling_hits(git_repo, hunks, [_fix()])
+    assert sweep.hits == [] and sweep.too_broad == [
+        {"fix_id": "F1", "pattern": 'call("x"', "count": many}]
+    broad = _fix(sibling_patterns=['call("x")'])
+    with pytest.raises(FixAuditRefused, match=r"call\(\"x\"\).*narrower"):
+        fixaudit.sibling_hits(git_repo, hunks, [broad])
     _write(git_repo, "many.py", "\n".join(line for _ in range(many - 1)) + "\n")
     _git(git_repo, "add", "-A")
-    assert len(fixaudit.sibling_hits(git_repo, hunks, [_fix()])) == many - 1
+    ok = fixaudit.sibling_hits(git_repo, hunks, [broad])
+    assert len(ok.hits) == many - 1 and ok.too_broad == []
 
 
-def test_trivial_lines_never_become_patterns():
-    """Invariant: only removed non-test lines with a call or a string literal become patterns,
-    whitespace collapsed.
+def test_call_heads_become_patterns_and_trivial_lines_do_not():
+    """Invariant: a pattern is a call head `callee(first-arg` whose first argument holds a string
+    literal, taken from removed non-test lines and from the context line above an added-only
+    block; `return None`, `)`, calls without a literal and test files give none.
 
-    Node: tests/test_fixaudit_checks.py::test_trivial_lines_never_become_patterns.
-    Red 2026-11-22: skeleton baseline (NotImplementedError at auto_patterns).
+    Node: tests/test_fixaudit_checks.py::test_call_heads_become_patterns_and_trivial_lines_do_not.
+    Red 2026-11-22: mutating `auto_patterns` to skip `h.anchors` failed the final assert,
+    `assert [] == ['h("k"']`.
     """
-    hunks = [Hunk("a.py", 1, 5, 1, 0, ("    return None", "  )", "", "x   =  f( 1 )", "y = 'a'"), ()),
-             Hunk("tests/test_a.py", 1, 1, 1, 0, ("assert f(1)",), ())]
-    assert fixaudit.auto_patterns(hunks) == ["x = f( 1 )", "y = 'a'"]
-    assert fixaudit.auto_patterns(hunks[:1] * 2) == ["x = f( 1 )", "y = 'a'"]  # no duplicates
+    removed = ("    return None", "  )", "", "x = f(1)", 'for l in p.read_text(encoding="utf-8").splitlines():',
+               'exe = resolve_tool("git", os.getcwd())', "y = 'a'")
+    hunks = [Hunk("a.py", 1, 7, 1, 0, removed, ()),
+             Hunk("tests/test_a.py", 1, 1, 1, 0, ('assert g("z")',), ())]
+    assert fixaudit.auto_patterns(hunks) == ['read_text(encoding="utf-8"', 'resolve_tool("git"']
+    assert fixaudit.auto_patterns(hunks[:1] * 2) == fixaudit.auto_patterns(hunks[:1])
+    anchored = Hunk("b.py", 1, 2, 1, 3, (), ("x",), added_at=(2,), anchors=((1, '    h("k", 1)'),))
+    assert fixaudit.auto_patterns([anchored]) == ['h("k"']
+
+
+def test_parse_records_added_lines_and_anchors():
+    """Invariant: `added_at` holds the new-side numbers of added lines, and an `anchors` entry is
+    the context line above a block that adds lines and removes none (not above a replacement).
+
+    Node: tests/test_fixaudit_checks.py::test_parse_records_added_lines_and_anchors.
+    Red 2026-11-22: mutating `end_run` to ignore `run_removed` failed
+    `assert ((1, 'one'), (4, 'four')) == ((1, 'one'),)` (a replacement block's context line was
+    also recorded).
+    """
+    diff = ("--- a/m.py\n+++ b/m.py\n@@ -1,5 +1,7 @@\n one\n+two\n+three\n four\n-five\n+FIVE\n six\n"
+            " seven\n")
+    (h,) = fixaudit.parse_fix_diff(diff)[0]
+    assert h.added_at == (2, 3, 5)
+    assert h.anchors == ((1, "one"),)

@@ -1,6 +1,7 @@
 """The fix audit: the code a run's fixes changed, and checks over it."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,10 @@ class Hunk:
     removed: tuple[str, ...]
     added: tuple[str, ...]
     old_path: str | None = None  # before a rename, so a fix may list either name
+    added_at: tuple[int, ...] = ()  # new-side line numbers of the added lines
+    # (new-side line number, text) of the context line above a block that only adds lines: where
+    # a new guard attaches, so the sibling sweep can search for what that line calls
+    anchors: tuple[tuple[int, str], ...] = ()
 
     @property
     def id(self) -> str:
@@ -51,22 +56,44 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
     head: tuple[int, int, int, int] | None = None
     removed: list[str] = []
     added: list[str] = []
+    added_at: list[int] = []
+    anchors: list[tuple[int, str]] = []
     old_left = new_left = 0
+    new_no = 0
+    ctx: tuple[int, str] | None = None  # the last context line
+    run_anchor: tuple[int, str] | None = None  # the context line above the current +/- run
+    run_added = run_removed = 0
+
+    def end_run() -> None:
+        if run_anchor is not None and run_added and not run_removed:
+            anchors.append(run_anchor)
 
     def close() -> None:
+        end_run()
         if head is not None and path is not None:
-            hunks.append(Hunk(path, *head, tuple(removed), tuple(added), old_path))
+            hunks.append(Hunk(path, *head, tuple(removed), tuple(added), old_path,
+                              tuple(added_at), tuple(anchors)))
 
     for line in diff.split("\n"):
         if old_left > 0 or new_left > 0:
             tag = line[:1]
+            if tag in ("-", "+") and not (run_added or run_removed):
+                run_anchor = ctx
             if tag == "-":
                 removed.append(line[1:])
                 old_left -= 1
+                run_removed += 1
             elif tag == "+":
                 added.append(line[1:])
+                added_at.append(new_no)
+                new_no += 1
                 new_left -= 1
+                run_added += 1
             elif tag in (" ", ""):
+                end_run()
+                run_added = run_removed = 0
+                ctx = (new_no, line[1:])
+                new_no += 1
                 old_left -= 1
                 new_left -= 1
             continue  # "\ No newline at end of file" belongs to the line before it
@@ -82,7 +109,8 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
             head = (int(old_start), 1 if old_len is None else int(old_len),
                     int(new_start), 1 if new_len is None else int(new_len))
             old_left, new_left = head[1], head[3]
-            removed, added = [], []
+            removed, added, added_at, anchors = [], [], [], []
+            new_no, ctx, run_anchor, run_added, run_removed = head[2], None, None, 0, 0
         elif m := _BINARY.match(line):
             close()
             head = None
@@ -135,30 +163,77 @@ def size_report(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
 
 MAX_HITS_PER_PATTERN = 50
 _REGEX_PREFIX = "re:"
+_NOT_CALLS = {"if", "elif", "while", "for", "in", "and", "or", "not", "return"}
+_TOKEN = re.compile(r'"[^"\\\n]*"|\'[^\'\\\n]*\'|\w+|[^\w\s]')
+
+
+def _call_heads(line: str) -> list[str]:
+    """Each call on `line` whose first argument holds a string literal, as `callee(first-arg`.
+
+    `exe = resolve_tool("git", os.getcwd())` gives `resolve_tool("git"`. A dotted prefix is
+    dropped (`ledger.read_text(...)` gives `read_text(...`), so a sibling on another object
+    still matches. The head, not the whole line, is the pattern: a sibling rarely repeats the
+    rest of the line.
+    """
+    heads = []
+    for m in re.finditer(r"([\w.]*)\(", line):
+        callee = m.group(1).rsplit(".", 1)[-1]
+        if not callee or callee in _NOT_CALLS:
+            continue
+        depth, quote, end = 0, "", len(line)
+        for k in range(m.end(), len(line)):
+            c = line[k]
+            if quote:
+                quote = "" if c == quote else quote
+            elif c in "\"'":
+                quote = c
+            elif depth == 0 and (c in ")]}" or c == ","):
+                end = k
+                break
+            elif c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+        arg = " ".join(line[m.end():end].split())
+        if '"' in arg or "'" in arg:
+            heads.append(f"{callee}({arg}")
+    return heads
 
 
 def auto_patterns(hunks: list[Hunk]) -> list[str]:
-    """Removed non-test lines, whitespace collapsed, that hold a call or a string literal.
-
-    A bare `return None` or `)` would match everywhere, so a line must carry a `(` or a quote.
-    """
+    """The call heads of the removed lines of non-test hunks, and of the context line above a
+    block that only adds lines (where a new guard attaches). Deduplicated, in order."""
     out: list[str] = []
     for h in hunks:
         if is_test_path(h.path):
             continue
-        for line in h.removed:
-            text = " ".join(line.split())
-            if ("(" in text or '"' in text or "'" in text) and text not in out:
-                out.append(text)
+        for line in (*h.removed, *(text for _, text in h.anchors)):
+            for head in _call_heads(line):
+                if head not in out:
+                    out.append(head)
     return out
 
 
+def _tolerant(text: str) -> str:
+    """An extended regex matching `text` literally, with any run of spaces where it has tokens
+    apart (so a reformatted or double spaced copy still matches)."""
+    parts: list[str] = []
+    tokens = _TOKEN.findall(text)
+    for prev, tok in zip([None, *tokens], tokens):
+        if prev is not None:
+            word = prev[-1].isalnum() or prev[-1] == "_"
+            parts.append("[[:space:]]+" if word and (tok[0].isalnum() or tok[0] == "_")
+                         else "[[:space:]]*")
+        parts.append(re.sub(r"([\\.^$*+?()\[\]{}|])", r"\\\1", tok))
+    return "".join(parts)
+
+
 def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str]]:
-    """(path, line, text) of every tracked-file line matching `pattern`: a fixed string, or an
-    extended regex when it starts with `re:`."""
-    mode, body = ("-E", pattern[len(_REGEX_PREFIX):]) if pattern.startswith(_REGEX_PREFIX) else ("-F", pattern)
+    """(path, line, text) of every tracked text file line matching `pattern`: a fixed string
+    (whitespace tolerant), or an extended regex when it starts with `re:`."""
+    body = pattern[len(_REGEX_PREFIX):] if pattern.startswith(_REGEX_PREFIX) else _tolerant(pattern)
     try:
-        out = git(repo_root, "grep", "-n", mode, "-e", body)
+        out = git(repo_root, "grep", "-n", "-I", "-z", "-E", "-e", body)
     except GitError as e:
         # git grep exits 1 with no stderr when nothing matches; a bad regex has a message.
         if str(e).rstrip().endswith(f"failed in {repo_root}:"):
@@ -166,48 +241,72 @@ def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str]]:
         raise FixAuditRefused(f"sibling pattern {pattern!r} could not be searched: {e}") from e
     hits = []
     for row in out.splitlines():
-        path, line, text = row.split(":", 2)
+        path, line, text = row.split("\0", 2)
         hits.append((path, int(line), text.strip()))
     return hits
 
 
-def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
+@dataclass(frozen=True)
+class SiblingSweep:
+    hits: list[dict]
+    # auto patterns that matched more than MAX_HITS_PER_PATTERN sites and were dropped:
+    # [{"fix_id", "pattern", "count"}]. Too common to say anything about one fix.
+    too_broad: list[dict]
+
+
+def _hit_id(fix_id: str, pattern: str, path: str, text: str) -> str:
+    """Stable across runs of the sweep, so a disposition written once keeps its hit."""
+    key = "\0".join((fix_id, pattern, path, text))
+    return "S-" + hashlib.sha1(key.encode("utf-8")).hexdigest()[:10]
+
+
+def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> SiblingSweep:
     """Every other place a fix's patterns occur, so each can be fixed or justified.
 
-    A fix's patterns are its removed lines (auto_patterns) plus its declared `sibling_patterns`,
-    fixed strings unless prefixed `re:`. Empty `sibling_patterns` needs a `sibling_reason`.
-    A hit inside one of the fix's own hunks (new side) is the fix itself, not a sibling.
+    A fix's patterns are the call heads of its changes (auto_patterns) plus its declared
+    `sibling_patterns`: fixed strings, or a regex when prefixed `re:`. Empty `sibling_patterns`
+    needs a `sibling_reason`. A site on a line the fixes added is not a hit (it was edited), nor
+    is the anchor line a guard was attached to. A declared pattern over MAX_HITS_PER_PATTERN
+    hits is refused; an auto pattern over it is dropped into `too_broad`.
     """
     for fix in fixes:
         declared = fix.get("sibling_patterns")
         if declared is None or (not declared and not str(fix.get("sibling_reason") or "").strip()):
             raise FixAuditRefused(
                 f"{fix['fix_id']}: give sibling_patterns, or a sibling_reason when there are none")
+    edited = {(h.path, n) for h in hunks for n in h.added_at}
     renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
     out: list[dict] = []
+    too_broad: list[dict] = []
     for fix in fixes:
         files = {renamed.get(f, f) for f in fix["files"]}
         own = [h for h in hunks if h.path in files]
+        skip = edited | {(h.path, n) for h in own for n, _ in h.anchors}
+        auto = auto_patterns(own)
         seen: set[tuple[str, int]] = set()
-        for pattern in auto_patterns(own) + list(fix["sibling_patterns"]):
-            found = [(path, line, text) for path, line, text in _grep(repo_root, pattern)
-                     if not any(h.path == path and h.new_start <= line < h.new_start + h.new_len
-                                for h in own)]
+        for pattern in auto + [d for d in fix["sibling_patterns"] if d not in auto]:
+            found = [x for x in _grep(repo_root, pattern) if x[:2] not in skip]
             if len(found) > MAX_HITS_PER_PATTERN:
+                if pattern in auto:
+                    too_broad.append({"fix_id": fix["fix_id"], "pattern": pattern,
+                                      "count": len(found)})
+                    continue
                 raise FixAuditRefused(
                     f"{fix['fix_id']}: pattern {pattern!r} matches {len(found)} sites "
                     f"(limit {MAX_HITS_PER_PATTERN}); declare a narrower one")
             for path, line, text in found:
                 if (path, line) not in seen:
                     seen.add((path, line))
-                    out.append({"hit_id": f"S-{len(out) + 1}", "fix_id": fix["fix_id"],
-                                "pattern": pattern, "path": path, "line": line, "text": text})
-    return out
+                    out.append({"hit_id": _hit_id(fix["fix_id"], pattern, path, text),
+                                "fix_id": fix["fix_id"], "pattern": pattern, "path": path,
+                                "line": line, "text": text})
+    return SiblingSweep(out, too_broad)
 
 
 def check_dispositions(hits: list[dict], dispositions: dict, repo_root: Path) -> list[str]:
-    """Reasons a hit has no valid disposition. `fixed` holds only while the hit's text is gone
-    from its path; `not_applicable` needs a reason."""
+    """Reasons a hit has no valid disposition. A hit still listed is a site no fix edited, so
+    only `not_applicable` with a reason can clear it; `fixed` is rejected. `repo_root` is kept
+    for the callers' signature and is not read."""
     reasons = []
     for hit in hits:
         hid = hit["hit_id"]
@@ -216,13 +315,11 @@ def check_dispositions(hits: list[dict], dispositions: dict, repo_root: Path) ->
             reasons.append(f"{hid}: no disposition")
             continue
         kind = entry.get("disposition")
-        if kind == "not_applicable":
-            if not str(entry.get("reason") or "").strip():
-                reasons.append(f"{hid}: not_applicable needs a reason")
-        elif kind == "fixed":
-            body = (repo_root / hit["path"]).read_text(encoding="utf-8", errors="replace")
-            if hit["text"] in body:
-                reasons.append(f"{hid}: marked fixed, but {hit['text']!r} still occurs in {hit['path']}")
-        else:
-            reasons.append(f"{hid}: disposition must be 'fixed' or 'not_applicable', not {kind!r}")
+        if kind == "fixed":
+            reasons.append(f"{hid}: marked fixed, but {hit['path']}:{hit['line']} is unedited; "
+                           "edit it, or mark it not_applicable with a reason")
+        elif kind != "not_applicable":
+            reasons.append(f"{hid}: disposition must be 'not_applicable', not {kind!r}")
+        elif not str(entry.get("reason") or "").strip():
+            reasons.append(f"{hid}: not_applicable needs a reason")
     return reasons
