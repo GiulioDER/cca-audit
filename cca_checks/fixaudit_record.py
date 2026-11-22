@@ -46,10 +46,7 @@ def _journal_path(root: pathlib.Path, run_id: str) -> pathlib.Path:
 def _rows(root: pathlib.Path, run_id: str) -> list[dict]:
     """The journal rows. A malformed line raises: skipping it could hide a CONFIRMED cycle and
     let a finding past the cap, so the run stops and the line is repaired by hand."""
-    return _read_rows(_journal_path(root, run_id))
-
-
-def _read_rows(path: pathlib.Path) -> list[dict]:
+    path = _journal_path(root, run_id)
     if not path.exists():
         return []
     rows = []
@@ -106,6 +103,8 @@ SIBLINGS = pathlib.Path(".claude/audits/out/L5.4-siblings.json")
 #: A confirmed fix audit finding of these priorities blocks L5.4; a P3 goes to the deferred pool.
 BLOCKING = ("P1", "P2")
 JOURNAL_VERDICTS = (*layer_outputs.FA_VERDICTS, "PARKED")
+#: The kept passes whose verdicts reached the side ledger, so a retry appends none twice.
+APPENDED = "fixaudit-appended.json"
 
 
 def _dispositions(root: pathlib.Path) -> tuple[dict, list[str]]:
@@ -137,7 +136,8 @@ def _audit_file(root: pathlib.Path, rel: pathlib.Path) -> tuple[dict | None, str
         return None, f"the L5.4 verdict file {rel} is unusable: {exc}"
 
 
-def _pass_reasons(data: dict, passes: dict[int, dict], report: dict) -> tuple[list[str], bool]:
+def _pass_reasons(data: dict, passes: dict[int, dict], report: dict, fixes: list[dict]
+                  ) -> tuple[list[str], bool]:
     """Why the verdict file cannot stand as the run's latest pass, and whether it is a new pass
     (False for a pass already kept and sent again, which was checked when it was kept)."""
     k, latest = data["pass"], max(passes, default=0)
@@ -151,10 +151,15 @@ def _pass_reasons(data: dict, passes: dict[int, dict], report: dict) -> tuple[li
         # A kept pass is never replaced: the next pass's delta and RESOLVED rows point at it.
         return reasons + [f"L5.4 is numbered pass {k}, but the last kept pass is {latest}: "
                           f"number it {latest + 1}"], True
-    missing = [h for h in report["delta_hunks"] if h not in data["hunks"]]
+    missing = [h["id"] for h in report["delta_hunks"] if h["id"] not in data["hunks"]]
     if missing:
         reasons.append(f"L5.4 pass {k} does not cover the changed hunks {', '.join(missing)}")
+    pairs = {(f["fix_id"], f["finding"]) for f in fixes}
     for row in data["findings"]:
+        if (row["fix_id"], row["finding"]) not in pairs:
+            # The cap and the revert are found through this pair; a wrong one escapes both.
+            reasons.append(f"{row['id']} names fix {row['fix_id']} for finding {row['finding']}, "
+                           "which L4 does not have")
         if row["verdict"] != "RESOLVED":
             continue
         p = int(row["resolves"].split("-")[1])
@@ -162,21 +167,48 @@ def _pass_reasons(data: dict, passes: dict[int, dict], report: dict) -> tuple[li
                        if f["id"] == row["resolves"]), None)
         if target is None or target["verdict"] != "CONFIRMED":
             reasons.append(f"{row['id']} resolves {row['resolves']}, which no kept pass confirmed")
+        elif target["fix_id"] != row["fix_id"]:
+            reasons.append(f"{row['id']} is about {row['fix_id']}, but {row['resolves']} is about "
+                           f"{target['fix_id']}")
         elif passes[p]["audited_tree"] == data["audited_tree"]:
             reasons.append(f"{row['id']} resolves {row['resolves']} at the tree pass {p} "
                            "audited: nothing was edited since, so nothing was fixed")
     return reasons, True
 
 
-def _unresolved(passes: dict[int, dict], held: set[str]) -> list[str]:
+def _reverted(row: dict, fixes: list[dict], hunks: list[dict]) -> bool:
+    """True when the fix that introduced `row` is out of the tree: no file that fix alone lists
+    differs from prefix_tree, and no current fix hunk holds the finding's line."""
+    changed = {h["path"] for h in hunks} | {h["old_path"] for h in hunks if h["old_path"]}
+    others = {p for f in fixes if f["fix_id"] != row["fix_id"] for p in f["files"]}
+    alone = {p for f in fixes if f["fix_id"] == row["fix_id"] for p in f["files"]} - others
+    if alone & changed:
+        return False
+    return not any(h["path"] == row["file"]
+                   and h["new_start"] <= row["line"] < h["new_start"] + h["new_len"]
+                   for h in hunks)
+
+
+def _unresolved(passes: dict[int, dict], held: set[str], fixes: list[dict],
+                hunks: list[dict]) -> list[str]:
+    """A confirmed P1 or P2 blocks until a later pass resolves it, or until its finding is
+    parked at the cap and its fix reverted: no run commits a fix with a known bug in it."""
     cleared = {row["resolves"] for p in passes.values() for row in p["findings"]
                if row["verdict"] == "RESOLVED"}
-    return [f"{row['id']} ({row['priority']}, {row['fix_id']}) was confirmed in pass {k} and is "
-            "unresolved: fix it and have the next pass re-verify it RESOLVED, or park "
-            f"{row['finding']}"
-            for k, p in passes.items() for row in p["findings"]
-            if row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING
-            and row["id"] not in cleared and row["finding"] not in held]
+    out = []
+    for k, p in passes.items():
+        for row in p["findings"]:
+            if row["verdict"] != "CONFIRMED" or row["priority"] not in BLOCKING \
+                    or row["id"] in cleared:
+                continue
+            what = f"{row['id']} ({row['priority']}, {row['fix_id']})"
+            if row["finding"] not in held:
+                out.append(f"{what} was confirmed in pass {k} and is unresolved: fix it and have "
+                           "the next pass re-verify it RESOLVED")
+            elif not _reverted(row, fixes, hunks):
+                out.append(f"{what}: {row['finding']} is parked, but {row['fix_id']} is still in "
+                           "the tree; revert that fix whole")
+    return out
 
 
 def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
@@ -218,11 +250,13 @@ def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
     held = parked(root, state.run_id)
     data, why = _audit_file(root, audit or AUDIT)
     if data is None:
-        return reasons + [str(why)] + _unresolved(passes, held), None, report
-    file_reasons, new = _pass_reasons(data, passes, report)
+        return (reasons + [str(why)] + _unresolved(passes, held, fixes, report["hunks"]),
+                None, report)
+    file_reasons, new = _pass_reasons(data, passes, report, fixes)
     keep = data if new and not file_reasons and not reasons else None
     considered = passes if file_reasons else {**passes, data["pass"]: data}
-    return reasons + file_reasons + _unresolved(considered, held), keep, report
+    return (reasons + file_reasons + _unresolved(considered, held, fixes, report["hunks"]),
+            keep, report)
 
 
 def record_reasons(root: pathlib.Path, state, audit: pathlib.Path | None = None) -> list[str]:
@@ -249,17 +283,21 @@ def record(root: pathlib.Path, audit: pathlib.Path | None = None) -> list[str]:
     if (root / SIBLINGS).exists():
         pipeline_state._store_run_file(state, SIBLINGS.name, _dispositions(root)[0], root)
     passes = fixaudit.kept_passes(root, state.run_id)
-    # Read before the gate records, so a malformed ledger refuses instead of failing after it.
-    logged = {row.get("pass") for row in _read_rows(root / LEDGER)
-              if row.get("run_id") == state.run_id and row.get("layer") == "L5.4"}
+    # The run's own record of what reached the shared ledger: reading that ledger instead
+    # would let one bad line from any run block this one.
+    appended_path = _journal_path(root, state.run_id).with_name(APPENDED)
+    appended = json.loads(appended_path.read_bytes()) if appended_path.exists() else []
     checks = (f"{len(report['siblings']['hits'])} sibling hits disposed, "
               f"{len(report['mechanisms'])} mechanism flags")
     detail = f"FAST checks: {checks}" if state.tier == "FAST" else \
         f"pass {max(passes)}: {checks}, {sum(len(p['findings']) for p in passes.values())} findings"
     pipeline_state.record("L5.4", detail=detail, source="tool", root=root, tree=report["tree"])
     for k, p in passes.items():
-        if k not in logged:
-            append_verdicts(root, state.run_id, p)
+        if k in appended:
+            continue
+        append_verdicts(root, state.run_id, p)
+        appended.append(k)
+        pipeline_state._store_run_file(state, APPENDED, appended, root)
     return []
 
 
@@ -276,6 +314,17 @@ def _journal_cli(root: pathlib.Path, state, a: argparse.Namespace) -> list[str]:
                for f in fixaudit.stored_fixes(root, state)):
         # The cap counts per original finding: a misspelt one would never reach it.
         reasons.append(f"L4 has no fix {a.fix_id} for finding {a.finding}")
+    # The cap counts CONFIRMED rows, so each must be a real cycle: one per finding and pass,
+    # and only for a pass that confirmed a blocking defect in that fix.
+    if any(r["finding"] == a.finding and r["pass"] == a.pass_no for r in _rows(root, state.run_id)):
+        reasons.append(f"the journal already has a row for {a.finding} in pass {a.pass_no}")
+    if a.verdict == "CONFIRMED" and not any(
+            f["verdict"] == "CONFIRMED" and f["priority"] in BLOCKING and f["fix_id"] == a.fix_id
+            for f in kept.get(a.pass_no, {}).get("findings", [])):
+        reasons.append(f"pass {a.pass_no} confirmed no P1 or P2 in {a.fix_id}")
+    if a.verdict == "PARKED" and cycles(root, state.run_id).get(a.finding, 0) < CAP:
+        reasons.append(f"{a.finding} is parked only after {CAP} confirmed cycles; it has "
+                       f"{cycles(root, state.run_id).get(a.finding, 0)}")
     if not a.reason.strip():
         reasons.append("--reason is empty")
     if reasons:
@@ -303,7 +352,7 @@ def _run(a: argparse.Namespace, root: pathlib.Path) -> list[str]:
         "too_broad": len(report["siblings"]["too_broad"]),
         "mechanisms": len(report["mechanisms"]),
         "oversized": [s["fix_id"] for s in report["sizes"] if s["over"]],
-        "auditors": report["auditors"], "delta_hunks": report["delta_hunks"],
+        "auditors": report["auditors"], "delta_hunks": [h["id"] for h in report["delta_hunks"]],
     }))
     return []
 

@@ -497,7 +497,8 @@ def build_report(root: Path, state, tree: str) -> dict:
         "siblings": {"hits": sweep.hits, "too_broad": sweep.too_broad},
         "mechanisms": flags, "sizes": size_report(hunks, fixes), "skipped": skipped,
         "auditors": auditors_for(fixes, flags, finding_auditors(root, state)),
-        "delta_hunks": [h.id for h in delta],
+        # with their text: a later pass audits the diff since the last audited tree, not the fix
+        "delta_hunks": [{"id": h.id, **asdict(h)} for h in delta],
     }
 
 

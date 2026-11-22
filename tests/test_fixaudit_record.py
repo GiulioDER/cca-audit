@@ -200,7 +200,8 @@ def _verdicts(repo, pass_no, findings, hunks=None):
     report = _check(repo)
     _put(repo, fr.AUDIT.as_posix(), json.dumps({
         "pass": pass_no, "audited_tree": report["tree"],
-        "hunks": report["delta_hunks"] if hunks is None else hunks, "findings": findings}))
+        "hunks": [h["id"] for h in report["delta_hunks"]] if hunks is None else hunks,
+        "findings": findings}))
     return report
 
 
@@ -211,6 +212,36 @@ def _edit_and_test(repo, name, text):
 
 def _app_run(repo, tier):
     return _to_l5(repo, tier, [_entry(1, ["app.py"])], lambda: _put(repo, "app.py", "x = 2\n"))
+
+
+def _two_fix_run(repo):
+    """A STANDARD run whose FIX-1 edits app.py and FIX-2 edits lib.py."""
+    _commit(repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(repo, "app.py", "x = 2\n")
+        _put(repo, "lib.py", "y = 2\n")
+
+    return _to_l5(repo, "STANDARD", [_entry(1, ["app.py"]), _entry(2, ["lib.py"])], edit)
+
+
+def _journal(repo, verdict, pass_no, finding="F-1", fix_id="FIX-1", reason="r"):
+    return fr.main(["journal", "--root", str(repo), "--finding", finding, "--fix-id", fix_id,
+                    "--pass", str(pass_no), "--verdict", verdict, "--reason", reason])
+
+
+def _three_cycles(repo, **fa):
+    """Passes 1 to 3 each confirm a P2 in FIX-1, journaled, with an edit of app.py between."""
+    for k in (1, 2, 3):
+        if k > 1:
+            _edit_and_test(repo, "app.py", f"x = {k + 1}\n")
+        _verdicts(repo, k, [_fa(f"FA-{k}-1", **fa)])
+        assert fr.record(repo) != []
+        assert _journal(repo, "CONFIRMED", k) == 0
+
+
+def _parked_but_present(k):
+    return f"FA-{k}-1 (P2, FIX-1): F-1 is parked, but FIX-1 is still in the tree; revert that fix whole"
 
 
 def _side_ledger(repo):
@@ -265,19 +296,22 @@ def test_record_refuses_an_unresolved_confirmed_p2_on_standard(git_repo):
     an edited tree and over the hunks changed since, re-verifies it RESOLVED.
     Red 2026-11-22, tests/test_fixaudit_record.py::test_record_refuses_an_unresolved_confirmed_p2_on_standard:
     `BLOCKING = ("P1", "P2")` became `("P1",)`; failed `assert any(r.startswith("FA-1-1 (P2, FIX-1)
-    was confirmed in pass 1") ...)` (AssertionError: []). Second mutation: `build_report`
-    `if passes else hunks` became `if False else hunks`; failed
-    `assert ['app.py:1', 'extra.py:1'] == ['extra.py:1']`."""
+    was confirmed in pass 1") ...)` (AssertionError: []). Round 1 mutations of `build_report`:
+    `if passes else hunks` became `if False else hunks`, and separately the delta took its
+    text from the fix hunk of the same id; each failed the delta assertion,
+    `('app.py:1', ('x = 1',), ('x = 7',)) != ('app.py:1', ('x = 2',), ('x = 7',))`."""
     run = _app_run(git_repo, "STANDARD")
     first = _verdicts(git_repo, 1, [_fa("FA-1-1")])
-    assert first["delta_hunks"] == [h["id"] for h in first["hunks"]] == ["app.py:1"]
+    assert first["delta_hunks"] == first["hunks"] and first["hunks"][0]["id"] == "app.py:1"
     reasons = fr.record(git_repo)
     assert any(r.startswith("FA-1-1 (P2, FIX-1) was confirmed in pass 1") for r in reasons), reasons
     assert "L5.4" not in ps.load(git_repo).layers
-    _edit_and_test(git_repo, "extra.py", "y = 3\n")
+    _edit_and_test(git_repo, "app.py", "x = 7\n")
     second = _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1")])
-    assert [h["id"] for h in second["hunks"]] == ["app.py:1", "extra.py:1"]
-    assert second["delta_hunks"] == ["extra.py:1"]  # app.py is as pass 1 audited it
+    assert [(h["id"], h["removed"]) for h in second["hunks"]] == [("app.py:1", ("x = 1",))]
+    # the diff since the tree pass 1 audited, with its text, not the whole fix again
+    assert [(h["id"], h["removed"], h["added"]) for h in second["delta_hunks"]] == [
+        ("app.py:1", ("x = 2",), ("x = 7",))]
     assert fr.record(git_repo) == []
     assert ps.load(git_repo).layers["L5.4"]["detail"].startswith("pass 2:")
     assert _side_ledger(git_repo) == ["FA-1-1", "FA-2-1"]
@@ -351,6 +385,8 @@ def test_a_refused_or_retried_record_appends_each_pass_once(git_repo):
     added after the pass file is kept: failed `assert ['FA-1-1'] == []`. `if k != latest + 1:`
     became `if False:`: failed `assert [] == ['L5.4 is numbered pass 1, ...: number it 2', ...]`.
     `if k not in logged:` became `if True:`: failed
+    `assert ['FA-1-1', 'FA-2-1', 'FA-1-1', 'FA-2-1'] == ['FA-1-1', 'FA-2-1']`. Round 1 (dedup now
+    from fixaudit-appended.json): `if k in appended:` became `if False:`; failed
     `assert ['FA-1-1', 'FA-2-1', 'FA-1-1', 'FA-2-1'] == ['FA-1-1', 'FA-2-1']`."""
     run = _app_run(git_repo, "STANDARD")
     _verdicts(git_repo, 1, [_fa("FA-1-1")])
@@ -362,52 +398,110 @@ def test_a_refused_or_retried_record_appends_each_pass_once(git_repo):
     assert fr.record(git_repo) == [
         "L5.4 is numbered pass 1, but the last kept pass is 1: number it 2",
         "FA-1-1 (P2, FIX-1) was confirmed in pass 1 and is unresolved: fix it and have the next "
-        "pass re-verify it RESOLVED, or park F-1"]
+        "pass re-verify it RESOLVED"]
     assert fixaudit.kept_passes(git_repo, run)[1] == kept
     _edit_and_test(git_repo, "app.py", "x = 5\n")
     _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1")])
     assert fr.record(git_repo) == []
     assert fr.record(git_repo) == []
     assert _side_ledger(git_repo) == ["FA-1-1", "FA-2-1"]
+    appended = git_repo / ".claude" / "audits" / "runs" / run / fr.APPENDED
+    assert json.loads(appended.read_text(encoding="utf-8")) == [1, 2]
+
+
+def test_a_torn_line_in_the_shared_ledger_does_not_block_record(git_repo):
+    """Invariant: record never reads the shared side ledger, so another run's torn line cannot
+    block it, and the new rows still start on their own line.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_torn_line_in_the_shared_ledger_does_not_block_record:
+    `record` read the shared ledger (`json.loads` per line) instead of fixaudit-appended.json;
+    failed `assert fr.main(["record", ...]) == 0` (2 == 0)."""
+    ledger = git_repo / fr.LEDGER
+    ledger.parent.mkdir(parents=True)
+    ledger.write_bytes(b'{"run_id": "other", "ver')
+    _app_run(git_repo, "STANDARD")
+    _verdicts(git_repo, 1, [_fa("FA-1-1", priority="P3")])
+    assert fr.main(["record", "--root", str(git_repo)]) == 0
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == '{"run_id": "other", "ver'
+    assert [json.loads(line)["id"] for line in lines[1:]] == ["FA-1-1"]
 
 
 def test_the_journal_command_validates_its_row(git_repo):
-    """Invariant: `fixaudit journal` refuses an unknown verdict, a pass not kept and a finding L4
-    does not fix, and appends a valid row.
+    """Invariant: `fixaudit journal` refuses an unknown verdict, a pass not kept, a finding L4
+    does not fix, a CONFIRMED for a pass that confirmed nothing in that fix, a PARKED before the
+    cap, and a second row for the same finding and pass; it appends a valid row.
     Red 2026-11-22, tests/test_fixaudit_record.py::test_the_journal_command_validates_its_row:
     each check of `_journal_cli` became `if False:` in turn; the verdict one failed
     `assert journal(**{"--verdict": "CONFIRMD"}) == 2` (0 == 2), the pass one
     `assert journal(**{"--pass": "2"}) == 2` (0 == 2), the L4 one
-    `assert journal(**{"--finding": "F-9"}) == 2` (0 == 2)."""
-    run = _app_run(git_repo, "STANDARD")
+    `assert journal(**{"--finding": "F-9"}) == 2` (0 == 2). Round 1: the duplicate check became `if False:`: failed
+    `assert _journal(git_repo, "CONFIRMED", 1) == 2` (0 == 2, the same cycle twice); the CONFIRMED
+    check became `if False and ...`: failed `assert _journal(..., finding="F-2", fix_id="FIX-2") == 2`
+    (0 == 2); the PARKED cap check became `if False:`: failed `assert _journal(git_repo, "PARKED", 1)
+    == 2` (0 == 2). The pass check, re-proven with a FALSE_POSITIVE row because the CONFIRMED check
+    also refuses an unkept pass: failed `assert _journal(git_repo, "FALSE_POSITIVE", 2) == 2` (0 == 2)."""
+    run = _two_fix_run(git_repo)
     _verdicts(git_repo, 1, [_fa("FA-1-1")])
     fr.record(git_repo)
-
-    def journal(**changed):
-        row = {"--finding": "F-1", "--fix-id": "FIX-1", "--pass": "1",
-               "--verdict": "CONFIRMED", "--reason": "r", **changed}
-        return fr.main(["journal", "--root", str(git_repo),
-                        *(x for kv in row.items() for x in kv)])
-
-    assert journal(**{"--verdict": "CONFIRMD"}) == 2
-    assert journal(**{"--pass": "2"}) == 2
-    assert journal(**{"--finding": "F-9"}) == 2
+    assert _journal(git_repo, "CONFIRMD", 1) == 2
+    assert _journal(git_repo, "FALSE_POSITIVE", 2) == 2  # not CONFIRMED: only the pass check
+    assert _journal(git_repo, "CONFIRMED", 1, finding="F-9") == 2
+    assert _journal(git_repo, "CONFIRMED", 1, finding="F-2", fix_id="FIX-2") == 2
+    assert _journal(git_repo, "PARKED", 1) == 2  # parked with no cycle at all
     assert fr.cycles(git_repo, run) == {}
-    assert journal() == 0
+    assert _journal(git_repo, "CONFIRMED", 1) == 0
+    assert _journal(git_repo, "CONFIRMED", 1) == 2  # the same cycle counted twice
     assert fr.cycles(git_repo, run) == {"F-1": 1}
 
 
-def test_a_parked_finding_no_longer_blocks(git_repo):
-    """Invariant: a confirmed finding whose original finding the journal parks stops blocking.
-    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_parked_finding_no_longer_blocks:
-    `_unresolved` dropped `and row["finding"] not in held`; failed the last
-    `assert ['FA-1-1 (P2, FIX-1) was confirmed in pass 1 and is unresolved: ...'] == []`."""
-    _app_run(git_repo, "STANDARD")
-    _verdicts(git_repo, 1, [_fa("FA-1-1")])
-    assert fr.record(git_repo) != []
-    assert fr.main(["journal", "--root", str(git_repo), "--finding", "F-1", "--fix-id", "FIX-1",
-                    "--pass", "1", "--verdict", "PARKED", "--reason", "fix reverted"]) == 0
+def test_a_parked_finding_blocks_until_its_fix_is_reverted(git_repo):
+    """Invariant: at the cap a finding is parked, but its confirmed defects keep blocking until
+    every file its fix alone lists is back to prefix_tree; then PARKED may be journaled.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_parked_finding_blocks_until_its_fix_is_reverted:
+    `elif not _reverted(row, fixes, hunks):` became `elif False:`, and separately `_reverted`
+    `if alone & changed:` became `if False:`; each failed
+    `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`. `if row["finding"] not in held:`
+    became `if True:`; failed the same assertion with 'FA-1-1 ... is unresolved ...' in its place."""
+    run = _app_run(git_repo, "STANDARD")
+    _three_cycles(git_repo, line=50)  # outside every hunk: only the file clause can block
+    assert fr.parked(git_repo, run) == {"F-1"}
+    assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # FIX-1 reverted whole
+    _verdicts(git_repo, 4, [])
     assert fr.record(git_repo) == []
+    assert _journal(git_repo, "PARKED", 4, reason="reverted at the cap") == 0
+
+
+def test_a_parked_finding_blocks_while_its_line_is_in_a_fix_hunk(git_repo):
+    """Invariant: a parked finding whose line lies in a hunk still in the fix diff (here FIX-2's
+    lib.py) keeps blocking after its own fix's files are reverted.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_parked_finding_blocks_while_its_line_is_in_a_fix_hunk:
+    `_reverted` `return not any(h["path"] == row["file"] ...` became `return True or ...`;
+    failed `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`."""
+    _two_fix_run(git_repo)
+    _three_cycles(git_repo, file="lib.py")
+    _edit_and_test(git_repo, "app.py", "x = 1\n")
+    _verdicts(git_repo, 4, [])
+    assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]
+
+
+def test_a_verdict_row_names_an_l4_fix_and_resolves_only_its_own_fix(git_repo):
+    """Invariant: an FA row's fix_id and finding are an L4 pair, and a RESOLVED row clears only a
+    finding about the same fix.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_verdict_row_names_an_l4_fix_and_resolves_only_its_own_fix:
+    `_pass_reasons` `if (row["fix_id"], row["finding"]) not in pairs:` became `if False:`; failed
+    `assert ['FA-1-1 (P2, FIX-9) was confirmed ...'] == ['FA-1-1 names fix FIX-9 ...']`.
+    `elif target["fix_id"] != row["fix_id"]:` became `elif False:`; failed
+    `assert 'FA-2-1 is about FIX-2, but FA-1-1 is about FIX-1' in []`."""
+    _two_fix_run(git_repo)
+    _verdicts(git_repo, 1, [_fa("FA-1-1", fix_id="FIX-9")])
+    assert fr.record(git_repo) == [
+        "FA-1-1 names fix FIX-9 for finding F-1, which L4 does not have"]
+    _verdicts(git_repo, 1, [_fa("FA-1-1")])
+    fr.record(git_repo)
+    _edit_and_test(git_repo, "app.py", "x = 3\n")
+    _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", fix=2, resolves="FA-1-1")])
+    assert "FA-2-1 is about FIX-2, but FA-1-1 is about FIX-1" in fr.record(git_repo)
 
 
 # The seven fix-induced findings of run 20261120T225224Z, as (case, the prefix of the reason
@@ -426,7 +520,8 @@ def test_the_seven_case_fixture_blocks_until_each_is_resolved(git_repo):
     """Invariant: each of the seven blocks L5.4 on its own, and clearing one clears only it.
     Red 2026-11-22, tests/test_fixaudit_record.py::test_the_seven_case_fixture_blocks_until_each_is_resolved:
     `_unresolved` `row["id"] not in cleared` became `not cleared` (any RESOLVED clears
-    all); failed at the CODE-001 step, `assert set() == {'DOC-001'}`. Second mutation:
+    all), and in round 1 `or row["id"] in cleared:` became `or bool(cleared):`; each failed at
+    the CODE-001 step, `assert set() == {'DOC-001'}`. Second mutation:
     `finding_auditors` dropped `.removeprefix("cca-")`; failed
     `assert ['cca-bug-auditor', 'bug-auditor', ...] == ['bug-auditor', 'bug-auditor:DAT', 'perf-auditor']`."""
     _commit(git_repo, {
