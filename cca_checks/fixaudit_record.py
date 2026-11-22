@@ -162,15 +162,14 @@ def _pass_reasons(data: dict, passes: dict[int, dict], report: dict, fixes: list
             reasons.append(f"{row['id']} names fix {row['fix_id']} for finding {row['finding']}, "
                            "which L4 does not have")
         # The revert check compares this file with the diff's paths, so a second spelling of
-        # one file, or a file outside the fix, would read as reverted.
-        if not _canonical(row["file"]):
+        # one file, or a file the diff does not touch, would read as reverted.
+        if not fixaudit.canonical(row["file"]):
             reasons.append(f"{row['id']} file {row['file']!r} is not a repo-relative POSIX path "
                            "as the fix diff spells it")
         elif row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING \
-                and row["file"] not in changed | {p for f in fixes if f["fix_id"] == row["fix_id"]
-                                                  for p in f["files"]}:
+                and row["file"] not in changed:
             reasons.append(f"{row['id']} is a confirmed {row['priority']} in {row['file']}, which "
-                           f"neither the fix diff nor {row['fix_id']}'s files hold")
+                           "the fix diff does not touch")
         if row["verdict"] != "RESOLVED":
             continue
         p = int(row["resolves"].split("-")[1])
@@ -191,13 +190,6 @@ def _changed(report: dict) -> set[str]:
     """Every path the current fix diff touches, a skipped binary or non-UTF-8 file included."""
     return ({h["path"] for h in report["hunks"]}
             | {h["old_path"] for h in report["hunks"] if h["old_path"]} | set(report["skipped"]))
-
-
-def _canonical(path: str) -> bool:
-    """A repo-relative POSIX path spelt the one way the fix diff spells it."""
-    pure = pathlib.PurePosixPath(path)
-    return (path == pure.as_posix() and not pure.is_absolute() and ".." not in pure.parts
-            and "\\" not in path and ":" not in path)
 
 
 def _reverted(row: dict, fixes: list[dict], changed: set[str]) -> bool:
@@ -305,7 +297,10 @@ def record(root: pathlib.Path, audit: pathlib.Path | None = None) -> list[str]:
     # The run's own record of what reached the shared ledger: reading that ledger instead
     # would let one bad line from any run block this one.
     appended_path = _journal_path(root, state.run_id).with_name(APPENDED)
-    appended = json.loads(appended_path.read_bytes()) if appended_path.exists() else []
+    try:
+        appended = json.loads(appended_path.read_bytes()) if appended_path.exists() else []
+    except ValueError as exc:  # a refusal with its reason, before the gate records
+        return [f"{APPENDED} is not valid JSON ({exc}); repair it"]
     if not isinstance(appended, list) or not all(
             isinstance(k, int) and not isinstance(k, bool) for k in appended):
         # Checked before the gate records, so a damaged marker cannot leave L5.4 recorded with

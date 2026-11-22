@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import layer_outputs, pipeline_state
 from .bugs.caused_by import _path, fix_diff
@@ -466,9 +466,28 @@ def stored_fixes(root: Path, state) -> list[dict]:
         if not isinstance(fix.get("fix_id"), str) or not fix["fix_id"]:
             raise FixAuditRefused(f'L4 entry {n} needs a non-empty string "fix_id"')
         files = fix.get("files")
-        if not isinstance(files, list) or not all(isinstance(f, str) and f for f in files):
-            raise FixAuditRefused(f'{fix["fix_id"]}: "files" must list the paths the fix changed')
+        # Spelt as the diff spells paths: the revert check compares these with the diff's paths.
+        if not isinstance(files, list) or not files or not all(
+                isinstance(f, str) and canonical(f) for f in files):
+            raise FixAuditRefused(f'{fix["fix_id"]}: "files" must list the paths the fix changed, '
+                                  "each a repo-relative POSIX path as git diff spells it")
     return fixes
+
+
+def canonical(path: str) -> bool:
+    """A repo-relative POSIX path spelt the one way the fix diff spells it."""
+    pure = PurePosixPath(path)
+    return (path == pure.as_posix() and path != "." and not pure.is_absolute()
+            and ".." not in pure.parts and "\\" not in path and ":" not in path)
+
+
+def _unlisted(hunks: list[Hunk], skipped: list[str], fixes: list[dict]) -> list[str]:
+    """The non-test paths the fix diff edits that no fix's `files` lists (a renamed file may
+    be listed under either name)."""
+    listed = {p for f in fixes for p in f["files"]}
+    names = [(h.path, h.old_path) for h in hunks] + [(p, None) for p in skipped]
+    return sorted({path for path, old in names if not is_test_path(path)
+                   and path not in listed and old not in listed})
 
 
 def finding_auditors(root: Path, state) -> dict[str, str]:
@@ -487,6 +506,11 @@ def build_report(root: Path, state, tree: str) -> dict:
     the last kept pass's audited tree (every fix hunk before the first pass)."""
     fixes = stored_fixes(root, state)
     hunks, skipped = fix_hunks(root, state.prefix_tree, tree)
+    unlisted = _unlisted(hunks, skipped, fixes)
+    if unlisted:
+        # An edit no fix owns escapes the size check, the sweep and the revert check.
+        raise FixAuditRefused(f"the fixes edit {', '.join(unlisted)}, which no L4 entry lists in "
+                              '"files"; add each to the fix that made it and record L4 again')
     sweep = sibling_hits(root, hunks, fixes)
     flags = mechanism_flags(hunks, fixes)
     passes = kept_passes(root, state.run_id)

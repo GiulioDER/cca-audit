@@ -530,13 +530,109 @@ def test_a_confirmed_row_must_name_a_file_of_the_fix_or_its_diff(git_repo):
     Red 2026-11-22, tests/test_fixaudit_record.py::test_a_confirmed_row_must_name_a_file_of_the_fix_or_its_diff:
     against the round 1 code (2d6ad3a's fixaudit_record.py), and with the in-scope `elif` as
     `elif False and ...`, it failed `assert ['FA-1-1 (P2, FIX-1) was confirmed in pass 1 ...'] ==
-    ["FA-1-1 is a confirmed P2 in other.py, which neither ..."]`."""
+    ["FA-1-1 is a confirmed P2 in other.py, which neither ..."]`. Round 3 (R7: the diff only):
+    the expected message changed; the in-scope `elif` re-run as `elif False and ...` fails the same
+    assertion."""
     _commit(git_repo, {"other.py": "z = 1\n"})
     _two_fix_run(git_repo)
     _verdicts(git_repo, 1, [_fa("FA-1-1", file="other.py"),
                             _fa("FA-1-2", file="other.py", priority="P3")])
-    assert fr.record(git_repo) == ["FA-1-1 is a confirmed P2 in other.py, which neither the fix "
-                                   "diff nor FIX-1's files hold"]
+    assert fr.record(git_repo) == ["FA-1-1 is a confirmed P2 in other.py, which the fix diff "
+                                   "does not touch"]
+
+
+def test_a_confirmed_row_in_a_listed_but_unedited_file_is_refused(git_repo):
+    """Invariant (R7): a file the fix lists but the diff does not touch cannot hold a confirmed
+    P2, or a row there would read as reverted while the fix is in place.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_confirmed_row_in_a_listed_but_unedited_file_is_refused:
+    against 311d1e1's fixaudit.py and fixaudit_record.py, and with the in-scope clause back to
+    `not in changed | {that fix's files}` (round 2's rule), it failed
+    `assert ['FA-1-1 (P2, FIX-1) was confirmed in pass 1 ...'] == ['FA-1-1 is a confirmed P2 in
+    lib.py, which the fix diff does not touch']`."""
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "lib.py"])],
+           lambda: _put(git_repo, "app.py", "x = 2\n"))
+    _verdicts(git_repo, 1, [_fa("FA-1-1", file="lib.py")])
+    assert fr.record(git_repo) == ["FA-1-1 is a confirmed P2 in lib.py, which the fix diff "
+                                   "does not touch"]
+
+
+def test_the_reviewers_second_probe_an_l4_spelling_the_diff_never_uses(git_repo):
+    """Invariant (R8): L4 listing `App.py` for an edit of `app.py` is refused at check, so FA
+    rows copying that spelling can never park a fix still in the tree. The probe recorded L5.4
+    with nothing reverted (`fr.record` returned []).
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_the_reviewers_second_probe_an_l4_spelling_the_diff_never_uses:
+    against 311d1e1's fixaudit.py and fixaudit_record.py, and with `build_report` `if unlisted:` as
+    `if False:`, it failed `Failed: DID NOT RAISE FixAuditRefused`."""
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["App.py"])], lambda: _put(git_repo, "app.py", "x = 2\n"))
+    with pytest.raises(fixaudit.FixAuditRefused, match=r"the fixes edit app\.py, which no L4"):
+        _check(git_repo)
+
+
+def test_a_fix_listing_no_file_is_refused(git_repo):
+    """Invariant (R8): every fix lists at least one file.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_fix_listing_no_file_is_refused:
+    against 311d1e1's fixaudit.py and fixaudit_record.py, and with `or not files` dropped from
+    `stored_fixes`, it failed `Failed: DID NOT RAISE FixAuditRefused`."""
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "lib.py"]), _entry(2, [])], edit)
+    with pytest.raises(fixaudit.FixAuditRefused, match=r'FIX-2: "files" must list'):
+        _check(git_repo)
+
+
+@pytest.mark.parametrize("entry", ["./app.py", ".", "sub\\app.py", "/app.py"])
+def test_an_l4_file_entry_must_be_spelt_as_the_diff_spells_it(git_repo, entry):
+    """Invariant (R8): each L4 `files` entry is a canonical repo-relative POSIX path, not `.`.
+    `app.py` is listed too, so only the spelling check can refuse.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_an_l4_file_entry_must_be_spelt_as_the_diff_spells_it:
+    against 311d1e1's fixaudit.py and fixaudit_record.py all four cases failed `DID NOT RAISE
+    FixAuditRefused`; with `canonical(f)` as `f` in `stored_fixes` all four failed the same way;
+    with `path != "."` dropped from `canonical`, the `.` case failed it (the others are refused
+    by the remaining clauses)."""
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", entry])],
+           lambda: _put(git_repo, "app.py", "x = 2\n"))
+    with pytest.raises(fixaudit.FixAuditRefused, match=r'FIX-1: "files" must list'):
+        _check(git_repo)
+
+
+def test_every_edited_non_test_file_must_be_listed_by_a_fix(git_repo):
+    """Invariant (R8): a non-test file the fixes edit that no L4 entry lists is refused; an
+    edited test file need not be listed.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_every_edited_non_test_file_must_be_listed_by_a_fix:
+    against 311d1e1's fixaudit.py and fixaudit_record.py, and with `if unlisted:` as `if False:`,
+    it failed `DID NOT RAISE FixAuditRefused`; with `not is_test_path(path)` as `True` in
+    `_unlisted`, it failed `Regex pattern did not match` (actual: 'the fixes edit lib.py,
+    tests/test_new.py, which no L4 ...')."""
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+        _put(git_repo, "tests/test_new.py", "def test_x():\n    pass\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py"])], edit)
+    with pytest.raises(fixaudit.FixAuditRefused, match=r"the fixes edit lib\.py, which no L4"):
+        _check(git_repo)
+
+
+def test_a_marker_that_is_not_json_refuses_with_its_reason(git_repo, capsys):
+    """Invariant (R9): an appended marker that is not valid JSON refuses with exit 2 and a reason
+    naming the file, before the gate records.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_marker_that_is_not_json_refuses_with_its_reason:
+    against 311d1e1's fixaudit.py and fixaudit_record.py, and with the marker's `except ValueError` as
+    `except KeyError`, it failed `assert 'refused: fixaudit-appended.json is not valid JSON' in
+    'refused: Expecting value: line 1 column 1 (char 0)'`."""
+    run = _app_run(git_repo, "STANDARD")
+    _verdicts(git_repo, 1, [])
+    _put(git_repo, f".claude/audits/runs/{run}/{fr.APPENDED}", "not json")
+    assert fr.main(["record", "--root", str(git_repo)]) == 2
+    assert f"refused: {fr.APPENDED} is not valid JSON" in capsys.readouterr().err
+    assert "L5.4" not in ps.load(git_repo).layers
 
 
 def test_a_parked_fix_sharing_a_file_blocks_while_that_file_differs(git_repo):
