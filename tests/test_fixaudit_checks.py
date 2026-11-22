@@ -30,7 +30,10 @@ def test_the_fix_diff_starts_at_the_prefix_tree_not_the_base(git_repo):
     _write(git_repo, "app.py", "x = 1\nA = 1\nB = 2\n")
     prefix = core.fingerprint(git_repo)
     _write(git_repo, "app.py", "x = 1\nA = 1\nB = 2\nC = 3\n")
-    hunks = fix_hunks(git_repo, prefix, core.fingerprint(git_repo))
+    result = fix_hunks(git_repo, prefix, core.fingerprint(git_repo))
+    assert isinstance(result, tuple)  # (hunks, skipped), so skipped files have a consumer
+    hunks, skipped = result
+    assert skipped == []
     assert [h.added for h in hunks] == [("C = 3",)]
     assert hunks[0].id == "app.py:1"  # the hunk's start, with its leading context
 
@@ -60,7 +63,7 @@ def test_added_deleted_and_renamed_files_are_counted_to_their_fix(git_repo):
     (git_repo / "old.py").rename(git_repo / "new.py")
     _write(git_repo, "new.py", "".join(f"l{i}\n" for i in range(9)) + "edited\n")
     _write(git_repo, "created.py", "c1\nc2\nc3\n")
-    hunks = fix_hunks(git_repo, prefix, core.fingerprint(git_repo))
+    hunks, _ = fix_hunks(git_repo, prefix, core.fingerprint(git_repo))
     by_path = {h.path: h for h in hunks}
     assert set(by_path) == {"gone.py", "new.py", "created.py"}
     assert by_path["gone.py"].removed == ("g1", "g2")
@@ -72,20 +75,42 @@ def test_added_deleted_and_renamed_files_are_counted_to_their_fix(git_repo):
     assert lines == {"F1": 4, "F2": 3}
 
 
-def test_a_binary_file_is_skipped_and_reported_and_odd_bytes_do_not_crash(git_repo):
-    """Invariant: a binary file adds no hunk but is named; a non-UTF-8 text file still counts.
+def test_a_fix_listing_the_old_path_of_a_renamed_file_owns_its_lines(git_repo):
+    """Invariant: a renamed and edited file's lines go to a fix listing its old or new path,
+    shared evenly, and a fix listing both counts them once.
 
-    Node: tests/test_fixaudit_checks.py::test_a_binary_file_is_skipped_and_reported_and_odd_bytes_do_not_crash.
-    Red 2026-11-22: skeleton baseline; failed with NotImplementedError from parse_fix_diff.
+    Node: tests/test_fixaudit_checks.py::test_a_fix_listing_the_old_path_of_a_renamed_file_owns_its_lines.
+    Red 2026-11-22: baseline 1860ff7; failed `assert lines == {...}` (F1 got 0: only the new
+    path matched).
+    """
+    _write(git_repo, "old.py", "".join(f"l{i}\n" for i in range(10)))
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "more")
+    prefix = core.fingerprint(git_repo)
+    (git_repo / "old.py").rename(git_repo / "new.py")
+    _write(git_repo, "new.py", "".join(f"l{i}\n" for i in range(9)) + "edited\n")
+    hunks, _ = fix_hunks(git_repo, prefix, core.fingerprint(git_repo))
+    fixes = [{"fix_id": "F1", "files": ["old.py"]}, {"fix_id": "F2", "files": ["new.py"]},
+             {"fix_id": "F3", "files": ["old.py", "new.py"]}]
+    lines = {r["fix_id"]: r["lines"] for r in size_report(hunks, fixes)}
+    assert lines == {"F1": 2 / 3, "F2": 2 / 3, "F3": 2 / 3}
+
+
+def test_a_binary_or_non_utf8_file_is_skipped_and_reported(git_repo):
+    """Invariant: a binary or non-UTF-8 file adds no hunk and is named in `skipped`.
+
+    Node: tests/test_fixaudit_checks.py::test_a_binary_or_non_utf8_file_is_skipped_and_reported.
+    Red 2026-11-22: baseline 1860ff7; failed `assert skipped == ["blob.bin", "latin.txt"]`
+    (latin.txt was counted as a hunk, not skipped).
     """
     prefix = core.fingerprint(git_repo)
     _write(git_repo, "blob.bin", b"\x00\x01\x02binary")
     _write(git_repo, "latin.txt", b"caf\xe9\n")
+    _write(git_repo, "ok.py", "y = 2\n")
     hunks, skipped = fixaudit.parse_fix_diff(
         fix_diff(git_repo, prefix, core.fingerprint(git_repo)))
-    assert skipped == ["blob.bin"]
-    assert [h.path for h in hunks] == ["latin.txt"]
-    assert len(hunks[0].added) == 1
+    assert skipped == ["blob.bin", "latin.txt"]
+    assert [h.path for h in hunks] == ["ok.py"]
 
 
 def test_a_fix_over_the_threshold_needs_a_size_reason():

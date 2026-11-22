@@ -24,6 +24,7 @@ class Hunk:
     new_len: int
     removed: tuple[str, ...]
     added: tuple[str, ...]
+    old_path: str | None = None  # before a rename, so a fix may list either name
 
     @property
     def id(self) -> str:
@@ -32,11 +33,12 @@ class Hunk:
 
 # caused_by._HUNK drops the new-side start, which a hunk's id needs, so this one keeps all four.
 _HUNK = re.compile(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+_REPLACEMENT = chr(0xFFFD)
 _BINARY = re.compile(r"Binary files (.*) differ")
 
 
 def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
-    """The hunks of a `fix_diff` and the paths of binary files, which have no lines to count.
+    """The hunks of a `fix_diff` and the paths of binary or non-UTF-8 files, which are not counted.
 
     Hunk bodies are consumed by their line counts, as caused_by._changes does, so a removed
     line that reads `-- x` is never mistaken for a file header.
@@ -44,6 +46,7 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
     hunks: list[Hunk] = []
     skipped: list[str] = []
     path: str | None = None
+    old_path: str | None = None
     head: tuple[int, int, int, int] | None = None
     removed: list[str] = []
     added: list[str] = []
@@ -51,7 +54,7 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
 
     def close() -> None:
         if head is not None and path is not None:
-            hunks.append(Hunk(path, *head, tuple(removed), tuple(added)))
+            hunks.append(Hunk(path, *head, tuple(removed), tuple(added), old_path))
 
     for line in diff.split("\n"):
         if old_left > 0 or new_left > 0:
@@ -69,7 +72,7 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
         if line.startswith("--- "):
             close()
             head = None
-            path = _path(line[4:], "a/")  # a deleted file has no "+++" path; the old one stands
+            old_path = path = _path(line[4:], "a/")  # a deleted file has no "+++" path; the old one stands
         elif line.startswith("+++ "):
             path = _path(line[4:], "b/") or path
         elif m := _HUNK.match(line):
@@ -85,15 +88,19 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
             old, _, new = m.group(1).rpartition(" and ")
             skipped.append(_path(new, "b/") or _path(old, "a/") or "")
     close()
-    return hunks, skipped
+    # gitread.git decodes with errors="replace", so U+FFFD marks bytes that are not UTF-8. (A file
+    # that really contains U+FFFD is skipped too; the cost of reusing caused_by.fix_diff.)
+    bad = {h.path for h in hunks if any(_REPLACEMENT in x for x in h.removed + h.added)}
+    return [h for h in hunks if h.path not in bad], skipped + sorted(bad)
 
 
-def fix_hunks(repo_root: Path, prefix_tree: str | None, tree: str) -> list[Hunk]:
-    """The hunks the fixes made: the diff from the run's prefix tree to `tree`."""
+def fix_hunks(repo_root: Path, prefix_tree: str | None, tree: str) -> tuple[list[Hunk], list[str]]:
+    """The hunks the fixes made (the diff from the run's prefix tree to `tree`), and the paths
+    of the files skipped because they have no countable lines."""
     if prefix_tree is None:
         # The base commit would pull the whole feature into the fix diff.
         raise FixAuditRefused("the run has no prefix_tree, so its fix diff cannot be computed")
-    return parse_fix_diff(fix_diff(repo_root, prefix_tree, tree))[0]
+    return parse_fix_diff(fix_diff(repo_root, prefix_tree, tree))
 
 
 def is_test_path(path: str) -> bool:
@@ -104,17 +111,22 @@ def is_test_path(path: str) -> bool:
 
 def size_report(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
     """Per fix, its changed non-test lines; a file listed by k fixes counts 1/k to each."""
+    renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
+
+    def files_of(fix: dict) -> set[str]:
+        return {renamed.get(f, f) for f in fix["files"]}  # a renamed file is one file
+
     lines: dict[str, int] = {}
     for h in hunks:
         if not is_test_path(h.path):
             lines[h.path] = lines.get(h.path, 0) + len(h.added) + len(h.removed)
     sharing: dict[str, int] = {}
     for fix in fixes:
-        for f in set(fix["files"]):
+        for f in files_of(fix):
             sharing[f] = sharing.get(f, 0) + 1
     out = []
     for fix in fixes:
-        total = sum(lines.get(f, 0) / sharing[f] for f in set(fix["files"]))
+        total = sum(lines.get(f, 0) / sharing[f] for f in files_of(fix))
         out.append({"fix_id": fix["fix_id"], "lines": total, "over": total > SIZE_THRESHOLD,
                     "has_reason": bool(str(fix.get("size_reason") or "").strip())})
     return out
