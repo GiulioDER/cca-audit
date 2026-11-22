@@ -103,11 +103,13 @@ Emit exactly one verdict per finding:
   plan.
 - **RESOLVED** *(MODE=FIXAUDIT only)*: an earlier pass's CONFIRMED finding you were handed to
   re-verify, whose defect is gone at the current tree. Write it as a new row of this pass carrying
-  `resolves`, the earlier id (`FA-<j>-<n>`), with the same `fix_id` and original finding id. A
+  `resolves`, the earlier id (`FA-<j>-<n>`), and every field a row needs, copied from that finding:
+  the same `fix_id` and original finding id, its `priority`, `file`, `line` and `claim`. A
   defect still present is CONFIRMED again, as a new row of this pass. A changed hunk alone is not
   RESOLVED: read the code now and cite what removed the defect.
-- **OUT_OF_SCOPE** *(MODE=FIXAUDIT only)*: outside the fix hunks and the listed sibling sites. Give
-  the file:line and say why it is outside; it is reported as deferred, not fixed in this run.
+- **OUT_OF_SCOPE** *(MODE=FIXAUDIT only)*: outside the fix hunks and the listed sibling sites. Keep
+  every field of the row (`fix_id`, original finding id, `priority`, `file`, `line`, `claim`), and
+  say why it is outside; it is reported as deferred, not fixed in this run.
 - **UNCERTAIN** — cannot confirm or refute without runtime or business context. → never fix blind;
   escalate to a human.
 

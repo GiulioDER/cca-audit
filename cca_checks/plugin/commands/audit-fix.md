@@ -944,7 +944,7 @@ python -m cca_checks pipeline record L3 --to-fix <N> --deferred <D> \
 ## Fix Attempt Budget & Journal (STANDARD/DEEP)
 
 The fix lifecycle (L4 implement → L5 re-verify → L5.4 fix audit → L5.5 regression → L6 architect) is a
-repair loop per finding. Bound it **per finding, once** — not per stage — so a single stubborn finding
+repair loop per finding. Bound it **per finding, once**, not per stage, so a single stubborn finding
 cannot ping-pong between gates and burn 3×3 cycles.
 
 - `attempts[FIX-id]` starts at 0. Increment it **each time** any gate (L5 test-repair, L5.4 confirmed
@@ -969,7 +969,10 @@ journal (it has no L5.5/L6 mapping loop).
 ## Step 4: Layer 4 — Implement Fixes
 
 **Before the first edit**, snapshot the pre-fix content of every file you are about to change. The
-red-state proof at Step 5.6 needs it, and it becomes unrecoverable the moment the fixes land:
+red-state proof at Step 5.6 needs it, and it becomes unrecoverable the moment the fixes land. Take it
+once per run, before the first L4 edit, and never again: `snapshot` replaces its directory, so a
+second one would store already fixed content as the pre-fix state, and every proof judged against
+it would read TAUTOLOGICAL:
 
 ```bash
 python -m cca_checks tautology snapshot <every file you will edit>
@@ -1126,6 +1129,8 @@ checks, and each blocks the record:
    A flagged fix names `failure_test` in L4: a test of that mechanism's own failure (the timeout
    firing, the lock contended, malformed input). The tool checks that the file exists and defines the
    test function; whether the test really exercises the failure is for the auditors and L6 to judge.
+   Writing that test edits the tree: record L4 again with the new `failure_test`, then Step 5 again,
+   then `fixaudit check` again.
 3. **Size** (`sizes`). Per fix, the changed non-test lines in its `files`, a file listed by k fixes
    counting 1/k to each. A fix the report marks `over` names `size_reason` in L4.
 
@@ -1135,12 +1140,15 @@ checks, and each blocks the record:
 python -m cca_checks fixaudit record
 ```
 
+Then re-read § Step 6: on FAST, L5.5 and L5.6 are not owed.
+
 **Part 2: the auditor pass (STANDARD and DEEP).**
 
 *Who.* The auditors the report names in `auditors`: at most 4, the auditor of each fix's finding
 plus those its flagged mechanisms route to, ranked by how many fixes need each. Each is the subagent
-type of that name; `bug-auditor:DAT` is `bug-auditor` given Agent 9's DAT- scope (§ Step 1). Launch
-them in ONE message (parallel), each with:
+type of that name; `bug-auditor:DAT` is `bug-auditor` given Agent 9's DAT- scope (§ Step 1). When
+`auditors` is empty (no fix's finding has a known auditor and no mechanism is flagged), `bug-auditor`
+runs: the pass is owed all the same. Launch them in ONE message (parallel), each with:
 
 ```
 subagent_type: <an auditor named in fixaudit.json>
@@ -1188,7 +1196,11 @@ file:line evidence.
 
 - `pass` is one past the last kept pass (1 the first time); ids are `FA-<k>-<n>` for pass k, never an
   L1 finding id or FIX id. `audited_tree` is the current tree, so audit the report `fixaudit check`
-  wrote at this tree; `hunks` covers every id in `delta_hunks`.
+  wrote at this tree; `hunks` covers every id in `delta_hunks`, also when the pass finds nothing
+  (then `"findings": []`).
+- every row, `RESOLVED` and `OUT_OF_SCOPE` included, carries every field: `id`, `fix_id` and
+  `finding` (a pair L4 has), `priority`, `verdict`, `file`, `line` and `claim`. A RESOLVED row copies
+  them from the finding it resolves; an OUT_OF_SCOPE row names the fix whose pass raised it.
 - `verdict` is the verifier's: `CONFIRMED`, `FALSE_POSITIVE`, `UNCERTAIN`, `RESOLVED` or
   `OUT_OF_SCOPE`. `fix_id` and `finding` are a pair L4 has. `file` is a repo-relative POSIX path, and
   a CONFIRMED P1 or P2 must sit in a file the current fix diff touches.
@@ -1229,9 +1241,12 @@ the run directory. That ledger and the journal below are append-only: never edit
 2. Before the first repair edit for pass k, snapshot every file the repairs of this pass will edit:
    `python -m cca_checks tautology snapshot --snapdir .claude/audits/.fixaudit_snapshot/pass-<k> <files>`.
    Take it once per pass: a second snapshot into the same directory replaces the first.
-3. Go back to § Step 4 for the repair, with a red→green test for the fix audit finding, handing the
-   re-fixer the finding's FIX_JOURNAL rows. Update L4.json if the files change and record L4 again,
-   then Step 5, then this step again: pass k+1 audits the new `delta_hunks` and re-verifies.
+3. Go back to § Step 4 for the repair and follow its rules, but never re-take its snapshot: the
+   pass snapshot of step 2 replaces it for these repairs, and a new Step 4 snapshot would destroy the
+   pre-L4 content every original proof is judged against. Write a red→green test for the fix audit
+   finding, and hand the re-fixer the finding's FIX_JOURNAL rows. Update L4.json if the files
+   change and record L4 again, then Step 5, then this step again: pass k+1 audits the new
+   `delta_hunks` and re-verifies.
 
 A CONFIRMED P3 and an OUT_OF_SCOPE finding are not fixed in this run and do not block: list each
 under Deferred in the report and in the commit message's `Deferred:` lines (FA id, priority,
@@ -1247,9 +1262,10 @@ journal it with `--verdict PARKED` (accepted only once the cap is reached, and o
 that has no row of that finding yet, so for the pass after the third confirmation). `record`
 refuses until none of those files, nor the fix audit finding's own file, differs from
 `prefix_tree`: a file the fix shares with another fix counts as reverted only when it has no hunk
-left at all. The revert
-changes the tree, so Step 5 and this step run again; the parked fix's declared `sibling_patterns`
-still list hits, which take `not_applicable` with the reason that the fix was reverted. The code
+left at all. So a parked fix sharing a file with a live fix clears in one of two ways: that file has
+no hunk left (the live fix's hunks there reverted or moved), or the next pass re-verifies the open
+fix audit findings `RESOLVED` at the current tree. The revert changes the tree, so Step 5 and this
+step run again; the parked fix's declared `sibling_patterns` still list hits, which take `not_applicable` with the reason that the fix was reverted. The code
 counts only L5.4 cycles, while `attempts[FIX-id]` counts every gate: when that shared cap parks a
 finding first, revert its fix the same way, and the next pass re-verifies its open fix audit findings
 RESOLVED, since the code they named is gone. No run commits a fix with a known bug it introduced.
@@ -1258,7 +1274,7 @@ RESOLVED, since the code they named is gone. No run commits a fix with a known b
 like any other. Its baseline is the pass snapshot taken in step 2, not the Step 4 snapshot: the bug
 did not exist before L4, so every honest test would read TAUTOLOGICAL there. § Step 5.6 says how.
 
-Then re-read § Step 5.5 and § Step 5.6 (STANDARD/DEEP), or § Step 6 on FAST.
+Then re-read § Step 5.5 and § Step 5.6.
 
 ## Step 5.5: Layer 5.5 — Regression Diff (ANTI-REGRESSION) — STANDARD/DEEP
 

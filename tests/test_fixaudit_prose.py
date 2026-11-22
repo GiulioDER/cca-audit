@@ -218,3 +218,61 @@ def test_codex_writes_the_l54_files_and_queues_the_auditors():
     assert "MODE=FIXAUDIT" in flat
     apply = _flat(_section(CODEX, "## Apply fixes safely", "## Gate before reporting"))
     assert "Step 5.4" in apply and "six slot queue" in apply
+
+
+# Fix round 1 (2026-11-22). Red: each test below failed on its `assert` against 865fc61's prose.
+
+
+def test_a_fix_audit_repair_never_retakes_the_step_4_snapshot():
+    """`tautology snapshot` rmtrees its directory, so a repair that re-takes Step 4's default
+    snapshot replaces the pre-L4 content with fixed content, and every original P1 proof judged
+    against it then reads TAUTOLOGICAL at L5.6."""
+    step4 = _flat(_section(PIPELINE, "## Step 4:", "## Step 5: "))
+    assert "once per run, before the first L4 edit" in step4
+    loop = _flat(_step_54())
+    loop = loop[loop.find("3. Go back to § Step 4"):loop.find("A CONFIRMED P3")]
+    assert "never re-take its snapshot" in loop
+    assert "pass snapshot of step 2 replaces it" in loop
+
+
+def test_every_verdict_row_carries_every_field():
+    """`l54_audit` requires priority, file, line, claim, fix_id and finding on every row, a
+    RESOLVED or OUT_OF_SCOPE one included; a verifier told otherwise writes a refused file."""
+    step = _flat(_step_54())
+    assert "every row, `RESOLVED` and `OUT_OF_SCOPE` included, carries every field" in step
+    resolved = _flat(FP_CHECK[FP_CHECK.find("- **RESOLVED** *(MODE=FIXAUDIT only)*"):
+                              FP_CHECK.find("- **OUT_OF_SCOPE** *(MODE=FIXAUDIT only)*")])
+    for field in ("priority", "file", "line", "claim"):
+        assert f"`{field}`" in resolved, field
+
+
+def test_codex_adapter_row_runs_fixaudit_from_the_package():
+    adapter = _section(CODEX, "## Apply the Codex adapter", "\n## Guard")
+    row = next(ln for ln in adapter.splitlines() if "cca_checks tautology" in ln)
+    assert "python -m cca_checks fixaudit" in row and "L5.4" in row
+
+
+def test_the_shared_file_park_rule_names_its_way_out():
+    cap = _flat(_step_54())
+    cap = cap[cap.find("**The cap.**"):cap.find("**Red proof.**")]
+    assert "no hunk left" in cap
+    assert "or the next pass re-verifies the open fix audit findings `RESOLVED`" in cap
+
+
+def test_an_empty_auditor_list_still_gets_an_auditor_and_a_verdict_file():
+    step = _flat(_step_54())
+    assert "When `auditors` is empty" in step and "`bug-auditor` runs" in step
+    assert '`"findings": []`' in step
+
+
+def test_fast_cue_follows_its_record_and_a_new_failure_test_reruns_step_5():
+    step = _step_54()
+    fast = step[step.find("**On FAST that is the whole layer.**"):step.find("**Part 2")]
+    assert "§ Step 6" in fast
+    assert "then Step 5 again" in _flat(step[step.find("2. **New mechanism flags**"):
+                                            step.find("3. **Size**")])
+
+
+def test_the_fix_attempt_budget_line_has_no_dash_punctuation():
+    budget = _section(PIPELINE, "## Fix Attempt Budget", "- `attempts[FIX-id]`")
+    assert "—" not in budget

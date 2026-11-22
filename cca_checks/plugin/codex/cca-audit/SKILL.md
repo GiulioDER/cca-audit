@@ -38,7 +38,7 @@ Map Claude specific terms in the canonical pipeline as follows:
 | Agent or `subagent_type` call | Spawn a Codex subagent with the matching role prompt |
 | Agent return value | The subagent final response returned to the primary agent |
 | Launch in a SINGLE message, or in ONE message (parallel) | Dispatch through the six slot queue under "Respect the six subagent limit" |
-| `python -m cca_checks scorecard` and `python -m cca_checks tautology` | Run exactly as written, from the installed package; they record L2.6 and L5.6. This skill's `scripts/` copies are for reading only |
+| `python -m cca_checks scorecard`, `python -m cca_checks fixaudit` and `python -m cca_checks tautology` | Run exactly as written, from the installed package; they record L2.6, L5.4 and L5.6. This skill's `scripts/` copies are for reading only |
 | Optional `.claude/audits/` trail | Omit unless the user explicitly requests persistent audit files |
 
 `python -m cca_checks pipeline pause --reason "<why>"` and `pipeline resume` exist here too, and
@@ -243,10 +243,11 @@ Run the detected tests and linters after repairs. Then run the canonical Step 5.
 any reviewer: `python -m cca_checks fixaudit check` in the primary agent, the sibling dispositions,
 and on FAST `python -m cca_checks fixaudit record` with no `--audit`. On STANDARD and DEEP, dispatch
 the auditors the report names (at most four; `bug-auditor:DAT` is the bug auditor role given the
-canonical DAT- scope) as read only subagents through the six slot queue, then one `fp-check` subagent
+canonical DAT- scope; the bug auditor when it names none) as read only subagents through the six slot queue, then one `fp-check` subagent
 in MODE=FIXAUDIT over their findings, write `.claude/audits/out/L5.4.json`, and record with
 `fixaudit record --audit .claude/audits/out/L5.4.json`. A confirmed P1 or P2 in the fix code goes
-back to repair through `fixaudit journal`, as the canonical loop says. Then dispatch the read only
+back to repair through `fixaudit journal`, as the canonical loop says: the repair takes the pass
+snapshot, never a second Step 4 snapshot. Then dispatch the read only
 differential reviewer and architect reviewer, handing both the sibling list as the canonical Steps
 5.5 and 6 say. Repeat the canonical revise loop when required. Respect `no-fix` as an absolute
 prohibition on edits and commits.
