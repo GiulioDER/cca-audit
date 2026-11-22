@@ -1,4 +1,4 @@
-"""The shape of the work files L2, L2.5, L3 and L4 store, checked when they are recorded.
+"""The shape of the work files L2, L2.5, L3, L4 and L5.4 store, checked when they are recorded.
 
 `record` used to accept any JSON for these layers. A later run reads them back: the deferred
 pass finds its findings by id in L2, and its pool in L2.5 and L3. A file that disagreed with the
@@ -175,7 +175,7 @@ def l4_fixes(data) -> list[dict]:
 
 
 FA_VERDICTS = ("CONFIRMED", "FALSE_POSITIVE", "UNCERTAIN", "RESOLVED", "OUT_OF_SCOPE")
-_FA_ID = re.compile(r"FA-([0-9]+)-[0-9]+")
+_FA_ID = re.compile(r"FA-([1-9][0-9]*)-[1-9][0-9]*")
 _FA_TEXT = ("fix_id", "finding", "file", "claim")
 
 
@@ -189,8 +189,9 @@ def l54_audit(data) -> dict:
     if not isinstance(data.get("audited_tree"), str) or not data["audited_tree"]:
         raise ShapeError('L5.4 needs a non-empty string "audited_tree"')
     hunks = data.get("hunks")
-    if not isinstance(hunks, list) or not all(isinstance(h, str) for h in hunks):
-        raise ShapeError('L5.4 "hunks" must be an array of hunk id strings')
+    if (not isinstance(hunks, list) or not all(isinstance(h, str) and h for h in hunks)
+            or len(set(hunks)) != len(hunks)):
+        raise ShapeError('L5.4 "hunks" must be an array of unique non-empty hunk id strings')
     findings = data.get("findings")
     if not isinstance(findings, list):
         raise ShapeError('L5.4 needs a "findings" array')
