@@ -8,6 +8,12 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-23
+
+**Upgrade note: reinstall both clients.** After `pip install -U cca-audit`, run `cca-audit install`
+and `cca-audit install-codex`. Runs started by this version owe L5.4, and a Codex skill left from
+0.16.0 has no Step 5.4, so it cannot record that layer.
+
 **Upgrade note: the commit guard now covers the PowerShell tool.** Run `cca-audit install`, then
 replace the guard's entry in settings.json with the output of `cca-audit install --print-hook`: its
 matcher becomes `Bash|PowerShell`. `install` warns about an entry still wired to Bash only.
@@ -46,6 +52,24 @@ every check holds. Verdicts go to their own append-only `.claude/audits/FIXAUDIT
 The prefix tree and each audited tree are pinned under `refs/cca/<run_id>/` until the run closes
 or aborts. Design: `docs/superpowers/specs/2026-11-22-fix-audit-loop-design.md`; files:
 [configuration](docs/configuration.md#fix-audit-files-l54).
+
+**Fixes from the fix audit layer's own DEEP audit (#136).** `out/L5.4-siblings.json` now has the
+shape `{"run_id", "hits", "skipped"}`: `fixaudit record` refuses a file without this run's id, so
+an earlier run's dispositions clear nothing. Only the hunks holding U+FFFD are dropped from the fix
+diff; skipped paths are printed, and a skipped non-test path needs a reason under `"skipped"`.
+`FA-<k>-<n>` proofs no longer mark a run's proofs orphaned in the bug ledger. The repair cap counts
+the larger of journal rows and distinct audited trees of kept passes, so a run that never journals
+still reaches it. `fix_size_q3.py` counts only non-merge CCA fix commits. Parked for a human:
+`tautology verify --no-proofs` can still record L5.6 for a run with fix audit repairs (DOC-002).
+
+**Fixes from the CCA self hunt (#131, #132).** 27 defects in `cca_checks` itself, plus 7 that the
+audit of those fixes found in them. Among them:
+ledger writes survive a lone surrogate and a torn last line and append under a lock; `tautology
+verify` refuses to run again after an interrupted restore, times out a hung proof as INCONCLUSIVE
+and refuses a snapshot older than the open run; `verify --no-proofs` counts CONFIRMED P1s from the
+stored L2 and L2.5 as well; a pyright silence no longer refutes a file with a `# pyright:` comment;
+`git` and `gh` are never resolved from the working directory; installers keep numbered `.bak.N`
+backups instead of overwriting one.
 
 ## [0.16.0] - 2026-11-12
 
