@@ -437,7 +437,9 @@ def test_the_journal_command_validates_its_row(git_repo):
     `assert journal(**{"--finding": "F-9"}) == 2` (0 == 2). Round 1: the duplicate check became `if False:`: failed
     `assert _journal(git_repo, "CONFIRMED", 1) == 2` (0 == 2, the same cycle twice); the CONFIRMED
     check became `if False and ...`: failed `assert _journal(..., finding="F-2", fix_id="FIX-2") == 2`
-    (0 == 2); the PARKED cap check became `if False:`: failed `assert _journal(git_repo, "PARKED", 1)
+    (0 == 2); round 2: the duplicate check, now also covered for CONFIRMED by the same-tree
+    check, was re-proven with a FALSE_POSITIVE row: failed `assert _journal(git_repo,
+    "FALSE_POSITIVE", 1) == 2` (0 == 2); the PARKED cap check became `if False:`: failed `assert _journal(git_repo, "PARKED", 1)
     == 2` (0 == 2). The pass check, re-proven with a FALSE_POSITIVE row because the CONFIRMED check
     also refuses an unkept pass: failed `assert _journal(git_repo, "FALSE_POSITIVE", 2) == 2` (0 == 2)."""
     run = _two_fix_run(git_repo)
@@ -451,6 +453,7 @@ def test_the_journal_command_validates_its_row(git_repo):
     assert fr.cycles(git_repo, run) == {}
     assert _journal(git_repo, "CONFIRMED", 1) == 0
     assert _journal(git_repo, "CONFIRMED", 1) == 2  # the same cycle counted twice
+    assert _journal(git_repo, "FALSE_POSITIVE", 1) == 2  # any second row: only the duplicate rule
     assert fr.cycles(git_repo, run) == {"F-1": 1}
 
 
@@ -461,7 +464,9 @@ def test_a_parked_finding_blocks_until_its_fix_is_reverted(git_repo):
     `elif not _reverted(row, fixes, hunks):` became `elif False:`, and separately `_reverted`
     `if alone & changed:` became `if False:`; each failed
     `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`. `if row["finding"] not in held:`
-    became `if True:`; failed the same assertion with 'FA-1-1 ... is unresolved ...' in its place."""
+    became `if True:`; failed the same assertion with 'FA-1-1 ... is unresolved ...' in its place.
+    Round 2: `_reverted` is now file level, so `elif not _reverted(row, fixes, changed):` as
+    `elif False:` and the held mutation were re-run, with the same failures."""
     run = _app_run(git_repo, "STANDARD")
     _three_cycles(git_repo, line=50)  # outside every hunk: only the file clause can block
     assert fr.parked(git_repo, run) == {"F-1"}
@@ -473,16 +478,136 @@ def test_a_parked_finding_blocks_until_its_fix_is_reverted(git_repo):
 
 
 def test_a_parked_finding_blocks_while_its_line_is_in_a_fix_hunk(git_repo):
-    """Invariant: a parked finding whose line lies in a hunk still in the fix diff (here FIX-2's
-    lib.py) keeps blocking after its own fix's files are reverted.
+    """Invariant: a parked finding in a file still in the fix diff (here FIX-2's lib.py) keeps
+    blocking after its own fix's files are reverted.
     Red 2026-11-22, tests/test_fixaudit_record.py::test_a_parked_finding_blocks_while_its_line_is_in_a_fix_hunk:
     `_reverted` `return not any(h["path"] == row["file"] ...` became `return True or ...`;
+    failed `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`. Round 2 (file level, the
+    line clause dropped): `return not (files | {row["file"]}) & changed` became `return not files & changed`;
     failed `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`."""
     _two_fix_run(git_repo)
     _three_cycles(git_repo, file="lib.py")
     _edit_and_test(git_repo, "app.py", "x = 1\n")
     _verdicts(git_repo, 4, [])
     assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]
+
+
+@pytest.mark.parametrize("spelling", ["./lib.py", "lib.py/", "sub\\lib.py", "../lib.py",
+                                      "/lib.py", "C:/lib.py"])
+def test_a_verdict_row_file_must_be_spelt_as_the_diff_spells_it(git_repo, spelling):
+    """Invariant: every FA row's file, a P3 too, is a canonical repo-relative POSIX path. A P3
+    row isolates this check: the in-scope check applies only to a confirmed P1 or P2.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_verdict_row_file_must_be_spelt_as_the_diff_spells_it:
+    all six cases against the round 1 code (2d6ad3a's fixaudit_record.py) failed
+    `assert ['FA-1-1 (P2, FIX-1) was confirmed ...'] == ["FA-1-1 file ... spells it"]` (then a P2
+    row; now a P3, which isolates the check); `_pass_reasons` `if not _canonical(row["file"]):`
+    became `if False:`: all six failed `assert [] == ["FA-1-1 file ... spells it"]`."""
+    _two_fix_run(git_repo)
+    _verdicts(git_repo, 1, [_fa("FA-1-1", file=spelling, priority="P3")])
+    assert fr.record(git_repo) == [f"FA-1-1 file {spelling!r} is not a repo-relative POSIX "
+                                   "path as the fix diff spells it"]
+
+
+def test_the_reviewers_probe_a_second_spelling_is_refused_and_not_kept(git_repo):
+    """Invariant: a confirmed P2 at `./lib.py` (the reviewer's probe, which let a parked fix
+    through: `fr.record` returned []) is refused and its pass never kept, so it can never
+    become a parked row that reads as reverted.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_the_reviewers_probe_a_second_spelling_is_refused_and_not_kept:
+    against the round 1 code (2d6ad3a's fixaudit_record.py) it failed its first assertion
+    (`['FA-1-1 (P2, FIX-1) was confirmed ...'] == ["FA-1-1 file './lib.py' ..."]`); with
+    `if not _canonical(row["file"]):` as `if False:` it failed the same assertion with
+    "FA-1-1 is a confirmed P2 in ./lib.py, which neither ..." in its place."""
+    run = _two_fix_run(git_repo)
+    _verdicts(git_repo, 1, [_fa("FA-1-1", file="./lib.py")])
+    assert fr.record(git_repo) == ["FA-1-1 file './lib.py' is not a repo-relative POSIX path "
+                                   "as the fix diff spells it"]
+    assert fixaudit.kept_passes(git_repo, run) == {}
+
+
+def test_a_confirmed_row_must_name_a_file_of_the_fix_or_its_diff(git_repo):
+    """Invariant: a confirmed P2 sits in the fix diff or in its fix's files; a P3 elsewhere is
+    allowed (it goes to the deferred pool).
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_confirmed_row_must_name_a_file_of_the_fix_or_its_diff:
+    against the round 1 code (2d6ad3a's fixaudit_record.py), and with the in-scope `elif` as
+    `elif False and ...`, it failed `assert ['FA-1-1 (P2, FIX-1) was confirmed in pass 1 ...'] ==
+    ["FA-1-1 is a confirmed P2 in other.py, which neither ..."]`."""
+    _commit(git_repo, {"other.py": "z = 1\n"})
+    _two_fix_run(git_repo)
+    _verdicts(git_repo, 1, [_fa("FA-1-1", file="other.py"),
+                            _fa("FA-1-2", file="other.py", priority="P3")])
+    assert fr.record(git_repo) == ["FA-1-1 is a confirmed P2 in other.py, which neither the fix "
+                                   "diff nor FIX-1's files hold"]
+
+
+def test_a_parked_fix_sharing_a_file_blocks_while_that_file_differs(git_repo):
+    """Invariant: a file the parked fix shares with another fix counts as reverted only when it
+    has no hunk at all, since code cannot tell which fix made a shared file's hunks.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_parked_fix_sharing_a_file_blocks_while_that_file_differs:
+    against the round 1 code (2d6ad3a's fixaudit_record.py), and with `_reverted`'s `files`
+    minus the other fixes' files (the round 1 rule), it failed
+    `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`."""
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "lib.py"]), _entry(2, ["lib.py"])], edit)
+    _three_cycles(git_repo, line=50)
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # app.py reverted; lib.py still differs
+    _verdicts(git_repo, 4, [])
+    assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]
+
+
+def test_a_parked_fix_with_a_skipped_binary_file_blocks_while_it_differs(git_repo):
+    """Invariant: a binary file the diff skips still counts as changed for the revert check.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_parked_fix_with_a_skipped_binary_file_blocks_while_it_differs:
+    against the round 1 code (2d6ad3a's fixaudit_record.py), and with `| set(report["skipped"])`
+    dropped from `_changed`, it failed `assert [] == [_parked_but_present(k) for k in (1, 2, 3)]`."""
+    (git_repo / "blob.bin").write_bytes(b"\x00\x01")
+    _git(git_repo, "add", "-A")
+    _git(git_repo, "commit", "-qm", "binary")
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        (git_repo / "blob.bin").write_bytes(b"\x00\x02")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "blob.bin"])], edit)
+    _three_cycles(git_repo, line=50)
+    _edit_and_test(git_repo, "app.py", "x = 1\n")
+    report = _verdicts(git_repo, 4, [])
+    assert report["skipped"] == ["blob.bin"]
+    assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]
+
+
+def test_a_damaged_appended_marker_refuses_before_the_gate_records(git_repo):
+    """Invariant: the appended-pass marker is checked before L5.4 is recorded.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_damaged_appended_marker_refuses_before_the_gate_records:
+    against the round 1 code (2d6ad3a's fixaudit_record.py), and with the marker check as
+    `if False and not all(`, it failed `assert [] == ['fixaudit-appended.json must hold ...']`."""
+    run = _app_run(git_repo, "STANDARD")
+    _verdicts(git_repo, 1, [])
+    _put(git_repo, f".claude/audits/runs/{run}/{fr.APPENDED}", '["1"]')
+    assert fr.record(git_repo) == [
+        f"{fr.APPENDED} must hold a list of the pass numbers already appended; repair it"]
+    assert "L5.4" not in ps.load(git_repo).layers
+
+
+def test_a_confirmed_cycle_needs_a_new_tree(git_repo):
+    """Invariant: two CONFIRMED cycles of one finding at the same audited tree are one repair
+    attempt, so the second is refused.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_confirmed_cycle_needs_a_new_tree:
+    against the round 1 code (2d6ad3a's fixaudit_record.py), and with the same-tree check as
+    `if False:`, it failed `assert _journal(git_repo, "CONFIRMED", 2) == 2` (0 == 2)."""
+    run = _app_run(git_repo, "STANDARD")
+    _verdicts(git_repo, 1, [_fa("FA-1-1")])
+    fr.record(git_repo)
+    assert _journal(git_repo, "CONFIRMED", 1) == 0
+    _verdicts(git_repo, 2, [_fa("FA-2-1")])  # no edit since pass 1
+    fr.record(git_repo)
+    assert sorted(fixaudit.kept_passes(git_repo, run)) == [1, 2]
+    assert _journal(git_repo, "CONFIRMED", 2) == 2
+    assert fr.cycles(git_repo, run) == {"F-1": 1}
 
 
 def test_a_verdict_row_names_an_l4_fix_and_resolves_only_its_own_fix(git_repo):
@@ -554,7 +679,8 @@ def test_the_seven_case_fixture_blocks_until_each_is_resolved(git_repo):
              _entry(4, ["proof.py"]), _entry(5, ["dedupe.py"]), _entry(6, ["util.py"]),
              _entry(7, ["README.md"])]
     run = _to_l5(git_repo, "STANDARD", fixes, fix)
-    report = _verdicts(git_repo, 1, [_fa("FA-1-1", fix=6), _fa("FA-1-2", fix=7)])
+    report = _verdicts(git_repo, 1, [_fa("FA-1-1", fix=6, file="util.py"),
+                                    _fa("FA-1-2", fix=7, file="README.md")])
     assert report["auditors"] == ["bug-auditor", "bug-auditor:DAT", "perf-auditor"]
     hits = {h["fix_id"]: h for h in report["siblings"]["hits"]}
     assert {k: (h["path"], h["line"]) for k, h in hits.items()} == {

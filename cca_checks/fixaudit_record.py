@@ -155,11 +155,22 @@ def _pass_reasons(data: dict, passes: dict[int, dict], report: dict, fixes: list
     if missing:
         reasons.append(f"L5.4 pass {k} does not cover the changed hunks {', '.join(missing)}")
     pairs = {(f["fix_id"], f["finding"]) for f in fixes}
+    changed = _changed(report)
     for row in data["findings"]:
         if (row["fix_id"], row["finding"]) not in pairs:
             # The cap and the revert are found through this pair; a wrong one escapes both.
             reasons.append(f"{row['id']} names fix {row['fix_id']} for finding {row['finding']}, "
                            "which L4 does not have")
+        # The revert check compares this file with the diff's paths, so a second spelling of
+        # one file, or a file outside the fix, would read as reverted.
+        if not _canonical(row["file"]):
+            reasons.append(f"{row['id']} file {row['file']!r} is not a repo-relative POSIX path "
+                           "as the fix diff spells it")
+        elif row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING \
+                and row["file"] not in changed | {p for f in fixes if f["fix_id"] == row["fix_id"]
+                                                  for p in f["files"]}:
+            reasons.append(f"{row['id']} is a confirmed {row['priority']} in {row['file']}, which "
+                           f"neither the fix diff nor {row['fix_id']}'s files hold")
         if row["verdict"] != "RESOLVED":
             continue
         p = int(row["resolves"].split("-")[1])
@@ -176,21 +187,29 @@ def _pass_reasons(data: dict, passes: dict[int, dict], report: dict, fixes: list
     return reasons, True
 
 
-def _reverted(row: dict, fixes: list[dict], hunks: list[dict]) -> bool:
-    """True when the fix that introduced `row` is out of the tree: no file that fix alone lists
-    differs from prefix_tree, and no current fix hunk holds the finding's line."""
-    changed = {h["path"] for h in hunks} | {h["old_path"] for h in hunks if h["old_path"]}
-    others = {p for f in fixes if f["fix_id"] != row["fix_id"] for p in f["files"]}
-    alone = {p for f in fixes if f["fix_id"] == row["fix_id"] for p in f["files"]} - others
-    if alone & changed:
-        return False
-    return not any(h["path"] == row["file"]
-                   and h["new_start"] <= row["line"] < h["new_start"] + h["new_len"]
-                   for h in hunks)
+def _changed(report: dict) -> set[str]:
+    """Every path the current fix diff touches, a skipped binary or non-UTF-8 file included."""
+    return ({h["path"] for h in report["hunks"]}
+            | {h["old_path"] for h in report["hunks"] if h["old_path"]} | set(report["skipped"]))
+
+
+def _canonical(path: str) -> bool:
+    """A repo-relative POSIX path spelt the one way the fix diff spells it."""
+    pure = pathlib.PurePosixPath(path)
+    return (path == pure.as_posix() and not pure.is_absolute() and ".." not in pure.parts
+            and "\\" not in path and ":" not in path)
+
+
+def _reverted(row: dict, fixes: list[dict], changed: set[str]) -> bool:
+    """True when no file of the fix that introduced `row`, nor the finding's own file, differs
+    from prefix_tree. File level, shared files included: code cannot tell which fix made a
+    shared file's hunks, so a hunk left in one means the fix may still be there."""
+    files = {p for f in fixes if f["fix_id"] == row["fix_id"] for p in f["files"]}
+    return not (files | {row["file"]}) & changed
 
 
 def _unresolved(passes: dict[int, dict], held: set[str], fixes: list[dict],
-                hunks: list[dict]) -> list[str]:
+                changed: set[str]) -> list[str]:
     """A confirmed P1 or P2 blocks until a later pass resolves it, or until its finding is
     parked at the cap and its fix reverted: no run commits a fix with a known bug in it."""
     cleared = {row["resolves"] for p in passes.values() for row in p["findings"]
@@ -205,7 +224,7 @@ def _unresolved(passes: dict[int, dict], held: set[str], fixes: list[dict],
             if row["finding"] not in held:
                 out.append(f"{what} was confirmed in pass {k} and is unresolved: fix it and have "
                            "the next pass re-verify it RESOLVED")
-            elif not _reverted(row, fixes, hunks):
+            elif not _reverted(row, fixes, changed):
                 out.append(f"{what}: {row['finding']} is parked, but {row['fix_id']} is still in "
                            "the tree; revert that fix whole")
     return out
@@ -248,14 +267,14 @@ def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
         return reasons, None, report
     passes = fixaudit.kept_passes(root, state.run_id)
     held = parked(root, state.run_id)
+    changed = _changed(report)
     data, why = _audit_file(root, audit or AUDIT)
     if data is None:
-        return (reasons + [str(why)] + _unresolved(passes, held, fixes, report["hunks"]),
-                None, report)
+        return reasons + [str(why)] + _unresolved(passes, held, fixes, changed), None, report
     file_reasons, new = _pass_reasons(data, passes, report, fixes)
     keep = data if new and not file_reasons and not reasons else None
     considered = passes if file_reasons else {**passes, data["pass"]: data}
-    return (reasons + file_reasons + _unresolved(considered, held, fixes, report["hunks"]),
+    return (reasons + file_reasons + _unresolved(considered, held, fixes, changed),
             keep, report)
 
 
@@ -287,6 +306,11 @@ def record(root: pathlib.Path, audit: pathlib.Path | None = None) -> list[str]:
     # would let one bad line from any run block this one.
     appended_path = _journal_path(root, state.run_id).with_name(APPENDED)
     appended = json.loads(appended_path.read_bytes()) if appended_path.exists() else []
+    if not isinstance(appended, list) or not all(
+            isinstance(k, int) and not isinstance(k, bool) for k in appended):
+        # Checked before the gate records, so a damaged marker cannot leave L5.4 recorded with
+        # its passes' rows lost or appended twice.
+        return [f"{APPENDED} must hold a list of the pass numbers already appended; repair it"]
     checks = (f"{len(report['siblings']['hits'])} sibling hits disposed, "
               f"{len(report['mechanisms'])} mechanism flags")
     detail = f"FAST checks: {checks}" if state.tier == "FAST" else \
@@ -316,8 +340,16 @@ def _journal_cli(root: pathlib.Path, state, a: argparse.Namespace) -> list[str]:
         reasons.append(f"L4 has no fix {a.fix_id} for finding {a.finding}")
     # The cap counts CONFIRMED rows, so each must be a real cycle: one per finding and pass,
     # and only for a pass that confirmed a blocking defect in that fix.
-    if any(r["finding"] == a.finding and r["pass"] == a.pass_no for r in _rows(root, state.run_id)):
+    rows = _rows(root, state.run_id)
+    if any(r["finding"] == a.finding and r["pass"] == a.pass_no for r in rows):
         reasons.append(f"the journal already has a row for {a.finding} in pass {a.pass_no}")
+    # Three cycles mean three repair attempts: a pass at a tree an earlier CONFIRMED pass of
+    # this finding already audited saw no new repair.
+    tried = {kept[r["pass"]]["audited_tree"] for r in rows
+             if r["finding"] == a.finding and r["verdict"] == "CONFIRMED" and r["pass"] in kept}
+    if a.verdict == "CONFIRMED" and a.pass_no in kept and kept[a.pass_no]["audited_tree"] in tried:
+        reasons.append(f"pass {a.pass_no} audited the same tree as an earlier confirmed pass of "
+                       f"{a.finding}; a cycle needs a repair in between")
     if a.verdict == "CONFIRMED" and not any(
             f["verdict"] == "CONFIRMED" and f["priority"] in BLOCKING and f["fix_id"] == a.fix_id
             for f in kept.get(a.pass_no, {}).get("findings", [])):
