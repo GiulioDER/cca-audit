@@ -11,8 +11,9 @@ from . import layer_outputs, pipeline_state
 from .bugs.caused_by import _path, fix_diff
 from .bugs.gitread import GitError, git
 
-# Placeholder: Task 9's measurement of past fixes (their 90th percentile) sets this.
-SIZE_THRESHOLD = 40
+# 90th percentile of past fix sizes (139.4 non-test lines per fix, n=198), rounded up; see
+# docs/preregistrations/2026-11-22-fix-audit-loop.md, Result (2026-11-22).
+SIZE_THRESHOLD = 140
 
 
 class FixAuditRefused(ValueError):

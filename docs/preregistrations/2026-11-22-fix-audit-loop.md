@@ -88,3 +88,28 @@ not measured until it does.
 - **Q2 needs a later audit to exist:** with L5.4, fixes are audited inside the run, so a
   "qualifying pair" is rarer; if fewer than 5 pairs appear by 2027-01-31, Q2 is reported with its
   actual n and no verdict.
+
+## Result (2026-11-22)
+
+Status: Q3 measured; Q1 and Q2 not yet measured.
+
+- **Q3 measured:** the 90th percentile is 139.4 lines (nearest rank). The 50th is 50.1, the 75th
+  93.6 and the 95th 141.7. n = 198 ledger fixes of `GiulioDER/cca-audit` with a `fix_commit`,
+  in 20 distinct commits. All 20 commits exist in this checkout, so none were skipped; no binary
+  file appeared. The ledger holds 3,593 rows with a `fix_commit`, 3,395 of them in other
+  repositories, which are excluded.
+- **Q3 predicted:** 30 to 80 lines, most likely about 45.
+- **Gap:** the 90th percentile is 59.4 lines above the top of the predicted range and 94.4 above
+  the most likely value, so the Q3 prediction is falsified. Per the falsification rule above it
+  changes the threshold, not the verdict on Q1 or Q2. The 20 commits are few and each is a whole
+  audit run's fix commit divided across many fixes, so the percentile rests on 20 distinct sizes.
+- **Apparatus check:** commit bfc7d2568ff40b52dace6ee3653c7caef0b48463 has non-test numstat lines
+  20+0, 3+2, 37+10 and 12+2, which I summed by hand to 86; the script printed 86 (43 per fix for
+  the 2 fixes sharing it).
+- **Command** (run from the repository root with `PYTHONPATH` set to it):
+  `python C:\Users\gde00\AppData\Local\Temp\claude\f88d87f088c7e606\6c0dcf18-af2c-4868-8ef4-7c3537af01cc\scratchpad\measure_q3.py`
+  (single commit: the same script with the sha as its argument). It reads the ledger through
+  `bug_rows`, keeps `repo` equal to `GiulioDER/cca-audit` (case-insensitive), counts
+  `git show --numstat --format=` lines excluding `fixaudit.is_test_path` paths, and divides by the
+  fixes sharing the commit.
+- **Setting:** `SIZE_THRESHOLD` becomes 140 (the 90th percentile rounded up).
