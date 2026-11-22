@@ -828,14 +828,58 @@ def _check_counts(layer: str, state: PipelineState, counts: dict, root) -> None:
                 f"L3 plans {to_fix} (--to-fix) and defers {n_deferred} (--deferred) but L2.5 "
                 f"confirmed {confirmed}; every confirmed finding is either planned or deferred"
             )
-        if state.fix_audit:
-            # The fix audit measures the fixes against this tree, so it must exist.
-            state.prefix_tree = core.fingerprint(root)
-            if state.prefix_tree is None:
-                raise RecordRefused(
-                    "L3 cannot be recorded: the working tree could not be fingerprinted "
-                    "(git missing from PATH, older than 2.31, or timed out)"
-                )
+
+
+def _pin_ref(run_id: str, name: str) -> str:
+    return f"refs/cca/{run_id}/{name}"
+
+
+def pin_tree(state: PipelineState, name: str, tree: str, root) -> None:
+    """Point `refs/cca/<run_id>/<name>` at `tree`. The fingerprint writes its tree through a
+    temporary index, so nothing else references it, and `git gc` would prune it from under the
+    fix diff, the revert check and the red proofs."""
+    ref = _pin_ref(state.run_id, name)
+    proc = _git(root, "update-ref", ref, tree)
+    if proc is None or proc.returncode != 0:
+        why = "git could not run" if proc is None else proc.stderr.decode("utf-8", "replace")
+        why = why.strip()
+        raise RecordRefused(
+            f"tree {tree} could not be pinned as {ref} ({why}); fix git and record again, or "
+            "abort this run and start one with a plain --run-id"
+        )
+
+
+def _unpin(run_id: str, root) -> str:
+    """Delete the run's `refs/cca/<run_id>/` refs; '' when done, else a note for the log.
+
+    A failure is noted, not raised: close and abort are how a run with a broken git is
+    retired, and a leftover ref costs only the objects it keeps."""
+    listed = _git(root, "for-each-ref", "--format=%(refname)", f"refs/cca/{run_id}/")
+    failed = listed is None or listed.returncode != 0
+    for ref in [] if listed is None or failed else listed.stdout.decode("utf-8").split():
+        done = _git(root, "update-ref", "-d", ref)
+        failed = failed or done is None or done.returncode != 0
+    # a note, not a "|": the log line is a Markdown table row
+    return f" (refs/cca/{run_id}/ left in place)" if failed else ""
+
+
+def _store_prefix_tree(state: PipelineState, tree: str | None, root) -> None:
+    """Keep the tree the first L3 record saw: the fix audit measures every fix from it."""
+    if tree is None:
+        raise RecordRefused(
+            "L3 cannot be recorded: the working tree could not be fingerprinted "
+            "(git missing from PATH, older than 2.31, or timed out)"
+        )
+    if state.prefix_tree is None:
+        pin_tree(state, "prefix", tree, root)
+        state.prefix_tree = tree
+    elif tree != state.prefix_tree and "L4" in state.layers:
+        # A second prefix_tree taken after the fixes would hide them from the fix audit.
+        raise RecordRefused(
+            "L3 cannot be recorded again after L4 at a different tree: the fixes are measured "
+            f"from the tree L3 first stored ({state.prefix_tree}). Revert the edits to record "
+            "L3 again, or carry on from L4"
+        )
 
 
 def _read_output(layer: str, output, root) -> bytes:
@@ -1139,6 +1183,8 @@ def record(layer: str, *, status: str = "done", detail: str = "", fixes: int | N
             # Optional: only an APPROVED verdict over false positives requires the file.
             data = _read_output(layer, output, root) if output is not None else None
             _check_l6(state, detail, None if data is None else json.loads(data), root)
+        if layer == "L3" and state.fix_audit:
+            _store_prefix_tree(state, tree if isinstance(tree, str) else None, root)
         if layer == "L2.5" and state.tier != "FAST":
             fp_anchors = _fp_anchors(state, root)
         state.seq += 1
@@ -1202,12 +1248,15 @@ def abort(reason: str, root: str | pathlib.Path = ".") -> pathlib.Path | None:
     path = state_path(root)
     if not path.exists():
         return None
+    state = None
     try:
         state = load(root)
         run_id = state.run_id if state else "unknown"
     except ValueError:
         run_id = "unparseable"
-    log = core.append_log(root, f"| {core.now()} | run {run_id} | ABORTED | {reason} |")
+    # Only a fix audit run pins trees (refs/cca/<run_id>/), and an unreadable state names none.
+    left = _unpin(run_id, root) if state is not None and state.fix_audit else ""
+    log = core.append_log(root, f"| {core.now()} | run {run_id} | ABORTED | {reason}{left} |")
     path.unlink()
     _registry("unregister", root)
     return log
@@ -1512,7 +1561,7 @@ def close(root: str | pathlib.Path = ".") -> pathlib.Path | None:
     log = core.append_log(
         root,
         f"| {core.now()} | run {state.run_id} | COMPLETE | tier {state.tier} | "
-        f"layers: {recorded} |",
+        f"layers: {recorded}{_unpin(state.run_id, root) if state.fix_audit else ''} |",
     )
     path.unlink()
     _registry("unregister", root)

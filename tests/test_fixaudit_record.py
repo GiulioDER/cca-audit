@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 
 import pytest
 from conftest import (
@@ -60,16 +61,6 @@ def test_the_third_cycle_parks_the_finding(tmp_path):
     _j(tmp_path, "F-1", "CONFIRMED", 3)
     _j(tmp_path, "F-2", "PARKED", 1)
     assert fr.parked(tmp_path, RUN) == {"F-1", "F-2"}
-
-
-def test_pass_numbering_continues_after_a_pause(tmp_path):
-    """Invariant: numbering is one past the highest pass journaled; an empty journal starts at 1.
-    Red 2026-11-22, tests/test_fixaudit_record.py::test_pass_numbering_continues_after_a_pause:
-    `next_pass` `1 + max(` became `0 + max(`; the first assertion failed, `assert 0 == 1`."""
-    assert fr.next_pass(tmp_path, RUN) == 1
-    _j(tmp_path, "F-1", "CONFIRMED", 1)
-    _j(tmp_path, "F-1", "RESOLVED", 2)
-    assert fr.next_pass(tmp_path, RUN) == 3
 
 
 def test_side_ledger_rows_never_reach_the_disposition_ledger(tmp_path):
@@ -338,6 +329,26 @@ def test_fast_records_without_an_auditor_file_once_checks_pass(git_repo, capsys)
         "a FAST run has no auditor pass: record L5.4 without --audit"]
 
 
+def test_a_kept_pass_tree_is_pinned_so_gc_cannot_prune_it(git_repo):
+    """Invariant: each kept pass's audited tree is pinned as refs/cca/<run_id>/pass-<k>, so
+    `git gc` keeps the tree the next pass's delta and the red proofs restore.
+    Red 2026-11-22, tests/test_fixaudit_record.py::test_a_kept_pass_tree_is_pinned_so_gc_cannot_prune_it:
+    with `record`'s `pipeline_state.pin_tree(state, f"pass-{keep['pass']}", ...)` mutated to
+    `pass` (as at 2b269bd, which pinned nothing), failed `assert (128, '') == (0, 'tree')`."""
+    run = _app_run(git_repo, "STANDARD")
+    tree = _verdicts(git_repo, 1, [])["tree"]
+    assert fr.record(git_repo) == []
+
+    def git(*args):
+        proc = subprocess.run(["git", "-C", str(git_repo), *args], capture_output=True,
+                              text=True)
+        return proc.returncode, proc.stdout.strip()
+
+    git("gc", "--prune=now", "--quiet")
+    assert git("cat-file", "-t", tree) == (0, "tree")
+    assert git("rev-parse", f"refs/cca/{run}/pass-1") == (0, tree)
+
+
 def test_an_edit_after_l54_makes_l5_and_l54_owed_again(git_repo):
     """Invariant: L5.4 is a fix verdict, stamped with its tree, so an edit makes it owed again.
     Red 2026-11-22, tests/test_fixaudit_record.py::test_an_edit_after_l54_makes_l5_and_l54_owed_again:
@@ -500,8 +511,9 @@ def test_a_verdict_row_file_must_be_spelt_as_the_diff_spells_it(git_repo, spelli
     Red 2026-11-22, tests/test_fixaudit_record.py::test_a_verdict_row_file_must_be_spelt_as_the_diff_spells_it:
     all six cases against the round 1 code (2d6ad3a's fixaudit_record.py) failed
     `assert ['FA-1-1 (P2, FIX-1) was confirmed ...'] == ["FA-1-1 file ... spells it"]` (then a P2
-    row; now a P3, which isolates the check); `_pass_reasons` `if not _canonical(row["file"]):`
-    became `if False:`: all six failed `assert [] == ["FA-1-1 file ... spells it"]`."""
+    row; now a P3, which isolates the check); `_pass_reasons`
+    `if not fixaudit.canonical(row["file"]):` became `if False:` (re-proved 2026-11-22 at
+    2b269bd plus the final fix wave): all six failed `assert [] == ["FA-1-1 file ... spells it"]`."""
     _two_fix_run(git_repo)
     _verdicts(git_repo, 1, [_fa("FA-1-1", file=spelling, priority="P3")])
     assert fr.record(git_repo) == [f"FA-1-1 file {spelling!r} is not a repo-relative POSIX "
@@ -515,8 +527,9 @@ def test_the_reviewers_probe_a_second_spelling_is_refused_and_not_kept(git_repo)
     Red 2026-11-22, tests/test_fixaudit_record.py::test_the_reviewers_probe_a_second_spelling_is_refused_and_not_kept:
     against the round 1 code (2d6ad3a's fixaudit_record.py) it failed its first assertion
     (`['FA-1-1 (P2, FIX-1) was confirmed ...'] == ["FA-1-1 file './lib.py' ..."]`); with
-    `if not _canonical(row["file"]):` as `if False:` it failed the same assertion with
-    "FA-1-1 is a confirmed P2 in ./lib.py, which neither ..." in its place."""
+    `if not fixaudit.canonical(row["file"]):` as `if False:` (re-proved 2026-11-22 at 2b269bd
+    plus the final fix wave) it failed the same assertion with "FA-1-1 is a confirmed P2 in
+    ./lib.py, which the fix diff does not touch" in its place."""
     run = _two_fix_run(git_repo)
     _verdicts(git_repo, 1, [_fa("FA-1-1", file="./lib.py")])
     assert fr.record(git_repo) == ["FA-1-1 file './lib.py' is not a repo-relative POSIX path "

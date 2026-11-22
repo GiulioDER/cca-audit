@@ -18,6 +18,7 @@ import pathlib
 import sys
 
 from . import fixaudit, layer_outputs, pipeline_state
+from .bugs.gitread import GitError
 
 JOURNAL = "fixaudit-journal.jsonl"
 LEDGER = pathlib.Path(".claude/audits/FIXAUDIT_LEDGER.jsonl")
@@ -82,11 +83,6 @@ def parked(root: pathlib.Path, run_id: str) -> set[str]:
     """Findings that reached the cap, plus any the journal parks outright."""
     held = {finding for finding, n in cycles(root, run_id).items() if n >= CAP}
     return held | {row["finding"] for row in _rows(root, run_id) if row.get("verdict") == "PARKED"}
-
-
-def next_pass(root: pathlib.Path, run_id: str) -> int:
-    """One past the highest pass journaled, so numbering survives a pause and resume."""
-    return 1 + max((row["pass"] for row in _rows(root, run_id)), default=0)
 
 
 def append_verdicts(root: pathlib.Path, run_id: str, audit: dict) -> int:
@@ -287,6 +283,8 @@ def record(root: pathlib.Path, audit: pathlib.Path | None = None) -> list[str]:
         return ["no CCA run is open"]
     reasons, keep, report = _evaluate(root, state, audit)
     if keep is not None:
+        # pinned first, so no kept pass names a tree `git gc` may prune
+        pipeline_state.pin_tree(state, f"pass-{keep['pass']}", keep["audited_tree"], root)
         pipeline_state._store_run_file(state, fixaudit.PASS_FILE.format(keep["pass"]), keep, root)
     if reasons:
         return reasons
@@ -402,9 +400,10 @@ def main(argv: list[str]) -> int:
     a = p.parse_args(argv)
     try:
         reasons = _run(a, pathlib.Path(a.root))
-    except ValueError as exc:
+    except (ValueError, GitError) as exc:
         # Every refusal below (FixAuditRefused, ShapeError, RecordRefused) is a ValueError,
-        # and a refusal is a message and exit 2, not a traceback.
+        # and a refusal is a message and exit 2, not a traceback. A git that fails (a tree
+        # pruned, a repository moved) is the same: the agent needs the reason, not a stack.
         reasons = [str(exc)]
     for reason in reasons:
         print(f"refused: {reason}", file=sys.stderr)
