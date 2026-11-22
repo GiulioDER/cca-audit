@@ -132,6 +132,7 @@ def _fix_through_l55(repo, fixes):
     (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=fixes, output=write_output(repo), root=repo)
     ps.record("L5", root=repo)
+    ps.record("L5.4", source="tool", root=repo)
     ps.record("L5.5", root=repo)
 
 
@@ -342,6 +343,7 @@ def test_g03_control_parking_after_l4_records_with_parked(monkeypatch, git_repo)
     ps.record("L4", fixes=1, output=write_output(git_repo), root=git_repo)
     (git_repo / "app.py").write_text("x = 1\n", encoding="utf-8")  # parked: reverted
     ps.record("L5", root=git_repo)
+    ps.record("L5.4", source="tool", root=git_repo)
     ps.record("L5.5", root=git_repo)
     assert _no_proofs(monkeypatch, git_repo, "--parked", "1") == 0
     assert "1 CONFIRMED P1 parked" in ps.load(git_repo).layers["L5.6"]["detail"]

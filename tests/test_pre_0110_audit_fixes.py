@@ -294,6 +294,7 @@ def _run_to_l5(repo, *, p1_confirmed: bool, to_fix: int, ledger_priority: str | 
     (repo / "app.py").write_text("x = 2\n", encoding="utf-8")
     ps.record("L4", fixes=1, output=write_output(repo), root=repo)
     ps.record("L5", root=repo)
+    ps.record("L5.4", source="tool", root=repo)
 
 
 def test_u09_no_proofs_refused_when_a_confirmed_p1_was_planned(monkeypatch, git_repo):
