@@ -248,7 +248,7 @@ def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
     reasons += bad
     for hit in report["siblings"]["hits"]:
         reasons += [f"{hit['fix_id']}: sibling {hit['path']}:{hit['line']}: {why}"
-                    for why in fixaudit.check_dispositions([hit], dispositions, root)]
+                    for why in fixaudit.check_dispositions([hit], dispositions)]
     reasons += fixaudit.failure_test_reasons(report["mechanisms"], fixes, root)
     reasons += [f"{s['fix_id']}: {s['lines']:g} changed lines, over {fixaudit.SIZE_THRESHOLD}; "
                 "give size_reason in L4"

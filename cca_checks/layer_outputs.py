@@ -180,7 +180,8 @@ _FA_TEXT = ("fix_id", "finding", "file", "claim")
 
 
 def l54_audit(data) -> dict:
-    """The fix audit verdict file: its pass, the tree and hunks audited, and one entry per finding."""
+    """The fix audit verdict file: its pass, the tree and hunks audited, and one entry per
+    finding."""
     if not isinstance(data, dict):
         raise ShapeError("L5.4's file must be a JSON object")
     pass_no = data.get("pass")
@@ -199,7 +200,8 @@ def l54_audit(data) -> dict:
     for n, row in enumerate(findings):
         if not isinstance(row, dict):
             raise ShapeError(f"L5.4 finding {n} must be an object")
-        match = _FA_ID.fullmatch(row.get("id")) if isinstance(row.get("id"), str) else None
+        fa_id = row.get("id")
+        match = _FA_ID.fullmatch(fa_id) if isinstance(fa_id, str) else None
         if not match or int(match.group(1)) != pass_no:
             raise ShapeError(f'L5.4 finding {n} needs an id of the form "FA-{pass_no}-<n>"')
         if row["id"] in seen:

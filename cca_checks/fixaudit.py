@@ -103,7 +103,8 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
         if line.startswith("--- "):
             close()
             head = None
-            old_path = path = _path(line[4:], "a/")  # a deleted file has no "+++" path; the old one stands
+            # a deleted file has no "+++" path; the old one stands
+            old_path = path = _path(line[4:], "a/")
         elif line.startswith("+++ "):
             path = _path(line[4:], "b/") or path
         elif m := _HUNK.match(line):
@@ -144,7 +145,7 @@ def is_test_path(path: str) -> bool:
 def _files_of(hunks: list[Hunk], fix: dict) -> set[str]:
     """The files a fix lists, a renamed file under its new path (it is one file)."""
     renamed = {h.old_path: h.path for h in hunks if h.old_path != h.path}
-    return {renamed.get(f, f) for f in fix["files"]}
+    return {renamed.get(f) or f for f in fix["files"]}
 
 
 def size_report(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
@@ -229,7 +230,8 @@ def _tolerant(text: str) -> str:
     inside a longer name (`load(` is not `json_load(`), though a dotted prefix is allowed."""
     parts: list[str] = []
     tokens = _TOKEN.findall(text)
-    for prev, tok in zip([None, *tokens], tokens):
+    # one longer than `tokens` on purpose: each token is paired with the one before it
+    for prev, tok in zip([None, *tokens], tokens, strict=False):
         if prev is not None:
             word = prev[-1].isalnum() or prev[-1] == "_"
             parts.append("[[:space:]]+" if word and (tok[0].isalnum() or tok[0] == "_")
@@ -247,7 +249,10 @@ def _grep(repo_root: Path, pattern: str) -> list[tuple[str, int, str, int]]:
     identical stripped texts earlier in the same path, which tells two copies of a line apart."""
     body = pattern[len(_REGEX_PREFIX):] if pattern.startswith(_REGEX_PREFIX) else _tolerant(pattern)
     try:
-        out = git(repo_root, "grep", "-n", "-I", "-z", "-E", "-e", body)
+        # The run's own files (a repository may track .claude/) would list the fixes' patterns
+        # back from the report that holds them.
+        out = git(repo_root, "grep", "-n", "-I", "-z", "-E", "-e", body,
+                  "--", ":(exclude,literal).claude/audits")
     except GitError as e:
         # git grep exits 1 with no stderr when nothing matches; a bad regex has a message.
         if str(e).rstrip().endswith(f"failed in {repo_root}:"):
@@ -329,10 +334,9 @@ def sibling_hits(repo_root: Path, hunks: list[Hunk], fixes: list[dict]) -> Sibli
     return SiblingSweep(out, too_broad)
 
 
-def check_dispositions(hits: list[dict], dispositions: dict, repo_root: Path) -> list[str]:
+def check_dispositions(hits: list[dict], dispositions: dict) -> list[str]:
     """Reasons a hit has no valid disposition. A hit still listed is a site no fix edited, so
-    only `not_applicable` with a reason can clear it; `fixed` is rejected. `repo_root` is kept
-    for the callers' signature and is not read."""
+    only `not_applicable` with a reason can clear it; `fixed` is rejected."""
     reasons = []
     for hit in hits:
         hid = hit["hit_id"]
@@ -366,7 +370,8 @@ MECHANISMS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
                 ("bug-auditor", "perf-auditor")),
     "parser": ((r"\bjson\.loads?\b", r"\bre\.compile\b", r"\bast\.parse\b", r"\bcsv\."),
                ("bug-auditor", DATA_AUDITOR)),
-    "file_write": ((r"\.write_(?:text|bytes)\(", r"\bopen\(.*[\"'][wax][bt+]*[\"']", r"\bos\.replace\b"),
+    "file_write": ((r"\.write_(?:text|bytes)\(", r"\bopen\(.*[\"'][wax][bt+]*[\"']",
+                    r"\bos\.replace\b"),
                    (DATA_AUDITOR,)),
 }
 # Shell installers: a trap or a changed error preference alters what a failure does, and a
@@ -394,7 +399,7 @@ def mechanism_flags(hunks: list[Hunk], fixes: list[dict]) -> list[dict]:
                 table = MECHANISMS
             else:
                 continue
-            for line_no, text in zip(h.added_at, h.added):
+            for line_no, text in zip(h.added_at, h.added, strict=True):
                 for name, (patterns, auditors) in table.items():
                     if any(re.search(p, text) for p in patterns):
                         out.append({"fix_id": fix["fix_id"], "mechanism": name, "path": h.path,
@@ -421,14 +426,17 @@ def failure_test_reasons(flags: list[dict], fixes: list[dict], repo_root: Path) 
         if not name or not path.is_file():
             reasons.append(f"{fid}: failure_test {node!r} is not an existing file::test node")
             continue
-        if not re.search(rf"\bdef\s+{re.escape(name)}\b", path.read_text(encoding="utf-8", errors="replace")):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        if not re.search(rf"\bdef\s+{re.escape(name)}\b", source):
             reasons.append(f"{fid}: failure_test {node!r}: no def {name} in {file}")
     return reasons
 
 
 def auditors_for(fixes: list[dict], flags: list[dict], categories: dict[str, str]) -> list[str]:
     """At most MAX_AUDITORS, by how many fixes need each: the auditor of a fix's finding
-    category, and those its flagged mechanisms route to. Ties go alphabetically."""
+    category, and those its flagged mechanisms route to. A tie goes first to an auditor a
+    mechanism routes to, security-auditor first, so a process launch cannot lose its security
+    review to alphabetical order; then alphabetically."""
     needs: dict[str, int] = {}
     for fix in fixes:
         wanted = {a for f in flags if f["fix_id"] == fix["fix_id"] for a in f["auditors"]}
@@ -436,7 +444,9 @@ def auditors_for(fixes: list[dict], flags: list[dict], categories: dict[str, str
             wanted.add(categories[fix["finding"]])
         for a in wanted:
             needs[a] = needs.get(a, 0) + 1
-    return sorted(needs, key=lambda a: (-needs[a], a))[:MAX_AUDITORS]
+    routed = {a for f in flags for a in f["auditors"]}
+    rank = sorted(needs, key=lambda a: (-needs[a], a not in routed, a != "security-auditor", a))
+    return rank[:MAX_AUDITORS]
 
 
 REPORT = "fixaudit.json"

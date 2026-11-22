@@ -321,6 +321,22 @@ def test_a_tracked_binary_file_holding_the_pattern_is_skipped(git_repo):
     assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits == []
 
 
+def test_the_sweep_never_lists_the_runs_own_files(git_repo_tracking_claude):
+    """Invariant: in a repository that tracks .claude/, a pattern held by a run file (a run's
+    notes quote the fix lines) is not a sibling; one elsewhere still is.
+
+    Node: tests/test_fixaudit_checks.py::test_the_sweep_never_lists_the_runs_own_files.
+    Red 2026-11-22: `_grep` without `"--", ":(exclude,literal).claude/audits"` (as at 2b269bd)
+    failed `assert ['.claude/audits/runs/r/notes.txt', 'b.py'] == ['b.py']`.
+    """
+    repo = git_repo_tracking_claude
+    _write(repo, "a.py", 'x = f("a")\n')
+    _write(repo, "b.py", 'y = f("a")\n')
+    _write(repo, ".claude/audits/runs/r/notes.txt", 'x = f("a")\n')
+    hunks = _fix_hunks_of(repo, lambda: _write(repo, "a.py", 'x = f("a", 1)\n'))
+    assert sorted(h["path"] for h in fixaudit.sibling_hits(repo, hunks, [_fix()]).hits) == ["b.py"]
+
+
 def test_num001_shape_needs_a_declared_pattern(git_repo):
     """Invariant: a sibling that is not a textual copy is found only through a declared pattern;
     a `re:` prefix makes a declared pattern a regex, and the default is a fixed string.
@@ -387,14 +403,13 @@ def test_an_unedited_hit_cannot_be_marked_fixed_and_ids_are_stable(git_repo):
     assert len(hit["hit_id"]) == 2 + 10
     hid = hit["hit_id"]
     check = fixaudit.check_dispositions
-    assert check([hit], {hid: {"disposition": "fixed"}}, git_repo) == [
+    assert check([hit], {hid: {"disposition": "fixed"}}) == [
         f"{hid}: marked fixed, but b.py:1 is unedited; edit it, or mark it not_applicable with a reason"]
-    assert check([hit], {hid: {"disposition": "not_applicable", "reason": "a test double"}},
-                 git_repo) == []
-    assert check([hit], {hid: {"disposition": "not_applicable", "reason": " "}}, git_repo) == [
+    assert check([hit], {hid: {"disposition": "not_applicable", "reason": "a test double"}}) == []
+    assert check([hit], {hid: {"disposition": "not_applicable", "reason": " "}}) == [
         f"{hid}: not_applicable needs a reason"]
-    assert check([hit], {}, git_repo) == [f"{hid}: no disposition"]
-    assert check([hit], {hid: {"disposition": "later"}}, git_repo) == [
+    assert check([hit], {}) == [f"{hid}: no disposition"]
+    assert check([hit], {hid: {"disposition": "later"}}) == [
         f"{hid}: disposition must be 'not_applicable', not 'later'"]
     _write(git_repo, "b.py", 'y = f("a")  \nz = 1\n')  # trailing spaces only: same stripped text
     assert fixaudit.sibling_hits(git_repo, hunks, [_fix()]).hits[0]["hit_id"] == hid
@@ -553,7 +568,7 @@ def _flagged(path, *lines):
 
 
 def test_bug002_shape_flags_a_timeout():
-    """Invariant: a fix that adds a process launch with a timeout is flagged for both.
+    r"""Invariant: a fix that adds a process launch with a timeout is flagged for both.
 
     Node: tests/test_fixaudit_checks.py::test_bug002_shape_flags_a_timeout.
     Red: 2026-11-22 mutating the timeout regex `\btimeout\s*=` to `\btimeoutX\s*=` failed
@@ -563,7 +578,7 @@ def test_bug002_shape_flags_a_timeout():
 
 
 def test_bug003_shape_flags_a_parser():
-    """Invariant: json.loads over ledger rows is a parser of untrusted input.
+    r"""Invariant: json.loads over ledger rows is a parser of untrusted input.
 
     Node: tests/test_fixaudit_checks.py::test_bug003_shape_flags_a_parser.
     Red: 2026-11-22 mutating `\bjson\.loads?\b` to `\bjson\.dumps?\b` failed
@@ -632,12 +647,17 @@ def test_a_failure_test_naming_a_missing_node_is_refused(tmp_path):
 
 
 def test_no_more_than_four_auditors():
-    """Invariant: at most 4 auditors, the most needed first, ties alphabetical, the data auditor
-    counted apart from bug-auditor.
+    """Invariant: at most 4 auditors, the most needed first; among ties an auditor a mechanism
+    routes to comes first, security-auditor before the rest, then alphabetical; the data auditor
+    is counted apart from bug-auditor.
 
     Node: tests/test_fixaudit_checks.py::test_no_more_than_four_auditors.
     Red: 2026-11-22 mutating `[:MAX_AUDITORS]` to `[:MAX_AUDITORS + 1]` failed
-    `assert [..., 'perf-auditor'] == [..., 'numeric-auditor']` (a fifth auditor).
+    `assert [..., 'perf-auditor'] == [..., 'numeric-auditor']` (a fifth auditor). Red (m5)
+    2026-11-22 against 2b269bd's fixaudit.py (ties alphabetical) failed `assert ['bug-auditor',
+    'bug-auditor:DAT', 'deploy-auditor', 'numeric-auditor'] == ['bug-auditor',
+    'security-auditor', 'bug-auditor:DAT', 'deploy-auditor']`: the process launch lost
+    security-auditor.
     """
     fixes = [{"fix_id": f"F{i}", "files": [], "finding": f"BUG-{i}"} for i in (1, 2, 3)]
     categories = {"BUG-1": "bug-auditor", "BUG-2": "bug-auditor", "BUG-3": "numeric-auditor"}
@@ -646,12 +666,12 @@ def test_no_more_than_four_auditors():
              _flag("F3", "timeout", ("bug-auditor", "perf-auditor")),
              _flag("F3", "trap", ("deploy-auditor",))]
     got = fixaudit.auditors_for(fixes, flags, categories)
-    assert got == ["bug-auditor", "bug-auditor:DAT", "deploy-auditor", "numeric-auditor"]
+    assert got == ["bug-auditor", "security-auditor", "bug-auditor:DAT", "deploy-auditor"]
     assert fixaudit.auditors_for(fixes, [], categories) == ["bug-auditor", "numeric-auditor"]
 
 
 def test_a_lock_is_flagged_and_a_lookalike_is_not():
-    """Invariant: threading and msvcrt.locking are locks; a word that only contains one is not.
+    r"""Invariant: threading and msvcrt.locking are locks; a word that only contains one is not.
 
     Node: tests/test_fixaudit_checks.py::test_a_lock_is_flagged_and_a_lookalike_is_not.
     Red: 2026-11-22 mutating `\bmsvcrt\.locking\b` to `\bmsvcrtX\.locking\b` failed
@@ -663,7 +683,7 @@ def test_a_lock_is_flagged_and_a_lookalike_is_not():
 
 
 def test_a_file_write_is_flagged_and_a_read_or_dump_is_not():
-    """Invariant: open with a write, append or exclusive mode and write_text are file writes;
+    r"""Invariant: open with a write, append or exclusive mode and write_text are file writes;
     open for reading and json.dumps are not.
 
     Node: tests/test_fixaudit_checks.py::test_a_file_write_is_flagged_and_a_read_or_dump_is_not.
