@@ -71,11 +71,21 @@ def journal(root: pathlib.Path, run_id: str, *, finding: str, fix_id: str, pass_
 
 
 def cycles(root: pathlib.Path, run_id: str) -> dict[str, int]:
-    """Per original finding, how many fix audit passes confirmed a defect in its fix."""
+    """Per original finding, how many fix audit passes confirmed a defect in its fix: the larger
+    of its CONFIRMED journal rows and the distinct audited trees of kept passes holding a
+    CONFIRMED P1 or P2 about it. The agent writes the journal; `record` keeps the passes, so a
+    run that never journals still reaches the cap."""
     counts: dict[str, int] = {}
     for row in _rows(root, run_id):
         if row.get("verdict") == "CONFIRMED":
             counts[row["finding"]] = counts.get(row["finding"], 0) + 1
+    trees: dict[str, set[str]] = {}
+    for p in fixaudit.kept_passes(root, run_id).values():
+        for row in p["findings"]:
+            if row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING:
+                trees.setdefault(row["finding"], set()).add(p["audited_tree"])
+    for finding, seen in trees.items():
+        counts[finding] = max(counts.get(finding, 0), len(seen))
     return counts
 
 
@@ -103,17 +113,32 @@ JOURNAL_VERDICTS = (*layer_outputs.FA_VERDICTS, "PARKED")
 APPENDED = "fixaudit-appended.json"
 
 
-def _dispositions(root: pathlib.Path) -> tuple[dict, list[str]]:
-    """The sibling dispositions file (none written means none given), or why it is unusable."""
+def _dispositions(root: pathlib.Path, run_id: str) -> tuple[dict, list[str]]:
+    """The sibling dispositions file (none written means none given), or why it is unusable.
+
+    It must name the open run: hit ids are the same in every run and the file sits at one path,
+    so a file an earlier run left would otherwise clear this run's hits.
+    """
     path = root / SIBLINGS
     if not path.exists():
         return {}, []
+    name = SIBLINGS.as_posix()
     try:
         data = json.loads(path.read_bytes())
     except (OSError, ValueError) as exc:
-        return {}, [f"{SIBLINGS.as_posix()} is not readable JSON ({exc})"]
-    if not isinstance(data, dict) or not all(isinstance(v, dict) for v in data.values()):
-        return {}, [f'{SIBLINGS.as_posix()} must map each hit id to {{"disposition", "reason"}}']
+        return {}, [f"{name} is not readable JSON ({exc})"]
+    if not isinstance(data, dict):
+        return {}, [f'{name} must be an object with "run_id", "hits" and "skipped"']
+    if "run_id" not in data:
+        return {}, [f'{name} has no "run_id": give this run\'s, {run_id}']
+    if data["run_id"] != run_id:
+        return {}, [f"{name} is for run {data['run_id']!r}, not this run {run_id}: "
+                    "write this run's dispositions"]
+    hits, skipped = data.get("hits", {}), data.get("skipped", {})
+    if not isinstance(hits, dict) or not all(isinstance(v, dict) for v in hits.values()):
+        return {}, [f'{name} "hits" must map each hit id to {{"disposition", "reason"}}']
+    if not isinstance(skipped, dict) or not all(isinstance(v, str) for v in skipped.values()):
+        return {}, [f'{name} "skipped" must map each skipped path to its reason']
     return data, []
 
 
@@ -240,11 +265,18 @@ def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
                        "run it again and audit that report")
     report = fixaudit.build_report(root, state, tree)
     fixes = fixaudit.stored_fixes(root, state)
-    dispositions, bad = _dispositions(root)
+    dispositions, bad = _dispositions(root, state.run_id)
     reasons += bad
     for hit in report["siblings"]["hits"]:
         reasons += [f"{hit['fix_id']}: sibling {hit['path']}:{hit['line']}: {why}"
-                    for why in fixaudit.check_dispositions([hit], dispositions)]
+                    for why in fixaudit.check_dispositions([hit], dispositions.get("hits", {}))]
+    # No check and no auditor reads a skipped edit, so a person must say why it needs none.
+    acknowledged = dispositions.get("skipped", {})
+    reasons += [f'{p} is skipped (a binary file, or a hunk holding U+FFFD; its other hunks are '
+                f'still audited), so nothing audits that edit: give a reason under "skipped" in '
+                f'{SIBLINGS.as_posix()}'
+                for p in report["skipped"]
+                if not fixaudit.is_test_path(p) and not acknowledged.get(p, "").strip()]
     reasons += fixaudit.failure_test_reasons(report["mechanisms"], fixes, root)
     reasons += [f"{s['fix_id']}: {s['lines']:g} changed lines, over {fixaudit.SIZE_THRESHOLD}; "
                 "give size_reason in L4"
@@ -290,7 +322,8 @@ def record(root: pathlib.Path, audit: pathlib.Path | None = None) -> list[str]:
         return reasons
     assert report is not None  # a None report always comes with a reason
     if (root / SIBLINGS).exists():
-        pipeline_state._store_run_file(state, SIBLINGS.name, _dispositions(root)[0], root)
+        pipeline_state._store_run_file(state, SIBLINGS.name,
+                                       _dispositions(root, state.run_id)[0], root)
     passes = fixaudit.kept_passes(root, state.run_id)
     # The run's own record of what reached the shared ledger: reading that ledger instead
     # would let one bad line from any run block this one.
@@ -377,6 +410,7 @@ def _run(a: argparse.Namespace, root: pathlib.Path) -> list[str]:
         "too_broad": len(report["siblings"]["too_broad"]),
         "mechanisms": len(report["mechanisms"]),
         "oversized": [s["fix_id"] for s in report["sizes"] if s["over"]],
+        "skipped": report["skipped"],
         "auditors": report["auditors"], "delta_hunks": [h["id"] for h in report["delta_hunks"]],
     }))
     return []

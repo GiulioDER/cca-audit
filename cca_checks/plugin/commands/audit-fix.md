@@ -1106,13 +1106,13 @@ python -m cca_checks fixaudit check
 ```
 
 It writes `.claude/audits/runs/<run_id>/fixaudit.json` for the current tree and prints a summary
-(`report`, `tree`, `sibling_hits`, `too_broad`, `mechanisms`, `oversized`, `auditors`, `delta_hunks`).
+(`report`, `tree`, `sibling_hits`, `too_broad`, `mechanisms`, `oversized`, `skipped`, `auditors`, `delta_hunks`).
 The fix diff is the working tree against `prefix_tree`, the tree `pipeline record L3` stored before
 the first fix edit, so the feature under audit is not in it. It refuses (exit 2, with the reason)
 while the stored L4 file is missing, an entry lacks a `fix_id` or a `files` list as Step 4 describes,
 a non-test file the fixes edit is listed by no entry, an entry has no `sibling_patterns` (or `[]`
 without a `sibling_reason`), or a declared pattern matches over 50 sites or cannot be searched (a
-bad regex). Fix L4.json, record L4 again, and run `fixaudit check` again. The report holds three
+bad regex). Fix L4.json, record L4 again, then Step 5 again, then run `fixaudit check` again. The report holds three
 checks, and each blocks the record:
 
 1. **Sibling sweep** (`siblings`). Each fix's patterns are searched over the tracked files: the
@@ -1120,13 +1120,17 @@ checks, and each blocks the record:
    to, whose first argument holds a string literal, as `callee("literal"`), and its declared
    `sibling_patterns`. A site on a line the fix diff added is not a hit (it was edited), nor is the
    line a guard was attached to. Every hit in `siblings.hits` needs a disposition in
-   `.claude/audits/out/L5.4-siblings.json`, keyed by its `hit_id`:
+   `.claude/audits/out/L5.4-siblings.json`, under `hits`, keyed by its `hit_id`:
 
    ```json
-   {"S-1a2b3c4d5e": {"disposition": "not_applicable", "reason": "<why this site does not have the defect>"}}
+   {"run_id": "<the run_id pipeline start printed>",
+    "hits": {"S-1a2b3c4d5e": {"disposition": "not_applicable", "reason": "<why this site does not have the defect>"}},
+    "skipped": {"assets/logo.png": "<why this edit needs no audit>"}}
    ```
 
-   `"not_applicable"` with a reason is the only disposition accepted. To fix a sibling, edit it: it
+   `run_id` is the open run's id: `fixaudit record` refuses a file without it, or with another run's,
+   naming both, because hit ids are the same in every run and a file an earlier run left would
+   clear this run's hits. `"not_applicable"` with a reason is the only disposition accepted. To fix a sibling, edit it: it
    then leaves the list. Add its file to the `files` of the fix whose finding it shares (a sibling
    fix is part of that fix, not a new one), record L4 again, then Step 5 and `fixaudit check` again.
    A hit marked `fixed` is refused, because a hit still listed is a site nobody edited. An automatic
@@ -1143,7 +1147,15 @@ checks, and each blocks the record:
    Writing that test edits the tree: record L4 again with the new `failure_test`, then Step 5 again,
    then `fixaudit check` again.
 3. **Size** (`sizes`). Per fix, the changed non-test lines in its `files`, a file listed by k fixes
-   counting 1/k to each. A fix the report marks `over` names `size_reason` in L4.
+   counting 1/k to each. A fix the report marks `over` names `size_reason` in L4: record L4 again
+   with it, then Step 5 again, then `fixaudit check` again.
+
+**Skipped edits** (`skipped`). A binary file and a hunk holding U+FFFD (bytes that are not UTF-8)
+have no lines the checks or the auditors can read. A binary file has no hunks; of a file that is
+not UTF-8 only the hunks holding U+FFFD are dropped, and its other hunks still reach `delta_hunks`.
+The report lists the path under `skipped` either way. Each skipped path that is not a test file needs a
+non-empty reason under `"skipped"` in the dispositions file, saying why that edit needs no audit;
+`record` refuses while one has none. The auditors, fp-check, L5.5 and L6 are handed these reasons.
 
 **On FAST that is the whole layer.** Record it with no verdict file:
 
@@ -1170,6 +1182,8 @@ Your scope, and nothing else:
     L4 entry of its fix (fix_id, the finding it answers, files);
   - the sibling sites in `siblings.hits`, with their dispositions, and `siblings.too_broad`;
   - the flagged `mechanisms`, and whether each flagged fix's failure_test exercises the failure;
+  - the paths under `skipped`, each with its reason from the "skipped" map of
+    .claude/audits/out/L5.4-siblings.json;
   - the FIX_JOURNAL rows of these fixes.
 Report bugs in the lines these hunks add or change: a sibling site left with the defect, a new bug in
 a new mechanism, a code or doc defect the fix introduced. Anything else you notice is OUT_OF_SCOPE:
@@ -1185,7 +1199,8 @@ RESOLVED, to be re-verified at the current tree. An auditor's guess never costs 
 
 ```
 subagent_type: fp-check
-MODE=FIXAUDIT, pass <k>, tree <the tree fixaudit check printed>. You are given fixaudit.json.
+MODE=FIXAUDIT, pass <k>, tree <the tree fixaudit check printed>. You are given fixaudit.json,
+and the skipped paths with their reasons (the "skipped" map of L5.4-siblings.json).
 For each finding, verify against ACTUAL code via Read/Grep:
   (a) does the issue exist at the cited file:line at the current tree?
   (b) is it in a line a hunk of delta_hunks added or changed, or at a listed sibling site?
@@ -1265,7 +1280,8 @@ under Deferred in the report and in the commit message's `Deferred:` lines (FA i
 file:line, claim). `pipeline deferred` builds its pool from L2.5 and L3 only, so it does not carry
 them; the commit message is where they survive. UNCERTAIN goes to a human; FALSE_POSITIVE is dropped.
 
-**The cap.** The tool counts the CONFIRMED journal rows of each original finding. At 3 the finding is
+**The cap.** The tool counts, per original finding, its CONFIRMED journal rows and the distinct
+trees of kept passes that confirmed a P1 or P2 in its fix, and takes the larger. At 3 the finding is
 parked: revert its whole fix, every file its L4 entry lists, back to the pre-fix tree
 (`git restore --source <prefix_tree> --worktree -- <files>`, with `prefix_tree` from `fixaudit.json`;
 delete a file the fix created), and park the original finding `UNCERTAIN → human` as § Fix Attempt
@@ -1295,8 +1311,8 @@ so in the report. Otherwise run one `differential-review` agent over the **whole
 working-tree diff since Layer 4 began** — the audit fixes, not the original feature, but including
 anything the Step 5 repair loop and the Step 5.4 repairs touched. Hand it, inline, the L4 entries
 (`files`, `sibling_patterns`, `sibling_reason`, `size_reason`), the sibling list of the latest
-`fixaudit.json` (`siblings.hits` with their dispositions, and `siblings.too_broad`), and the kept
-L5.4 passes:
+`fixaudit.json` (`siblings.hits` with their dispositions, and `siblings.too_broad`), the `skipped`
+paths with their reasons (the "skipped" map of L5.4-siblings.json), and the kept L5.4 passes:
 ```
 subagent_type: differential-review
 For each fix hunk, the intended change is to resolve a specific finding. Verify:
@@ -1386,7 +1402,8 @@ One `architect-reviewer` agent (read-only gate — it does NOT edit code; it ret
 instructions). Pass it the CONFIRMED P1/P2 list (IDs + fix locations) inline. STANDARD/DEEP additionally
 require the mapping table. Pass it also every FALSE_POSITIVE of L2.5, each with its claim, its
 `fp_reason` and fp-check's evidence: the architect accepts or rejects each one. Pass it also the
-L5.4 material Step 5.5 was handed (the L4 entries, the sibling list, the kept passes) and each fix
+L5.4 material Step 5.5 was handed (the L4 entries, the sibling list, the skipped paths with their
+reasons, the kept passes) and each fix
 audit repair's Step 5.6 proof.
 ```
 subagent_type: architect-reviewer

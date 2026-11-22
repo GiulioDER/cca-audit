@@ -6,6 +6,11 @@ case-insensitively) that has a `fix_commit` present in this clone, the non-test 
 skipped) of that commit, divided by the number of ledger rows sharing the commit. It prints the
 50th, 75th, 90th and 95th percentiles (nearest rank) of that per-row value.
 
+Only CCA fix commits count (Correction 2 of the pre-registration): a commit with one parent whose
+subject contains one of FIX_SUBJECTS. A merge's first-parent diff is its whole pull request, and
+a commit with another subject may carry feature code, so either would put feature lines in the
+numerator. Each excluded commit is printed with its reason.
+
 This is a commit-level average: every fix of one commit gets the same value, so the sample has at
 most as many distinct values as there are commits. It is not the statistic `fixaudit.size_report`
 applies, which counts per fix only the files that fix lists, over the fix diff from the run's
@@ -20,9 +25,14 @@ import math
 import subprocess
 import sys
 from collections import Counter
+from pathlib import Path
 
+from cca_checks.bugs.gitread import git
 from cca_checks.bugs.store import LEDGER, bug_rows, bugs_dir
 from cca_checks.fixaudit import is_test_path
+
+#: The subjects CCA's Step 7 gives its fix commits ("fix(x): N audit fixes from CCA (...)").
+FIX_SUBJECTS = ("audit fixes from CCA", "deferred fixes from CCA")
 
 
 def lines_of(sha):
@@ -38,6 +48,16 @@ def lines_of(sha):
             continue
         n += int(a) + int(d)
     return n, binary
+
+
+def excluded(sha):
+    """Why `sha` is not a CCA fix commit, or None when it is."""
+    if len(git(Path("."), "rev-list", "--parents", "-n1", sha).split()) > 2:
+        return "merge (its first-parent diff is the whole pull request)"
+    subject = git(Path("."), "log", "-1", "--format=%s", sha).strip()
+    if not any(s in subject for s in FIX_SUBJECTS):
+        return f"subject marks no CCA fix commit: {subject}"
+    return None
 
 
 def pct(v, q):  # nearest rank
@@ -59,6 +79,10 @@ for sha in {r.fix_commit for r in mine}:
 ok = [r for r in mine if have[r.fix_commit]]
 print("skipped missing commit: fixes", len(mine) - len(ok), "commits",
       sum(not v for v in have.values()))
+why = {s: excluded(s) for s in {r.fix_commit for r in ok}}
+for s, reason in sorted((s, w) for s, w in why.items() if w):
+    print("excluded", s[:10], "fixes", sum(r.fix_commit == s for r in ok), reason)
+ok = [r for r in ok if not why[r.fix_commit]]
 share = Counter(r.fix_commit for r in ok)
 cache = {s: lines_of(s) for s in share}
 vals = [cache[r.fix_commit][0] / share[r.fix_commit] for r in ok]

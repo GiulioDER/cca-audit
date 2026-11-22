@@ -11,8 +11,9 @@ from . import layer_outputs, pipeline_state
 from .bugs.caused_by import _path, fix_diff
 from .bugs.gitread import GitError, git
 
-# 90th percentile of past fix sizes (139.4 non-test lines per fix, n=198), rounded up; see
-# docs/preregistrations/2026-11-22-fix-audit-loop.md, Result (2026-11-22).
+# 90th percentile of past fix sizes (139.4 non-test lines per fix, n=198), rounded up. It stays 140
+# until a per-fix re-measure from run archives: Q3 measured a commit-level average, which must not
+# set it. See docs/preregistrations/2026-11-22-fix-audit-loop.md, Corrections 1 and 3 (2026-11-22).
 SIZE_THRESHOLD = 140
 
 
@@ -47,7 +48,8 @@ _BINARY = re.compile(r"Binary files (.*) differ")
 
 
 def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
-    """The hunks of a `fix_diff` and the paths of binary or non-UTF-8 files, which are not counted.
+    """The hunks of a `fix_diff`, and the paths of binary files and of files with a hunk dropped
+    for bytes that are not UTF-8; neither is counted.
 
     Hunk bodies are consumed by their line counts, as caused_by._changes does, so a removed
     line that reads `-- x` is never mistaken for a file header.
@@ -121,10 +123,14 @@ def parse_fix_diff(diff: str) -> tuple[list[Hunk], list[str]]:
             old, _, new = m.group(1).rpartition(" and ")
             skipped.append(_path(new, "b/") or _path(old, "a/") or "")
     close()
-    # gitread.git decodes with errors="replace", so U+FFFD marks bytes that are not UTF-8. (A file
-    # that really contains U+FFFD is skipped too; the cost of reusing caused_by.fix_diff.)
-    bad = {h.path for h in hunks if any(_REPLACEMENT in x for x in h.removed + h.added)}
-    return [h for h in hunks if h.path not in bad], skipped + sorted(bad)
+    # gitread.git decodes with errors="replace", so U+FFFD marks bytes that are not UTF-8. (A hunk
+    # that really contains U+FFFD is skipped too; the cost of reusing caused_by.fix_diff.) Only
+    # that hunk is dropped: the file's other hunks keep their flags and their audit.
+    def unreadable(h: Hunk) -> bool:
+        return any(_REPLACEMENT in x for x in h.removed + h.added)
+
+    bad = sorted({h.path for h in hunks if unreadable(h)})
+    return [h for h in hunks if not unreadable(h)], skipped + bad
 
 
 def fix_hunks(repo_root: Path, prefix_tree: str | None, tree: str) -> tuple[list[Hunk], list[str]]:

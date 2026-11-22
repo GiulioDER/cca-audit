@@ -706,3 +706,35 @@ def test_a_docs_file_raises_no_flags():
     """
     assert _flagged("NOTES.md", "call json.loads(x) with timeout=3") == set()
     assert _flagged("cfg.toml", "timeout=3") == set()
+
+
+def test_only_the_hunks_holding_u_fffd_are_dropped():
+    """Invariant (SEC-001): a hunk holding U+FFFD (bytes that were not UTF-8) is dropped and its
+    path named in `skipped`, but the file's other hunks stay, so their mechanism flags and their
+    audit survive.
+    Failure caught: one U+FFFD line hid a `subprocess.run(..., shell=True)` hunk of the same file
+    from the delta and from the mechanism flags.
+    Red 2026-11-22, tests/test_fixaudit_checks.py::test_only_the_hunks_holding_u_fffd_are_dropped:
+    baseline 023a1b5 (`parse_fix_diff` dropped every hunk of the file); failed
+    `assert [] == ['m.py:1']`."""
+    diff = ("--- a/m.py\n+++ b/m.py\n@@ -1 +1 @@\n-a = 1\n+subprocess.run(x, shell=True)\n"
+            f"@@ -10 +10 @@\n-b = 1\n+b = '{chr(0xFFFD)}'\n")
+    hunks, skipped = fixaudit.parse_fix_diff(diff)
+    assert [h.id for h in hunks] == ["m.py:1"]
+    assert skipped == ["m.py"]
+    flags = fixaudit.mechanism_flags(hunks, [{"fix_id": "F1", "files": ["m.py"]}])
+    assert [f["mechanism"] for f in flags] == ["process"]
+
+
+def test_the_size_threshold_stays_140_until_a_per_fix_re_measure():
+    """Invariant: SIZE_THRESHOLD is 140. Correction 1 of
+    docs/preregistrations/2026-11-22-fix-audit-loop.md holds it at 140 until a per-fix
+    re-measure with the statistic `size_report` applies, from run archives; Q3's numbers are
+    commit-level averages and must not set it. Correction 3 withdraws Correction 2's change to 35.
+    Failure mode (FA-1-10, FIX-006, NUM-001): the threshold was set to 35 from that average.
+
+    Node: tests/test_fixaudit_checks.py::test_the_size_threshold_stays_140_until_a_per_fix_re_measure.
+    Red 2026-11-22 on the pass-1 tree (run 20261122T184346Z, before the repair), target
+    `fixaudit.SIZE_THRESHOLD`: failed at the assert (35 != 140).
+    """
+    assert fixaudit.SIZE_THRESHOLD == 140

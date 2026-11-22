@@ -51,9 +51,13 @@ close` read them. On STANDARD and DEEP it must
 also append the disposition ledger rows of Step 2.5b to `.claude/audits/AUDITOR_SCORECARD.jsonl`,
 carrying the `run_id` that `pipeline start` printed: `record L2.5` refuses without them, and the
 Step 2.6 scorecard reads them. Neither is optional trail. The same holds for Step 5.4:
-`.claude/audits/out/L5.4-siblings.json` (the sibling dispositions) and, on STANDARD and DEEP,
+`.claude/audits/out/L5.4-siblings.json` (the sibling dispositions and a reason for each skipped file
+that is not a test, carrying this run's `run_id`: another run's file is refused) and, on STANDARD and DEEP,
 `.claude/audits/out/L5.4.json` (the verdict file) are read by `fixaudit record`, and the
-`fixaudit journal` rows are what the repair cap counts.
+`fixaudit journal` rows are what the repair cap counts. A skipped path is a binary file, which has
+no hunks, or a file with a hunk holding U+FFFD (not UTF-8), whose other hunks still reach
+`delta_hunks`; hand the skipped paths with their reasons to the fix audit auditors, fp-check,
+the regression diff and the architect.
 
 Resolve the selected skill directory from this `SKILL.md` path, and use absolute paths when reading
 its references. Never run the bundled `scripts/cca_*.py` to record a layer: an older install can leave

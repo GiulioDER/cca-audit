@@ -185,3 +185,47 @@ measurement of Q1, Q2 or Q3, and not a unit test.
   pass on small fixtures, where no pattern reaches the hit limit; on the real repository the limit
   decides BUG-001. Whether the auditor pass, given this routing, would have confirmed the five is
   not tested here.
+
+## Correction 2 (2026-11-22)
+
+Appended; nothing above is edited.
+
+- **The defect.** The Q3 numerator held feature code. Of the 20 commits, 5 are merges, whose
+  first-parent diff (`git show --numstat`) is the whole pull request, and others are feature
+  squashes that carry a feature with its fixes. The numeric auditor of run 20261122T184346Z
+  (NUM-001) found that the recorded 90th percentile of 139.4 is commit b0e574ac83, the TypeScript
+  backend squash, 2,370 non-test lines over its 17 fixes; over the 12 commits it judged fix-only,
+  the 90th percentile was 65.8.
+- **The new selection rule.** A commit counts only when it has one parent and its subject contains
+  "audit fixes from CCA" or "deferred fixes from CCA", the subjects of CCA's fix commits.
+  `benchmarks/harness/fix_size_q3.py` applies it and prints each excluded commit with its reason.
+  The rule is narrower than the auditor's selection: it also excludes c66f1489cc ("11 CCA audit
+  fixes", 13 fixes) and acde2a388e ("22 P2 fixes from the CCA self hunt", 7 fixes), whose subjects
+  carry neither phrase, so it does not reproduce the 65.8.
+- **Re-run 2026-11-22** from this checkout, `PYTHONPATH=. python benchmarks/harness/fix_size_q3.py`:
+  198 fixes in 20 commits read, none missing; 10 commits excluded, holding 114 fixes (5 merges:
+  1433be742f, 81c3082d77, af3f6bfdba, bfc7d2568f, fe6ceedc02; 5 by subject: 7113cf8c23,
+  acde2a388e, b0e574ac83, c66f1489cc, f91ecc0a52). Kept: n = 84 fixes in 10 commits, 10 distinct
+  values, no binary file. Percentiles (nearest rank): 50th 24.6, 75th 34.7, 90th 34.7, 95th 34.7.
+  The single commit check on bfc7d2568ff40b52dace6ee3653c7caef0b48463 still prints 86.
+- **Against the prediction.** With the corrected selection Q3 reads 34.7, inside the predicted 30
+  to 80 lines and 10.3 below the most likely value of about 45, so the corrected measurement does
+  not falsify the Q3 prediction. The 90th and 95th percentiles are one value because the sample
+  holds only 10 distinct values. The first Correction's caveat stands: this is a commit-level
+  average, not the statistic `size_report` applies.
+- **Setting:** `SIZE_THRESHOLD` becomes 35 (34.7 rounded up), replacing 140.
+
+## Correction 3 (2026-11-22)
+
+Appended; nothing above is edited.
+
+- **Correction 2's setting is withdrawn.** Its change of `SIZE_THRESHOLD` to 35 is withdrawn:
+  Correction 1 holds the threshold at 140 until a per-fix re-measure with the statistic
+  `size_report` applies, from run archives, and Correction 2's 34.7 is still a commit-level
+  average. `SIZE_THRESHOLD` is 140 again. Found by the fix audit of run 20261122T184346Z
+  (FA-1-10, on NUM-001's fix).
+- **Correction 2's corrected Q3 stands as the Q3 result:** n = 84, 90th percentile 34.7. Its 75th,
+  90th and 95th percentiles all come from one commit, 33e1c3a5c5 (764 non-test lines over 22
+  fixes, 34.7 per fix). Re-run 2026-11-22 from this checkout,
+  `PYTHONPATH=. python benchmarks/harness/fix_size_q3.py`, printed 34.72727272727273 for all three.
+- **Still owed:** the per-fix re-measure from run archives.

@@ -319,3 +319,85 @@ def test_both_clients_keep_test_files_out_of_snapshots(text):
 def test_configuration_lists_the_siblings_snapshot_dir():
     cfg = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
     assert ".fixaudit_snapshot/siblings/" in cfg
+
+
+# Run 20261122T184346Z, L4 (2026-11-22). Red: each test below failed on its `assert` against the
+# prose at 023a1b5, except where its docstring names another baseline (targets: audit-fix.md
+# Steps 5.4, 5.5 and 6, the Codex SKILL.md, and docs/configuration.md).
+
+def _sibling_sweep() -> str:
+    step = _step_54()
+    return _flat(step[step.find("1. **Sibling sweep**"):step.find("2. **New mechanism flags**")])
+
+
+def test_the_dispositions_file_is_bound_to_the_run_in_every_place_it_is_shown():
+    """FIX-001, FIX-002 (ENV-001, STAKES-003): `fixaudit record` refuses a dispositions file
+    without the open run's `run_id`; prose showing the old flat map writes a refused file."""
+    sweep = _sibling_sweep()
+    assert '{"run_id": "<the run_id pipeline start printed>",' in sweep
+    assert '"hits": {"S-1a2b3c4d5e": {"disposition": "not_applicable"' in sweep
+    assert "`fixaudit record` refuses a file without it, or with another run's" in sweep
+    assert "carrying this run's `run_id`" in _flat(CODEX)
+    cfg = (ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
+    row = next(ln for ln in cfg.splitlines() if ln.startswith("| `out/L5.4-siblings.json`"))
+    assert "`run_id`" in row and "`hits`" in row and "`skipped`" in row
+
+
+def test_skipped_files_need_a_reason_in_both_clients():
+    """FIX-003 (SEC-001): `fixaudit check` prints `skipped`, and `record` refuses while a skipped
+    non-test path has no reason under "skipped"."""
+    step = _flat(_step_54())
+    assert "`skipped`, `auditors`, `delta_hunks`" in step
+    assert '"skipped": {"assets/logo.png": "<why this edit needs no audit>"}' in step
+    assert "**Skipped edits** (`skipped`)" in step
+    assert "`record` refuses while one has none" in step
+    assert "a reason for each skipped file that is not a test" in _flat(CODEX)
+
+
+def test_a_refusal_or_an_oversized_fix_reruns_step_5_before_the_check():
+    """FIX-007 (DOC-001): recording L4 again makes L5 older than L4, so Step 5 runs again before
+    `fixaudit check`; the old sentence skipped it."""
+    step = _flat(_step_54())
+    assert "Fix L4.json, record L4 again, and run `fixaudit check` again" not in step
+    assert ("Fix L4.json, record L4 again, then Step 5 again, then run `fixaudit check` again"
+            in step)
+    size = step[step.find("3. **Size**"):step.find("**On FAST")]
+    assert ("names `size_reason` in L4: record L4 again with it, then Step 5 again, then "
+            "`fixaudit check` again") in size
+
+
+def test_the_cap_names_both_counts():
+    """FIX-009 (STAKES-001): the cap counts kept passes as well as journal rows."""
+    cap = _flat(_step_54())
+    cap = cap[cap.find("**The cap.**"):cap.find("**Red proof.**")]
+    assert "and takes the larger" in cap
+
+
+def test_every_l54_handoff_passes_the_skipped_reasons():
+    """FA-1-1 (FIX-003, SEC-001): the "Skipped edits" paragraph says the auditors and L6 read the
+    skipped reasons, so every handoff that feeds them carries the `skipped` paths with their
+    reasons: the Part 2 auditor scope, the fp-check FIXAUDIT prompt, Step 5.5 and (inherited)
+    Step 6. The prose also says what is dropped: a binary file has no hunks, and a file that is
+    not UTF-8 loses only its hunks holding U+FFFD.
+
+    Node: tests/test_fixaudit_prose.py::test_every_l54_handoff_passes_the_skipped_reasons.
+    Red 2026-11-22 on the pass-1 tree (run 20261122T184346Z, before the repair): failed at the
+    `assert reasons in scope` (the auditor scope listed no skipped reasons).
+    """
+    step = _flat(_step_54())
+    reasons = 'the paths under `skipped`, each with its reason from the "skipped" map'
+    scope = step[step.find("Your scope, and nothing else:"):step.find("Report bugs in")]
+    assert reasons in scope
+    fp = step[step.find("MODE=FIXAUDIT, pass <k>"):step.find("For each finding, verify")]
+    assert "and the skipped paths with their reasons" in fp
+    handoff = _flat(_section(PIPELINE, "## Step 5.5", "subagent_type: differential-review"))
+    assert 'the `skipped` paths with their reasons (the "skipped" map of' in handoff
+    step6 = _flat(_section(PIPELINE, "## Step 6", "subagent_type: architect-reviewer"))
+    assert "the skipped paths with their reasons" in step6
+    skipped = step[step.find("**Skipped edits**"):step.find("**On FAST")]
+    assert "no hunk of theirs reaches `delta_hunks`" not in skipped
+    assert "A binary file has no hunks" in skipped
+    assert "its other hunks still reach `delta_hunks`" in skipped
+    codex = _flat(CODEX)
+    assert "other hunks still reach `delta_hunks`" in codex
+    assert "hand the skipped paths with their reasons" in codex
