@@ -138,3 +138,50 @@ Appended; nothing above is edited.
   `size_report` but only the commit's average under Q3. A per-fix re-measure with the applied
   statistic, from run archives (each run's L4 file with its prefix tree and commit), is owed and
   not done. `SIZE_THRESHOLD` stays 140 until it is.
+
+## Acceptance replay (2026-11-22)
+
+Appended; nothing above is edited. Acceptance evidence for the design's "Acceptance cases", not a
+measurement of Q1, Q2 or Q3, and not a unit test.
+
+- **What was replayed.** `PYTHONPATH=. python benchmarks/harness/replay_fixaudit_acceptance.py`
+  runs `fixaudit`'s check functions (`fix_hunks`, `sibling_hits`, `mechanism_flags`,
+  `size_report`, `auditors_for`) over the hunt's 22 P2 fixes as run 20261120T225224Z audited them,
+  in a throwaway shared clone. Prefix tree: the tree of 191d9c5. Fixed tree:
+  79e700460b55cd2c6dbfa156af777dfdfc86d771, the `base_tree` that run recorded, still in this
+  clone's objects. It differs from the final squash tree (acde2a3) only in the 7 audit fixes' 11
+  files and 3 test files; each of the 9 files in the run's pre-fix snapshot equals its snapshot
+  copy up to line endings, and the 2 prose files (`audit-fix.md`, the Codex `SKILL.md`) are not in
+  the snapshot, so their audited content rests on the tree alone. The L4 entries were rebuilt by
+  hand from the hunt's L2 files, the commit message of acde2a3 and the diff, because the P2 fixes
+  were never recorded as an L4 file; every non-test file of the diff is listed by a fix, and no fix
+  declares a pattern.
+- **Totals.** 65 hunks; 33 sibling hits; 3 automatic patterns dropped as too broad; 42 mechanism
+  flags; no fix over 140 lines; auditors bug-auditor, bug-auditor:DAT, code-auditor and
+  security-auditor (perf-auditor and numeric-auditor lose at the cap of 4).
+- **BUG-001: missed.** BUG-005's automatic pattern `read_text(encoding="utf-8"` matches 222 sites,
+  over the limit of 50, so it is dropped into `too_broad` and lists nothing. The three strict
+  readers (store.py line 65, resolve.py lines 145 and 189 of the fixed tree) are unedited, so a
+  narrower pattern reaches them: the declared `ledger.read_text(encoding="utf-8")` lists 6 sites,
+  all three among them. I chose that pattern after reading the finding.
+- **SEC-001: missed by the sweep; its fix is routed to security-auditor.** The defect is on the
+  fix's own added line (gitread.py line 38), which the sweep never lists (deviation R3 of the
+  design). SEC-005's two sibling hits are both in a plans document. Process flags at github.py
+  line 57 and holdout.py line 84 route security-auditor to the fix, which its category does too;
+  the gitread.py change raises no flag, because its `subprocess.run(` line is context.
+- **NUM-001: missed.** Its site (cca_scorecard.py line 180) is an added line. Five declared
+  patterns for "where else is a run's parent recorded" were refused at 97 to 204 hits;
+  `state.parent` lists 13, 6 of them in pipeline_state.py, the source the finding names as unread,
+  and none at the site. I chose all six after reading the finding.
+- **BUG-002: caught.** A timeout flag at cca_tautology_check.py line 126, the finding's line,
+  routing bug-auditor and perf-auditor and requiring a `failure_test`.
+- **BUG-003: flagged at its fix, not at its site.** NUM-003's fix raises a parser flag at
+  cca_scorecard.py line 149 (the `json.loads` of summary.json), which routes bug-auditor and the
+  data auditor and requires a malformed input `failure_test`; the dedupe set at line 165 matches
+  no mechanism row.
+- **Against the design's expected outcome** (the sweep lists BUG-001's and SEC-001's siblings, a
+  declared pattern covers NUM-001, the table flags BUG-002 and BUG-003): BUG-002 holds, BUG-003
+  holds at fix level only, and BUG-001, SEC-001 and NUM-001 do not. The unit tests of these shapes
+  pass on small fixtures, where no pattern reaches the hit limit; on the real repository the limit
+  decides BUG-001. Whether the auditor pass, given this routing, would have confirmed the five is
+  not tested here.
