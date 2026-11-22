@@ -277,13 +277,15 @@ def test_u08_control_a_lone_commit_is_still_allowed(monkeypatch, git_repo, comma
 
 # --- U09: --no-proofs must not satisfy L5.6 on a run that fixed a CONFIRMED P1 --------
 
-def _run_to_l5(repo, *, p1_confirmed: bool, to_fix: int):
+def _run_to_l5(repo, *, p1_confirmed: bool, to_fix: int, ledger_priority: str | None = None):
     state = ps.start("STANDARD", root=repo)
     ps.record("L1", output=write_output(repo), root=repo)
     ps.record("L2", counts={"unique": 1},
               output=write_output(repo, _findings(1, U01="P1" if p1_confirmed else "P2")),
               root=repo)
-    _ledger(repo, state.run_id, [("P1" if p1_confirmed else "P2", "CONFIRMED")])
+    priority = ledger_priority if ledger_priority is not None else (
+        "P1" if p1_confirmed else "P2")
+    _ledger(repo, state.run_id, [(priority, "CONFIRMED")])
     ps.record("L2.5", counts={"confirmed": 1, "fp": 0, "uncertain": 0, "duplicate": 0},
               output=write_output(repo, _verdicts(CONFIRMED=1)), root=repo)
     ps.record("L2.6", source="tool", root=repo)
@@ -304,6 +306,25 @@ def test_u09_no_proofs_refused_when_a_confirmed_p1_was_planned(monkeypatch, git_
     Red proof: pre-fix cca_tautology_check.main at 0ec8c47 returns 0 and records L5.6.
     """
     _run_to_l5(git_repo, p1_confirmed=True, to_fix=1)
+    monkeypatch.chdir(git_repo)
+    monkeypatch.setattr(
+        "sys.argv", ["cca_tautology_check.py", "verify", "--no-proofs", "--record"])
+    assert _load_tool().main() != 0
+    assert "L5.6" not in ps.load(git_repo).layers
+
+
+@pytest.mark.parametrize("ledger_priority", ["", "P2"])
+def test_no_proofs_refused_when_the_ledger_row_misstates_the_p1(monkeypatch, git_repo,
+                                                                 ledger_priority):
+    """Invariant: a fixed CONFIRMED P1 needs a RED proof whatever the hand-written ledger
+    row says its priority is.
+
+    Failure mode: `_planned_p1` counted P1s only from the ledger rows' `priority`, which
+    record L2.5 never checks against L2, so a row with no priority (or the auditor's
+    proposed P2) let `--no-proofs --record` mark L5.6 done (STAKES-002, run 20261120T201246Z).
+    Red: both cases against the pre-fix cca_tautology_check.py; 0 != 0 fails.
+    """
+    _run_to_l5(git_repo, p1_confirmed=True, to_fix=1, ledger_priority=ledger_priority)
     monkeypatch.chdir(git_repo)
     monkeypatch.setattr(
         "sys.argv", ["cca_tautology_check.py", "verify", "--no-proofs", "--record"])

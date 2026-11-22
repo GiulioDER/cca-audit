@@ -21,6 +21,7 @@ the run (resolve, RE-call) has one.
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 import re
 from dataclasses import dataclass
@@ -72,6 +73,13 @@ def resolve_symbols(source: str) -> list[SymbolSpan]:
     Raises `SyntaxError` when `source` is not parseable Python: the caller decides on a
     file-level anchor, rather than receiving an empty list that reads as "no symbols".
     """
+    return list(_resolve_symbols(source))
+
+
+# Cached because `bugs anchors --diff` anchors every changed line of a file and each anchor
+# resolves the same source twice: parsing once per file, not twice per line, is the saving.
+@functools.lru_cache(maxsize=8)
+def _resolve_symbols(source: str) -> tuple[SymbolSpan, ...]:
     tree = ast.parse(normalize(source).removeprefix(_BOM))
     spans: list[SymbolSpan] = []
     seen: dict[str, int] = {}
@@ -91,7 +99,7 @@ def resolve_symbols(source: str) -> list[SymbolSpan]:
                     visit(child_body, prefix)
 
     visit(tree.body, "")
-    return spans
+    return tuple(spans)
 
 
 def _statement_bodies(node: ast.stmt) -> list[list[ast.stmt]]:

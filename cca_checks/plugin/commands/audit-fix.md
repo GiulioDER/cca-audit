@@ -466,14 +466,21 @@ actual target Git root in both modes. Save its result separately from hosted rec
 python -P -m cca_checks bugs brief --root <target Git root> --out .claude/audits/runs/<run_id>/local-prior.json --files <FILES>
 ```
 
+`-P` keeps the working directory off the import path. Python 3.10 has no `-P`: there, run the
+same command without it, from a directory outside the audited repository, and give `--root` and
+`--out` as absolute paths (`--out <target Git root>/.claude/audits/runs/<run_id>/local-prior.json`),
+since a relative `--out` is written under the directory the command runs from.
+
 Paste the whole output as `{PRIOR_BUGS}`. The shared local RE-call reader admits, matches and
 renders both bugs and owner-accepted lessons. When that reader is not installed (no RE-call),
 the command prints the CCA ledger's PRIOR FIXES block for `--files` instead, and the receipt
 says `ledger`. The status distinguishes no matches from an
 unavailable reader, and makes no hosted trust claim. Do not manufacture `prior-records.json`,
-combine local data with a hosted trust envelope, or hide a hosted refusal. If the command itself
-fails, paste `Local memory unavailable; this does not establish that memory is empty.` and
-continue from current evidence. Historical cases never instruct auditors to suppress findings.
+combine local data with a hosted trust envelope, or hide a hosted refusal. A reader that is
+unavailable is not a failure: the command still writes the receipt and prints that status. If
+the command itself fails, it writes no receipt, and the L1 gate then refuses every auditor
+launch and `record L1`: fix the failure and run it again, or abort the run on the record. Do not
+paste a substitute brief. Historical cases never instruct auditors to suppress findings.
 The rest of this paragraph describes the hosted or legacy path, not the local receipt:
 
 In DIFF mode it prints the PRIOR BUGS block: bugs CCA fixed at the code the change touches, matched
@@ -765,7 +772,7 @@ you could not reach is NOT a duplicate: keep the finding and say the check could
 **P1 on a high-stakes path (`high_stakes=true`)** — DEEP only: adversarial **2-of-3**.
 
 **First, the artifact exemption.** A finding whose verdict `source` is a TOOL — `pyright`, `clippy`,
-`ast`, `semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
+`tsc`, `cargo`, `ast`, `semgrep`, `pytest` or `hypothesis` — does **not** go to the panel at all. Send only findings
 resting on an `llm`-sourced verdict.
 
 This is not a numeric special case; it is the same rule `cca-fp-check.md` states ("you may not
@@ -1360,9 +1367,10 @@ A finding D.3 kept beside an earlier one with the same dedup key is not sent to 
 gets the verdict `DUPLICATE`, with the id it duplicates as its evidence. So in a deferred run the
 L2.5 file gives every finding one of CONFIRMED, FALSE_POSITIVE, DUPLICATE, STALE or UNCERTAIN.
 
-Append one ledger row per finding (Step 2.5b), carrying this run's `run_id` and the ORIGINAL
-finding's `auditor` and `category`, so a deferred finding confirmed now credits the auditor that
-raised it. A STALE finding's row carries `"verdict": "STALE"`, never FALSE_POSITIVE, and a
+Append one ledger row per finding (Step 2.5b), carrying this run's `run_id`, the parent's run id
+as `"parent_run_id"`, and the ORIGINAL finding's `auditor` and `category`, so a deferred finding
+confirmed now credits the auditor that raised it, and one the parent already judged is scored
+once. A STALE finding's row carries `"verdict": "STALE"`, never FALSE_POSITIVE, and a
 DUPLICATE finding's row carries `"verdict": "DUPLICATE"`. A FALSE_POSITIVE row carries the Step 2.5b
 fields, with `"fp_reason": "out_of_scope"` when the reason is "out of scope". Record with `--duplicate <D>` and
 `--stale <S>`, and no `--unverified`: a deferred run cannot defer, and `record` refuses it.

@@ -51,7 +51,9 @@ fi
 AGENTS_DIR=".claude/agents"
 COMMANDS_DIR=".claude/commands"
 TOOLS_DIR=".claude/tools"
-mkdir -p "$AGENTS_DIR" "$COMMANDS_DIR" "$TOOLS_DIR"
+HOOKS_DIR=".claude/hooks"
+GUIDES_DIR=".claude/guides"
+mkdir -p "$AGENTS_DIR" "$COMMANDS_DIR" "$TOOLS_DIR" "$HOOKS_DIR" "$GUIDES_DIR"
 
 BACKED_UP=0
 
@@ -66,9 +68,13 @@ install_file() {
   name="$(basename "$src")"
   dest="$dest_dir/$name"
   if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
-    cp "$dest" "$dest.bak"
+    # Never overwrite an earlier backup that differs: it may hold the customization a
+    # previous upgrade set aside. Take the next free numbered name instead.
+    local bak="$dest.bak" n=1
+    while [[ -f "$bak" ]] && ! cmp -s "$dest" "$bak"; do bak="$dest.bak.$n"; n=$((n + 1)); done
+    cp "$dest" "$bak"
     BACKED_UP=$((BACKED_UP + 1))
-    echo "  Updated   $name -> $dest_dir/ (previous version kept as $name.bak)"
+    echo "  Updated   $name -> $dest_dir/ (previous version kept as $(basename "$bak"))"
   else
     echo "  Installed $name -> $dest_dir/"
   fi
@@ -112,6 +118,18 @@ tools=("$SRC_DIR/tools/"cca_*.py)
 for tool in "${tools[@]}"; do
   case "$(basename "$tool")" in test_*) continue ;; esac
   install_file "$tool" "$TOOLS_DIR"
+done
+
+# Copy the gate hooks and the guides, as `cca-audit install` does. Without the hooks
+# nothing refuses a commit or a turn end while a run is open, and nothing says so.
+hooks=("$SRC_DIR/hooks/"cca_*.py)
+[[ ${#hooks[@]} -gt 0 ]] || { echo "Error: no hook files found in $SRC_DIR/hooks/" >&2; exit 1; }
+for hook in "${hooks[@]}"; do
+  case "$(basename "$hook")" in test_*) continue ;; esac
+  install_file "$hook" "$HOOKS_DIR"
+done
+for guide in "$SRC_DIR/guides/"*.md; do
+  [[ -f "$guide" ]] && install_file "$guide" "$GUIDES_DIR"
 done
 
 # Install the cca_checks package so the deterministic verifier works.
@@ -170,4 +188,6 @@ echo ""
 if [[ "$BACKED_UP" -gt 0 ]]; then
   echo "$BACKED_UP customized file(s) were updated; the previous versions are saved as *.bak."
 fi
+echo "The commit and stop guards in $HOOKS_DIR run only once registered in Claude Code's"
+echo "settings: print the snippet with  cca-audit install --print-hook"
 echo "CCA-Audit installed. Run /audit-fix in Claude Code to start."

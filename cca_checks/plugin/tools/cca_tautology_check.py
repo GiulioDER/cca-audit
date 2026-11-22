@@ -38,11 +38,14 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 DEFAULT_SNAPDIR = Path(".claude/audits/.prefix_snapshot")
 MANIFEST = "manifest.json"
+IN_PROGRESS = "verify-in-progress"
 
 RED, TAUTOLOGICAL, INCONCLUSIVE = "RED", "TAUTOLOGICAL", "INCONCLUSIVE"
 
@@ -100,16 +103,36 @@ _UNREACHED = re.compile(
 )
 
 
+def _timeout_s() -> float:
+    """CCA_TIMEOUT_S, the ceiling for every pytest launch; 120 s when run standalone."""
+    try:
+        from cca_checks import config
+    except ImportError:
+        return 120.0
+    return config.TIMEOUT_S
+
+
 def _run_one(nodeid: str, extra: list[str]) -> tuple[str, str]:
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", nodeid, "-q", "--tb=line",
-         "-p", "no:cacheprovider", *extra],
-        capture_output=True, text=True,
-        # No bytecode: this runs on the reverted PRE-FIX source, and a .pyc compiled from it
-        # would survive the restore and change the tree fingerprint L5 recorded.
-        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-    )
-    out = (proc.stdout or "") + (proc.stderr or "")
+    timeout = _timeout_s()
+    # Output to a file, not a pipe: after a timeout, subprocess.run on Windows waits for every
+    # holder of its pipes, so a process the test spawned with capture disabled kept it blocked.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace") as log:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", nodeid, "-q", "--tb=line",
+                 "-p", "no:cacheprovider", *extra],
+                stdout=log, stderr=subprocess.STDOUT, text=True,
+                # No bytecode: this runs on the reverted PRE-FIX source, and a .pyc compiled
+                # from it would survive the restore and change the tree fingerprint L5 recorded.
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                # A hang-class defect hangs its test pre-fix too; without a bound the restore
+                # in verify's finally never runs and the tree is left at the pre-fix code.
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return INCONCLUSIVE, f"timed out after {timeout:g} s against the pre-fix code"
+        log.seek(0)
+        out = log.read()
     tail = out.strip().splitlines()[-1] if out.strip() else f"(rc={proc.returncode})"
     if proc.returncode == 0:
         return TAUTOLOGICAL, tail
@@ -123,6 +146,23 @@ def _run_one(nodeid: str, extra: list[str]) -> tuple[str, str]:
     return INCONCLUSIVE, tail
 
 
+def _snapshot_predates_run(man_path: Path) -> str | None:
+    """The open run's id when the snapshot was written before that run started, else None.
+
+    A run that skipped `snapshot` would otherwise be judged against an earlier run's pre-fix
+    content, and a test that fails there for any reason would count as its RED proof.
+    """
+    try:
+        from cca_checks import pipeline_state
+    except ImportError:
+        return None
+    state = pipeline_state.load(".")
+    if state is None or not state.started_utc:
+        return None
+    started = datetime.fromisoformat(state.started_utc.replace("Z", "+00:00")).timestamp()
+    return state.run_id if man_path.stat().st_mtime < started else None
+
+
 def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
            extra_pytest: list[str] | None = None) -> list[ProofResult]:
     extra = extra_pytest or []
@@ -133,8 +173,25 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
     manifest = json.loads(man_path.read_text(encoding="utf-8"))
     if not manifest:
         raise SystemExit(f"snapshot at {snapdir} is empty — nothing to prove red against")
+    older = _snapshot_predates_run(man_path)
+    if older is not None:
+        raise SystemExit(
+            f"the snapshot at {snapdir} was taken before run {older} started, so it holds "
+            f"another run's pre-fix content; take `snapshot` at Layer 4 of this run, before "
+            f"its first edit"
+        )
 
     fixed_dir = snapdir / "fixed"
+    in_progress = snapdir / IN_PROGRESS
+    if in_progress.exists():
+        # A verify stopped before its restore (a kill, a tool timeout, a failed copy) leaves
+        # the tree at pre-fix content and the only copy of the fix in fixed/; stashing the
+        # tree again would overwrite that copy.
+        raise SystemExit(
+            f"a previous verify did not restore the fixed content, so the working tree may "
+            f"still hold the pre-fix code and the fix is only in {fixed_dir}. Recover it with "
+            f"`cp -r {fixed_dir}/. .`, then delete {in_progress} and run verify again"
+        )
     if fixed_dir.exists():
         shutil.rmtree(fixed_dir)
     fixed_dir.mkdir(parents=True)
@@ -145,6 +202,8 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
         dest = fixed_dir / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(rel, dest)
+    in_progress.write_text("verify reverted the tree; removed after a verified restore\n",
+                           encoding="utf-8")
 
     results: list[ProofResult] = []
     try:
@@ -162,6 +221,8 @@ def verify(proofs: list[tuple[str, str]], snapdir: Path = DEFAULT_SNAPDIR,
         if bad:
             print(f"\n*** RESTORE FAILED for {bad} — recover with:\n"
                   f"***   cp -r {fixed_dir}/. .\n", file=sys.stderr)
+        else:
+            in_progress.unlink()
     return results
 
 
@@ -239,7 +300,13 @@ def _planned_p1() -> int:
             f"row(s) for run {state.run_id} but L2.5 confirmed {confirmed}; the zero-proof "
             "claim cannot be checked"
         )
-    return sum(1 for row in mine if str(row.get("priority", "")).upper() == "P1")
+    by_ledger = sum(1 for row in mine if str(row.get("priority", "")).upper() == "P1")
+    # The ledger's priority is written by hand and record L2.5 does not check it against L2,
+    # so the run's own stored L2 and L2.5 are counted too, and the larger count holds.
+    l2 = pipeline_state._stored_l2(state, ".")
+    l25 = pipeline_state._stored_l25(state, ".", [r["id"] for r in l2])
+    stored = sum(1 for r in l2 if r["priority"] == "P1" and l25.get(r["id"]) == "CONFIRMED")
+    return max(by_ledger, stored)
 
 
 def _save_proofs(results: list[ProofResult]) -> None:

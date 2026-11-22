@@ -44,6 +44,8 @@ _INSTALLED_BY = {
     "node": "actions/setup-node",
     "npm": "actions/setup-node",
     "tsc": "npm install -g typescript@",
+    # Not installed by a step: bash ships with the runner image the jobs run on.
+    "bash": "runs-on: ubuntu-latest",
 }
 
 

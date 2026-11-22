@@ -25,6 +25,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from ..toolpath import resolve_tool
+
 #: Off unless the environment opts in: the holdout serves one pre-registered measurement on the
 #: maintainer's machine, and a released install must not withhold memory from anyone else.
 ENV = "CCA_MEMORY_HOLDOUT"
@@ -75,8 +77,11 @@ def _mode_reason(root: Path, run_id: str) -> tuple[str | None, str | None]:
 
 def project_root() -> Path:
     """The Git top level of the working directory, else the working directory itself."""
+    exe = resolve_tool("git", os.getcwd())  # never a bare `git` found in the audited cwd
+    if exe is None:
+        return Path(".")
     try:
-        done = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+        done = subprocess.run([exe, "rev-parse", "--show-toplevel"], capture_output=True,
                               text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
         return Path(".")

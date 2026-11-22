@@ -94,6 +94,109 @@ def test_fixed_content_is_stashed_before_any_revert(proj):
     assert stashed.exists() and stashed.read_text(encoding="utf-8") == FIXED
 
 
+def test_a_rerun_after_an_interrupted_verify_keeps_the_fix(proj, monkeypatch):
+    """Invariant: the only copy of the fix survives a second verify after a killed one.
+
+    Failure mode: a verify killed before its restore (a hung pre-fix test, a tool timeout)
+    leaves the tree at pre-fix content and the fix only in fixed/. The next verify deleted
+    fixed/, stashed the pre-fix tree as "fixed", reported RED and exited 0, so the fix was
+    gone (STAKES-001, run 20261120T201246Z).
+    Red: cca_checks/plugin/tools/test_cca_tautology_check.py::
+    test_a_rerun_after_an_interrupted_verify_keeps_the_fix against the pre-fix tool; DID NOT
+    RAISE SystemExit.
+    """
+    snapshot_then_fix(proj)
+    fixed = tc.DEFAULT_SNAPDIR / "fixed" / "money.py"
+    real_copy = shutil.copy2
+    broken = {"on": True}
+
+    def copy2(src, dst, *a, **k):
+        # The restore (fixed/ back onto the tree) is cut off, as a kill would cut it off.
+        if broken["on"] and Path(src).resolve() == fixed.resolve():
+            raise PermissionError("restore interrupted")
+        return real_copy(src, dst, *a, **k)
+
+    monkeypatch.setattr(tc.shutil, "copy2", copy2)
+    with pytest.raises(PermissionError):
+        tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    broken["on"] = False
+    assert (proj / "money.py").read_text(encoding="utf-8") == BUGGY  # left reverted
+    with pytest.raises(SystemExit, match="did not restore"):
+        tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert fixed.read_text(encoding="utf-8") == FIXED
+
+
+def test_a_proof_that_hangs_pre_fix_times_out_and_restores_the_fix(proj, monkeypatch):
+    """PERF-002 (self hunt run 20261120T201246Z). Invariant: a proof test that hangs
+    against the pre-fix code ends as INCONCLUSIVE within the timeout, and the fixed content
+    is put back. Failure mode: pytest ran with no timeout, so verify hung until something
+    killed it and the tree stayed at the pre-fix code.
+    Red: against the pre-fix tool the verify thread is still running after 20 s."""
+    import threading
+
+    from cca_checks import config
+
+    (proj / "test_hang.py").write_text(
+        "import time\nfrom money import net_payout\n\n"
+        "def test_hangs():\n    time.sleep(40)\n", encoding="utf-8")
+    snapshot_then_fix(proj)
+    monkeypatch.setattr(config, "TIMEOUT_S", 3)
+    out = []
+    worker = threading.Thread(daemon=True, target=lambda: out.extend(
+        tc.verify([("FIX-001", "test_hang.py::test_hangs")])))
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive()
+    assert [r.verdict for r in out] == [tc.INCONCLUSIVE]
+    assert (proj / "money.py").read_text(encoding="utf-8") == FIXED
+
+
+def test_a_proof_whose_child_hangs_with_capture_off_still_times_out(proj, monkeypatch):
+    """BUG-002 of audit run 20261120T225224Z. Invariant: the timeout bounds verify even when
+    the proof spawns a process that inherits pytest's output (capture off). Failure mode: on
+    Windows, subprocess.run waited after the kill for every holder of its pipes, so the child
+    kept verify blocked and the restore unrun. Red on Windows: still running after 60 s."""
+    import threading
+
+    from cca_checks import config
+
+    (proj / "test_child.py").write_text(
+        "import subprocess, sys, time\nfrom money import net_payout\n\n"
+        "def test_child_hangs():\n"
+        "    subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)'])\n"
+        "    time.sleep(120)\n", encoding="utf-8")
+    snapshot_then_fix(proj)
+    monkeypatch.setattr(config, "TIMEOUT_S", 25)  # pytest itself takes seconds to start
+    out = []
+    worker = threading.Thread(daemon=True, target=lambda: out.extend(
+        tc.verify([("FIX-001", "test_child.py::test_child_hangs")], extra_pytest=["-s"])))
+    worker.start()
+    worker.join(timeout=60)
+    assert not worker.is_alive()
+    assert [r.verdict for r in out] == [tc.INCONCLUSIVE]
+    assert (proj / "money.py").read_text(encoding="utf-8") == FIXED
+
+
+def test_a_second_verify_after_a_completed_one_still_runs(proj):
+    """Control for the test above: a verify that restored the tree leaves fixed/ equal to
+    it, so the next verify (a rework cycle) runs as before."""
+    snapshot_then_fix(proj)
+    tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    results = tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert [r.verdict for r in results] == [tc.RED]
+    assert (proj / "money.py").read_text(encoding="utf-8") == FIXED
+
+
+def test_a_verify_after_dropping_a_fix_still_runs(proj):
+    """Control: a rework that reverts a file to its pre-fix content (a fix the regression
+    gate asked to drop) is not mistaken for an interrupted verify."""
+    snapshot_then_fix(proj)
+    tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    (proj / "money.py").write_text(BUGGY, encoding="utf-8")
+    tc.verify([("FIX-001", "test_money.py::test_genuine_proof")])
+    assert (proj / "money.py").read_text(encoding="utf-8") == BUGGY
+
+
 def test_missing_snapshot_is_a_loud_error_not_a_silent_pass(proj):
     (proj / "money.py").write_text(FIXED, encoding="utf-8")   # fixed, but never snapshotted
     with pytest.raises(SystemExit, match="no snapshot"):

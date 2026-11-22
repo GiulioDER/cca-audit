@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 from .anchors import Anchor, well_formed_file, well_formed_symbol
+from .forward import safe_memo_id
 from .records import FP_REASON, FalsePositiveRow, no_nul
 
 APPROVED = "APPROVED"
@@ -110,7 +111,12 @@ def to_rows(picked: list[tuple[dict, list[Anchor]]], *, repo: str | None,
     if not repo or "/" not in repo:
         return [], ["no owner/name repository for this checkout"]
     out: list[FalsePositiveRow] = []
+    skipped: list[str] = []
     for row, where in picked:
+        finding = row["finding_id"]
+        if not safe_memo_id(finding):
+            skipped.append(f"{finding!r} is not a safe finding id for a memo name")
+            continue
         refs = row.get("evidence_refs")
         out.append(FalsePositiveRow(
             project=repo.split("/", 1)[1], repo=repo, date=date,
@@ -122,7 +128,7 @@ def to_rows(picked: list[tuple[dict, list[Anchor]]], *, repo: str | None,
             else [],
             verify_source=_text(row.get("verify_source")), anchors=where))
     # Claims and evidence are model output: no U+0000 reaches the ledger or a memo (#88).
-    return [no_nul(r) for r in out], []
+    return [no_nul(r) for r in out], skipped
 
 
 def _json(path: Path) -> object | None:
