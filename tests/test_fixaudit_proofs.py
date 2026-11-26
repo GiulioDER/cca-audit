@@ -620,3 +620,28 @@ def test_a_reverted_fix_dropped_from_l4_is_refused_at_l5_4_with_the_remedy(git_r
     assert fr.record(git_repo) == []
     ps.record("L5.5", detail="all SAFE", root=git_repo)
     assert tc.main(["verify", "--no-proofs", "--record"]) == 0
+
+
+def test_no_proofs_refuses_an_unreadable_kept_pass_with_a_reason(git_repo, monkeypatch, capsys):
+    """Invariant: a kept pass file that cannot be read makes `--no-proofs --record` refuse with
+    exit 2 and a reason, like a pass file that is not JSON, and records nothing. Failure mode
+    (DAT-001 of run 20261125T223933Z, deferred run 20261126T100603Z): `fixaudit.kept_passes`
+    let the OSError escape, so `main` ended in a traceback instead of the refusal.
+    Red 2026-11-26 against the Step 4 snapshot of `fixaudit.kept_passes`: failed
+    `assert code == 2` ('traceback' != 2, PermissionError on Windows). FA-1-1 of the deferred
+    run: the fixture also owes a proof, so the refusal must be the read failure itself; red
+    against the mutation `except OSError: continue` in `fixaudit.kept_passes`, failed
+    `assert "fixaudit-pass-9.json cannot be read" in err`."""
+    _repaired_run(git_repo, monkeypatch)
+    run_dir = git_repo / ".claude" / "audits" / "runs" / ps.load(git_repo).run_id
+    (run_dir / "fixaudit-pass-9.json").mkdir()  # a path that exists but cannot be read as a file
+    try:
+        code = tc.main(["verify", "--no-proofs", "--record"])
+    except OSError:
+        code = "traceback"
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "fixaudit-pass-9.json cannot be read" in err
+    assert "with zero proofs" not in err
+    state = ps.load(git_repo)
+    assert state is not None and "L5.6" not in state.layers

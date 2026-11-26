@@ -82,7 +82,7 @@ def cycles(root: pathlib.Path, run_id: str) -> dict[str, int]:
     trees: dict[str, set[str]] = {}
     for p in fixaudit.kept_passes(root, run_id).values():
         for row in p["findings"]:
-            if row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING:
+            if _blocking(row):
                 trees.setdefault(row["finding"], set()).add(p["audited_tree"])
     for finding, seen in trees.items():
         counts[finding] = max(counts.get(finding, 0), len(seen))
@@ -108,6 +108,12 @@ AUDIT = pathlib.Path(".claude/audits/out/L5.4.json")
 SIBLINGS = pathlib.Path(".claude/audits/out/L5.4-siblings.json")
 #: A confirmed fix audit finding of these priorities blocks L5.4; a P3 goes to the deferred pool.
 BLOCKING = ("P1", "P2")
+
+
+def _blocking(row: dict) -> bool:
+    """A kept fix audit row that blocks L5.4 until resolved, and whose repair owes a proof."""
+    return row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING
+
 JOURNAL_VERDICTS = (*layer_outputs.FA_VERDICTS, "PARKED")
 #: The kept passes whose verdicts reached the side ledger, so a retry appends none twice.
 APPENDED = "fixaudit-appended.json"
@@ -187,8 +193,7 @@ def _pass_reasons(data: dict, passes: dict[int, dict], report: dict, fixes: list
         if not fixaudit.canonical(row["file"]):
             reasons.append(f"{row['id']} file {row['file']!r} is not a repo-relative POSIX path "
                            "as the fix diff spells it")
-        elif row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING \
-                and row["file"] not in changed:
+        elif _blocking(row) and row["file"] not in changed:
             reasons.append(f"{row['id']} is a confirmed {row['priority']} in {row['file']}, which "
                            "the fix diff does not touch")
         if row["verdict"] != "RESOLVED":
@@ -225,15 +230,15 @@ def _unresolved(passes: dict[int, dict], held: set[str], fixes: list[dict],
                 changed: set[str]) -> list[str]:
     """A confirmed P1 or P2 blocks until a later pass resolves it, or until its finding is
     parked at the cap and its fix reverted; a parked finding blocks until every fix of it is
-    reverted: no run commits a fix with a known bug in it."""
+    reverted, except in a file a live fix also lists, which may keep hunks once the parked rows
+    are resolved: no run commits a fix with a known bug in it."""
     cleared = {row["resolves"] for p in passes.values() for row in p["findings"]
                if row["verdict"] == "RESOLVED"}
     out = []
     covered: set[str] = set()
     for k, p in passes.items():
         for row in p["findings"]:
-            if row["verdict"] != "CONFIRMED" or row["priority"] not in BLOCKING \
-                    or row["id"] in cleared:
+            if not _blocking(row) or row["id"] in cleared:
                 continue
             what = f"{row['id']} ({row['priority']}, {row['fix_id']})"
             if row["finding"] not in held:
@@ -272,8 +277,7 @@ def owed_proofs(root: pathlib.Path, state) -> list[str]:
     fixes = fixaudit.stored_fixes(root, state)
     changed = _changed(report)
     return sorted({row["id"] for p in passes.values() for row in p["findings"]
-                   if row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING
-                   and not _reverted(row, fixes, changed)})
+                   if _blocking(row) and not _reverted(row, fixes, changed)})
 
 
 def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
@@ -417,7 +421,7 @@ def _journal_cli(root: pathlib.Path, state, a: argparse.Namespace) -> list[str]:
         reasons.append(f"pass {a.pass_no} audited the same tree as an earlier confirmed pass of "
                        f"{a.finding}; a cycle needs a repair in between")
     if a.verdict == "CONFIRMED" and not any(
-            f["verdict"] == "CONFIRMED" and f["priority"] in BLOCKING and f["fix_id"] == a.fix_id
+            _blocking(f) and f["fix_id"] == a.fix_id
             for f in kept.get(a.pass_no, {}).get("findings", [])):
         reasons.append(f"pass {a.pass_no} confirmed no P1 or P2 in {a.fix_id}")
     if a.verdict == "PARKED" and cycles(root, state.run_id).get(a.finding, 0) < CAP:
