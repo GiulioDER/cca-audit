@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from cca_checks import fixaudit_record as fr
 from cca_checks import pipeline_state as ps
 from cca_checks.plugin.tools import cca_tautology_check as tc
 
@@ -438,3 +439,184 @@ def test_a_restore_copy_that_raises_ends_in_the_recovery_message(run, monkeypatc
     assert isinstance(raised.__cause__, PermissionError)
     assert (tc.DEFAULT_SNAPDIR / tc.IN_PROGRESS).exists()
     assert fixed.read_text(encoding="utf-8") == FIX_AUDIT
+
+
+def _repaired_run(repo, monkeypatch):
+    """A STANDARD run whose pass 1 confirms FA-1-1 (P2) in FIX-1, also listing a P3 and a false
+    positive, and whose pass 2 resolves it after a repair of app.py: L5.4 and L5.5 recorded."""
+    from test_fixaudit_record import _app_run, _edit_and_test, _fa, _verdicts
+
+    monkeypatch.chdir(repo)
+    _app_run(repo, "STANDARD")
+    _verdicts(repo, 1, [_fa("FA-1-1"), _fa("FA-1-2", priority="P3"),
+                        _fa("FA-1-3", "FALSE_POSITIVE", priority="P1")])
+    assert fr.record(repo) != []
+    _edit_and_test(repo, "app.py", "x = 3\n")  # the repair of FA-1-1
+    _verdicts(repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1")])
+    assert fr.record(repo) == []
+    ps.record("L5.5", detail="all SAFE", root=repo)
+
+
+def test_no_proofs_is_refused_while_a_live_fix_audit_repair_owes_a_proof(git_repo, monkeypatch,
+                                                                          capsys):
+    """Invariant (DOC-002): a CONFIRMED P1 or P2 fix audit row whose fix is still in the tree was
+    repaired, and the repair owes a proof passed with `--proof`, so `--no-proofs` refuses and
+    names it; a P3 and a false positive owe nothing. Failure mode: `--no-proofs` read only the
+    original P1s and recorded L5.6 with zero proofs.
+    Red 2026-11-25 against v0.17.0 (fb4ff30), target `cca_tautology_check.main`'s `--no-proofs`
+    branch: failed `assert code == 2` (0 != 2, L5.6 recorded)."""
+    _repaired_run(git_repo, monkeypatch)
+    code = tc.main(["verify", "--no-proofs", "--record"])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "FA-1-1" in err and "FA-1-2" not in err and "FA-1-3" not in err
+    state = ps.load(git_repo)
+    assert state is not None and "L5.6" not in state.layers
+
+
+def test_a_hand_written_parked_row_does_not_excuse_a_live_repair(git_repo, monkeypatch, capsys):
+    """Invariant: what a repair owes is decided from the tree, so a PARKED row appended to the
+    journal by hand after L5.4 recorded, with the repair still in the tree, excuses nothing.
+    Failure mode (SEC-001): the owed list trusted `parked()`, which reads raw journal rows.
+    Red 2026-11-25 against the parked-based owed list (this branch before the L4 fix of run
+    20261125T223933Z): failed `assert code == 2` (0 != 2)."""
+    _repaired_run(git_repo, monkeypatch)
+    journal = git_repo / ".claude" / "audits" / "runs" / ps.load(git_repo).run_id / fr.JOURNAL
+    with journal.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"finding": "F-1", "fix_id": "FIX-1", "pass": 2,
+                                 "verdict": "PARKED", "reason": "r"}) + "\n")
+    code = tc.main(["verify", "--no-proofs", "--record"])
+    assert code == 2
+    assert "FA-1-1" in capsys.readouterr().err
+
+
+def test_a_reverted_fix_owes_no_proof_whoever_parked_it(git_repo, monkeypatch):
+    """Invariant: a fix audit row whose fix is back at prefix_tree owes no proof, whether the L5.4
+    cap, a PARKED row or the shared attempts cap parked it. Failure mode (BUG-002): a finding the
+    attempts cap parked is unknown to `parked()`, so its reverted fix's row was still owed.
+    Red 2026-11-25 against the parked-based owed list (this branch before the L4 fix of run
+    20261125T223933Z): failed `assert tc.main([...]) == 0` (2 != 0, FA-1-1 named)."""
+    from test_fixaudit_record import _app_run, _edit_and_test, _fa, _verdicts
+
+    monkeypatch.chdir(git_repo)
+    _app_run(git_repo, "STANDARD")
+    _verdicts(git_repo, 1, [_fa("FA-1-1")])
+    assert fr.record(git_repo) != []
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # FIX-1 reverted whole, below the L5.4 cap
+    _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1")])
+    assert fr.record(git_repo) == []
+    ps.record("L5.5", detail="all SAFE", root=git_repo)
+    assert tc.main(["verify", "--no-proofs", "--record"]) == 0
+    state = ps.load(git_repo)
+    assert state is not None and "L5.6" in state.layers
+
+
+def test_a_parked_fix_left_in_a_shared_file_still_owes_its_proof(git_repo, monkeypatch, capsys):
+    """Invariant: L5.4 lets a parked fix keep hunks in a file a live fix also lists once its rows
+    are RESOLVED; such a fix is still in the tree, so its rows still owe a proof. Failure mode
+    (BUG-001): every row of a parked finding was excused, so that repair needed no proof.
+    Red 2026-11-25 against the parked-based owed list (this branch before the L4 fix of run
+    20261125T223933Z): failed `assert code == 2` (0 != 2)."""
+    from test_fixaudit_record import (
+        _commit,
+        _edit_and_test,
+        _entry,
+        _fa,
+        _put,
+        _three_cycles,
+        _to_l5,
+        _verdicts,
+    )
+
+    monkeypatch.chdir(git_repo)
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "lib.py"]), _entry(2, ["lib.py"])], edit)
+    _three_cycles(git_repo, line=50)
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # app.py reverted; lib.py is FIX-2's too
+    _verdicts(git_repo, 4, [_fa(f"FA-4-{k}", "RESOLVED", resolves=f"FA-{k}-1", line=50)
+                            for k in (1, 2, 3)])
+    assert fr.record(git_repo) == []
+    ps.record("L5.5", detail="all SAFE", root=git_repo)
+    code = tc.main(["verify", "--no-proofs", "--record"])
+    assert code == 2
+    assert "FA-1-1" in capsys.readouterr().err
+
+
+def test_a_row_whose_fix_a_new_l4_no_longer_lists_still_owes_its_proof(git_repo, monkeypatch,
+                                                                         capsys):
+    """Invariant: a row whose fix id the current L4 no longer lists cannot be shown reverted, so
+    it still owes its proof. Failure mode (FA-1-1 of run 20261125T223933Z, FIX-002, SEC-001):
+    L4 recorded again with FIX-1 renumbered gave `_reverted` no files for the row, so the row
+    was excused with its repair still in the tree.
+    Red 2026-11-26 against the pass-1 snapshot of `fixaudit_record.owed_proofs`: failed
+    `assert code == 2` (0 != 2). The rule then moved to L5.4 (FA-2-1): red against the pass-2
+    snapshot of `fixaudit_record`, failed
+    `assert any(r.startswith("FIX-1 (F-1) is named by a kept pass") ...)` on []."""
+    from conftest import write_output
+    from test_fixaudit_record import _commit, _edit_and_test, _entry, _fa, _put, _to_l5, _verdicts
+
+    monkeypatch.chdir(git_repo)
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "lib.py"]), _entry(2, ["lib.py"])], edit)
+    _verdicts(git_repo, 1, [_fa("FA-1-1")])
+    assert fr.record(git_repo) != []
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # app.py back; FIX-1's lib.py hunk stays
+    _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1")])
+    assert fr.record(git_repo) == []
+    renumbered = [_entry(9, ["app.py"], finding="F-1"), _entry(2, ["lib.py"])]
+    ps.record("L4", fixes=2, output=write_output(git_repo, renumbered), root=git_repo)
+    ps.record("L5", detail="green", root=git_repo)
+    assert any(r.startswith("FIX-1 (F-1) is named by a kept pass") for r in fr.record(git_repo))
+    original = [_entry(1, ["app.py", "lib.py"]), _entry(2, ["lib.py"])]
+    ps.record("L4", fixes=2, output=write_output(git_repo, original), root=git_repo)
+    ps.record("L5", detail="green", root=git_repo)
+    assert fr.record(git_repo) == []
+    ps.record("L5.5", detail="all SAFE", root=git_repo)
+    code = tc.main(["verify", "--no-proofs", "--record"])
+    assert code == 2
+    assert "FA-1-1" in capsys.readouterr().err
+
+
+def test_a_reverted_fix_dropped_from_l4_is_refused_at_l5_4_with_the_remedy(git_repo,
+                                                                            monkeypatch):
+    """Invariant: every fix a kept pass names stays in L4, a reverted one included, so its revert
+    can be shown; L5.4 refuses an L4 that drops one and says to list it again, after which a
+    reverted fix owes no proof. Failure mode (FA-2-1 of run 20261125T223933Z, FIX-002, SEC-001):
+    the dropped fix's row stayed owed at L5.6 with no proof possible and no remedy named.
+    Red 2026-11-26 against the pass-2 snapshot of `fixaudit_record`: failed
+    `assert any(r.startswith("FIX-1 (F-1) is named by a kept pass") ...)` on []."""
+    from conftest import write_output
+    from test_fixaudit_record import _commit, _edit_and_test, _entry, _fa, _put, _to_l5, _verdicts
+
+    monkeypatch.chdir(git_repo)
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py"]), _entry(2, ["lib.py"])], edit)
+    _verdicts(git_repo, 1, [_fa("FA-1-1")])
+    assert fr.record(git_repo) != []
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # FIX-1 reverted whole
+    _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1")])
+    assert fr.record(git_repo) == []
+    ps.record("L4", fixes=1, output=write_output(git_repo, [_entry(2, ["lib.py"])]), root=git_repo)
+    ps.record("L5", detail="green", root=git_repo)
+    assert any(r.startswith("FIX-1 (F-1) is named by a kept pass") for r in fr.record(git_repo))
+    both = [_entry(1, ["app.py"]), _entry(2, ["lib.py"])]
+    ps.record("L4", fixes=2, output=write_output(git_repo, both), root=git_repo)
+    ps.record("L5", detail="green", root=git_repo)
+    assert fr.record(git_repo) == []
+    ps.record("L5.5", detail="all SAFE", root=git_repo)
+    assert tc.main(["verify", "--no-proofs", "--record"]) == 0

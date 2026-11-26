@@ -1011,7 +1011,9 @@ A P1 fix without a red→green test is incomplete (the architect gate will flag 
   "size_reason": "<only when Step 5.4 reports the fix oversized>"}]
 ```
 
-- `fix_id` and `finding`: the fix and the finding id it answers.
+- `fix_id` and `finding`: the fix and the finding id it answers. An entry a kept fix audit pass
+  names stays in L4 with its files, reverted or parked included: its files are how the revert is
+  shown, and `fixaudit record` refuses an L4 that drops or renumbers it.
 - `files`: every file the fix changed, at least one, each a repo-relative POSIX path spelt as
   `git diff` spells it (no `./`, no `..`, no backslash, no drive letter). Every non-test file the
   fixes edit must be listed by some fix; a sibling site fixed at Step 5.4 adds its file here, to the
@@ -1282,7 +1284,7 @@ them; the commit message is where they survive. UNCERTAIN goes to a human; FALSE
 
 **The cap.** The tool counts, per original finding, its CONFIRMED journal rows and the distinct
 trees of kept passes that confirmed a P1 or P2 in its fix, and takes the larger. At 3 the finding is
-parked: revert its whole fix, every file its L4 entry lists, back to the pre-fix tree
+parked: revert every fix of it, every file their L4 entries list, back to the pre-fix tree
 (`git restore --source <prefix_tree> --worktree -- <files>`, with `prefix_tree` from `fixaudit.json`;
 delete a file the fix created), and park the original finding `UNCERTAIN → human` as § Fix Attempt
 Budget says. Three CONFIRMED rows already park it in the journal; to state the decision there as well,
@@ -1292,7 +1294,10 @@ refuses until none of those files, nor the fix audit finding's own file, differs
 `prefix_tree`: a file the fix shares with another fix counts as reverted only when it has no hunk
 left at all. So a parked fix sharing a file with a live fix clears in one of two ways: that file has
 no hunk left (the live fix's hunks there reverted or moved), or the next pass re-verifies the open
-fix audit findings `RESOLVED` at the current tree. The revert changes the tree, so Step 5 and this
+fix audit findings `RESOLVED` at the current tree. Parking acts on the original finding, not on
+one fix: a second fix of it whose rows a later pass resolved is reverted too, and a `RESOLVED`
+pass after the cap does not keep a parked fix; `record` refuses while any file a fix of a parked
+finding lists, other than a file a live fix also lists, differs from `prefix_tree`. The revert changes the tree, so Step 5 and this
 step run again; the parked fix's declared `sibling_patterns` still list hits, which take `not_applicable` with the reason that the fix was reverted. The code
 counts only L5.4 cycles, while `attempts[FIX-id]` counts every gate: when that shared cap parks a
 finding first, revert its fix the same way, and the next pass re-verifies its open fix audit findings
@@ -1370,7 +1375,12 @@ The text after the last `@` is read as a snapshot directory only when it holds a
 otherwise the whole text is the node id, so a mistyped directory leaves a node id pytest cannot
 collect, and the proof reads INCONCLUSIVE. Proofs against different snapshots run one snapshot
 at a time, each restored before the next. A fix audit proof does not count toward `--no-proofs`: a
-run with fix audit repairs and no P1 passes their proofs with `--proof`.
+run with fix audit repairs and no P1 passes their proofs with `--proof`. The tool enforces it:
+`--no-proofs` refuses while a kept pass holds a CONFIRMED P1 or P2 whose fix is still in the
+tree, and names those `FA-<k>-<n>` ids. It decides from the tree, not from parking: a row whose
+fix, and the row's own file, are back at `prefix_tree` owes nothing, however its finding was
+parked; while any file of its fix still differs, a file a live fix also lists included, it owes
+its proof, since code cannot tell whose hunks a shared file holds.
 
 | Verdict | Meaning | Action |
 |---|---|---|

@@ -8,6 +8,22 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+**Upgrade note: reinstall both clients, and expect two stricter gates.** After `pip install -U
+cca-audit`, run `cca-audit install` and `cca-audit install-codex`. A run already open may now be
+refused at L5.4 or L5.6: revert the fixes of a parked finding, or pass the fix audit proofs with
+`--proof`.
+
+**Parking acts on the original finding (STAKES-002).** `fixaudit record` refuses while any fix of
+a parked finding is still in the tree, a fix whose rows a later pass resolved included; a file a
+live fix also lists may keep hunks once the parked rows are re-verified `RESOLVED`. Before, only the
+fix of each unresolved row had to be reverted, so a `RESOLVED` pass after the cap kept the fix.
+
+**`tautology verify --no-proofs` refuses while a fix audit repair owes a proof (DOC-002).** Every
+CONFIRMED P1 or P2 of a kept pass whose fix is still in the tree owes a proof against its pass
+snapshot; `--no-proofs` names those `FA-<k>-<n>` ids and refuses. It decides from the tree, so a
+journal row cannot excuse a repair, and a reverted fix owes nothing whichever cap parked it. The
+0.17.0 entry listed DOC-002 as parked for a human; this settles it.
+
 ## [0.17.0] - 2026-11-23
 
 **Upgrade note: reinstall both clients.** After `pip install -U cca-audit`, run `cca-audit install`

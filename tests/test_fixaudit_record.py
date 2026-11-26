@@ -946,3 +946,77 @@ def test_three_confirming_passes_park_a_finding_with_no_journal_row(git_repo):
     assert fr.parked(git_repo, run) == {"F-1"}
     assert fr.cycles(git_repo, run) == {"F-1": 3}
     assert fr.record(git_repo) == [_parked_but_present(k) for k in (1, 2, 3)]
+
+
+def test_parking_a_finding_reverts_every_fix_of_it(git_repo):
+    """Invariant: parking acts on the original finding, so every L4 fix of it leaves the tree,
+    including one whose own confirmed rows a later pass resolved. Failure mode (FA-3-1): only
+    the fix of each unresolved row had to be reverted, so a repaired second fix of the parked
+    finding stayed in the tree and its repair escaped every gate.
+    Red 2026-11-25 against v0.17.0 (fb4ff30): failed `assert fr.record(git_repo) == [left]`
+    with [], FIX-2's lib.py still in the tree."""
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    fixes = [_entry(1, ["app.py"]), _entry(2, ["lib.py"], finding="F-1")]
+    run = _to_l5(git_repo, "STANDARD", fixes, edit)
+    lib = {"fix": 2, "finding": "F-1", "file": "lib.py"}
+    _verdicts(git_repo, 1, [_fa("FA-1-1", **lib)])
+    assert fr.record(git_repo) != []
+    _edit_and_test(git_repo, "lib.py", "y = 3\n")  # repairs FA-1-1 in FIX-2
+    _verdicts(git_repo, 2, [_fa("FA-2-1", "RESOLVED", resolves="FA-1-1", **lib),
+                            _fa("FA-2-2", line=50)])
+    assert fr.record(git_repo) != []
+    _edit_and_test(git_repo, "app.py", "x = 3\n")
+    _verdicts(git_repo, 3, [_fa("FA-3-1", line=50)])
+    assert fr.record(git_repo) != []
+    assert fr.parked(git_repo, run) == {"F-1"}
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # FIX-1 reverted; FIX-2 still in the tree
+    _verdicts(git_repo, 4, [])
+    left = "F-1 is parked, but FIX-2 is still in the tree (lib.py); revert every fix of F-1 whole"
+    assert fr.record(git_repo) == [left]
+    _edit_and_test(git_repo, "lib.py", "y = 1\n")
+    _verdicts(git_repo, 5, [])
+    assert fr.record(git_repo) == []
+
+
+def test_a_resolved_pass_after_the_cap_does_not_keep_the_parked_fix(git_repo):
+    """Invariant: once a finding is parked its fix is reverted, even if a fourth repair makes a
+    later pass resolve every confirmed row. Failure mode (STAKES-002): the RESOLVED rows cleared
+    the parked rows before the revert check, so L5.4 recorded with the parked fix in the tree.
+    Red 2026-11-25 against v0.17.0 (fb4ff30): failed `assert fr.record(git_repo) == [left]`
+    with []."""
+    run = _app_run(git_repo, "STANDARD")
+    _three_cycles(git_repo, line=50)
+    assert fr.parked(git_repo, run) == {"F-1"}
+    _edit_and_test(git_repo, "app.py", "x = 9\n")  # a fourth repair instead of the revert
+    _verdicts(git_repo, 4, [_fa(f"FA-4-{k}", "RESOLVED", resolves=f"FA-{k}-1", line=50)
+                            for k in (1, 2, 3)])
+    left = "F-1 is parked, but FIX-1 is still in the tree (app.py); revert every fix of F-1 whole"
+    assert fr.record(git_repo) == [left]
+    _edit_and_test(git_repo, "app.py", "x = 1\n")
+    _verdicts(git_repo, 5, [])
+    assert fr.record(git_repo) == []
+
+
+def test_a_parked_fix_may_leave_a_file_a_live_fix_shares_once_resolved(git_repo):
+    """Invariant: a parked fix's file that a live fix also lists may keep hunks once the next
+    pass re-verifies the parked rows RESOLVED, since code cannot tell whose hunks they are.
+    Control for the two tests above, not a red proof against v0.17.0, which also records.
+    Red 2026-11-25 by mutation of `fixaudit_record._unresolved`: with the live fixes' files
+    no longer subtracted from the parked fix's own, failed `assert fr.record(git_repo) == []`."""
+    _commit(git_repo, {"lib.py": "y = 1\n"})
+
+    def edit():
+        _put(git_repo, "app.py", "x = 2\n")
+        _put(git_repo, "lib.py", "y = 2\n")
+
+    _to_l5(git_repo, "STANDARD", [_entry(1, ["app.py", "lib.py"]), _entry(2, ["lib.py"])], edit)
+    _three_cycles(git_repo, line=50)
+    _edit_and_test(git_repo, "app.py", "x = 1\n")  # app.py reverted; lib.py is FIX-2's too
+    _verdicts(git_repo, 4, [_fa(f"FA-4-{k}", "RESOLVED", resolves=f"FA-{k}-1", line=50)
+                            for k in (1, 2, 3)])
+    assert fr.record(git_repo) == []
