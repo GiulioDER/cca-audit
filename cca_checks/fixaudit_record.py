@@ -224,10 +224,12 @@ def _reverted(row: dict, fixes: list[dict], changed: set[str]) -> bool:
 def _unresolved(passes: dict[int, dict], held: set[str], fixes: list[dict],
                 changed: set[str]) -> list[str]:
     """A confirmed P1 or P2 blocks until a later pass resolves it, or until its finding is
-    parked at the cap and its fix reverted: no run commits a fix with a known bug in it."""
+    parked at the cap and its fix reverted; a parked finding blocks until every fix of it is
+    reverted: no run commits a fix with a known bug in it."""
     cleared = {row["resolves"] for p in passes.values() for row in p["findings"]
                if row["verdict"] == "RESOLVED"}
     out = []
+    covered: set[str] = set()
     for k, p in passes.items():
         for row in p["findings"]:
             if row["verdict"] != "CONFIRMED" or row["priority"] not in BLOCKING \
@@ -240,7 +242,38 @@ def _unresolved(passes: dict[int, dict], held: set[str], fixes: list[dict],
             elif not _reverted(row, fixes, changed):
                 out.append(f"{what}: {row['finding']} is parked, but {row['fix_id']} is still in "
                            "the tree; revert that fix whole")
+                covered.add(row["fix_id"])
+    # Parking acts on the original finding: every fix of it leaves the tree, a fix whose rows a
+    # later pass resolved included. A file a live fix also lists is left to the rows above.
+    live = {p for f in fixes if f["finding"] not in held for p in f["files"]}
+    for f in fixes:
+        if f["finding"] not in held or f["fix_id"] in covered:
+            continue
+        left = sorted((set(f["files"]) - live) & changed)
+        if left:
+            out.append(f"{f['finding']} is parked, but {f['fix_id']} is still in the tree "
+                       f"({', '.join(left)}); revert every fix of {f['finding']} whole")
     return out
+
+
+def owed_proofs(root: pathlib.Path, state) -> list[str]:
+    """Ids of the confirmed P1 and P2 fix audit rows whose repair needs a Step 5.6 proof: every
+    such row of a kept pass whose fix is still in the tree (`_reverted` does not hold). Decided
+    from the tree, never from parking: a journal row can name a finding parked while its fix
+    stays, and a parked fix may keep hunks in a file a live fix also lists."""
+    passes = fixaudit.kept_passes(root, state.run_id)
+    if not passes:
+        return []
+    tree = pipeline_state.current_tree(state, root)
+    if tree is None:
+        raise ValueError("the working tree could not be fingerprinted (git missing from PATH, "
+                         "or timed out), so no fix audit repair can be shown reverted")
+    report = fixaudit.build_report(root, state, tree)
+    fixes = fixaudit.stored_fixes(root, state)
+    changed = _changed(report)
+    return sorted({row["id"] for p in passes.values() for row in p["findings"]
+                   if row["verdict"] == "CONFIRMED" and row["priority"] in BLOCKING
+                   and not _reverted(row, fixes, changed)})
 
 
 def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
@@ -286,6 +319,13 @@ def _evaluate(root: pathlib.Path, state, audit: pathlib.Path | None
             reasons.append("a FAST run has no auditor pass: record L5.4 without --audit")
         return reasons, None, report
     passes = fixaudit.kept_passes(root, state.run_id)
+    # A fix a kept pass names must stay in L4, reverted or parked: its files are how the
+    # revert check, here and at Step 5.6, shows that its repair left the tree.
+    listed = {(f["fix_id"], f["finding"]) for f in fixes}
+    named = {(row["fix_id"], row["finding"]) for p in passes.values() for row in p["findings"]}
+    reasons += [f"{fix} ({finding}) is named by a kept pass but L4 no longer lists it: list it "
+                "again with its files, reverted or parked, then record L4, Step 5 and this step"
+                for fix, finding in sorted(named - listed)]
     held = parked(root, state.run_id)
     changed = _changed(report)
     data, why = _audit_file(root, audit or AUDIT)

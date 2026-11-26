@@ -384,6 +384,20 @@ def _planned_p1() -> int:
     return max(by_ledger, stored)
 
 
+def _owed_fix_audit_proofs() -> list[str]:
+    """The open run's fix audit rows whose repair is still in the tree and needs a proof
+    (`fixaudit_record.owed_proofs`). Raises ValueError for an unreadable run state or kept pass,
+    and for a fix audit report that cannot be built."""
+    try:
+        from cca_checks import fixaudit_record, pipeline_state
+    except ImportError:
+        return []  # _record reports the missing package
+    state = pipeline_state.load(".")
+    if state is None:
+        return []
+    return fixaudit_record.owed_proofs(Path("."), state)
+
+
 def _save_proofs(results: list[ProofResult]) -> None:
     """Keep each proof's verdict beside the run's other outputs: runs/<run_id>/L5.6.json.
 
@@ -464,7 +478,8 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--record", action="store_true",
                    help="record L5.6 in the open CCA run")
     v.add_argument("--no-proofs", action="store_true",
-                   help="no CONFIRMED P1 needs a proof; records L5.6 with zero proofs")
+                   help="no CONFIRMED P1 and no fix audit repair needs a proof; records L5.6 "
+                        "with zero proofs")
     v.add_argument("--parked", type=int, default=0, metavar="N",
                    help="with --no-proofs: N CONFIRMED P1 findings were parked (edit "
                         "reverted, UNCERTAIN to a human), so they need no proof")
@@ -480,8 +495,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         try:
             planned = _planned_p1()
+            owed = _owed_fix_audit_proofs()
         except ValueError as exc:
             print(f"cannot record L5.6: {exc}", file=sys.stderr)
+            return 2
+        if owed:
+            print(f"cannot record L5.6 with zero proofs: the fix audit repairs of "
+                  f"{', '.join(owed)} each need a RED proof against their pass snapshot "
+                  "(verify --proof FA-<k>-<n>=NODEID@.claude/audits/.fixaudit_snapshot/"
+                  "pass-<k> --record)", file=sys.stderr)
             return 2
         if a.parked < 0 or a.parked > planned:
             print(f"cannot record L5.6: --parked {a.parked} is not a count of parked P1s; "
