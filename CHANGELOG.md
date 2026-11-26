@@ -8,10 +8,13 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
-**Upgrade note: reinstall both clients, and expect two stricter gates.** After `pip install -U
+## [0.17.1] - 2026-11-26
+
+**Upgrade note: reinstall both clients, and expect three stricter gates.** After `pip install -U
 cca-audit`, run `cca-audit install` and `cca-audit install-codex`. A run already open may now be
-refused at L5.4 or L5.6: revert the fixes of a parked finding, or pass the fix audit proofs with
-`--proof`.
+refused at L5.4 or L5.6: revert the fixes of a parked finding, pass the fix audit proofs with
+`--proof`, or, when `fixaudit record` says a kept pass names a fix L4 no longer lists, list that
+fix again in L4 with its files and record L4, Step 5 and L5.4 again.
 
 **Parking acts on the original finding (STAKES-002).** `fixaudit record` refuses while any fix of
 a parked finding is still in the tree, a fix whose rows a later pass resolved included; a file a
