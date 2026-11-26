@@ -467,7 +467,10 @@ def kept_passes(root: Path, run_id: str) -> dict[int, dict]:
     for path in (Path(root) / ".claude" / "audits" / "runs" / run_id).glob(PASS_FILE.format("*")):
         number = path.stem.rsplit("-", 1)[-1]
         if number.isdigit():
-            found[int(number)] = json.loads(path.read_bytes())
+            try:
+                found[int(number)] = json.loads(path.read_bytes())
+            except OSError as exc:
+                raise ValueError(f"{path} cannot be read ({exc})") from exc
     return dict(sorted(found.items()))
 
 
