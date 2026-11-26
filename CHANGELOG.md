@@ -8,6 +8,16 @@ Dates and content are sourced from `git log` and `docs/v3-design.md` §7 — not
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-11-26
+
+**Upgrade note: `pip install -U cca-audit` is enough.** No installed skill, hook or tool file
+changed, so `cca-audit install` and `cca-audit install-codex` are not needed for this version.
+
+**An unreadable fix audit pass file is refused, not a traceback (DAT-001).** When a kept
+`fixaudit-pass-<k>.json` cannot be read, `tautology verify --no-proofs --record` and
+`fixaudit record` now refuse with exit 2 and name the file, like a pass file that is not JSON, and
+record nothing. Before, the OSError escaped and the command ended in a traceback.
+
 ## [0.17.1] - 2026-11-26
 
 **Upgrade note: reinstall both clients, and expect three stricter gates.** After `pip install -U
