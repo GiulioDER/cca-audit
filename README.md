@@ -7,20 +7,50 @@
 
 # CCA-Audit
 
-A multi-agent code auditor for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and
-Codex. No finding reaches the fix plan until it has been verified against the code.
+AI code review that proves its findings, fixes them, confirms no new bugs were introduced, and ends with a final review.
 
-Eleven specialised auditors read your diff in parallel. Each finding is then re-derived from the code: by
-`pyright`, `clippy`, `semgrep`, `pytest` or `hypothesis` where a tool can settle it, and by
-adversarial review where none can. Only survivors get fixed. A differential pass checks each fix for
-scope creep, and an architect gate refuses the change unless every confirmed finding has a fix and
-every edit has a finding.
+Agentic reviewers and deterministic tools check each other, and every layer runs as a separate agent that sees only the previous layer's output, never its reasoning.
 
-It also remembers. Bugs it already fixed and false alarms it already rejected come back to the next
-audit of the same code, through [RE-call](https://github.com/GiulioDER/RE-call), so it does not
-repeat its own mistakes.
+## Why
 
-The design rule: a check that could not run must never look like a check that passed.
+Most AI code reviewers give you a list of plausible findings and leave you to sort out which are
+real. CCA-Audit, a multi-agent auditor for
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex, does that sorting before
+you see the list. No finding reaches the fix plan until it has been verified against the code, and
+no commit goes through until every fix has been checked. I use it a lot to speed up coding with
+agents: the agent writes the code, CCA checks it, and the findings I read have already been checked
+against the code.
+
+## How it works
+
+Eleven specialised auditors read your diff in parallel, each in its own scope. Every finding then
+goes through four steps:
+
+1. **Prove.** Each finding is re-derived from the code: by `pyright`, `clippy`, `semgrep`, `pytest`
+   or `hypothesis` where a tool can settle it, and by adversarial review where none can. An LLM may
+   not overturn a tool verdict. A verdict claims only what its evidence supports: `semgrep` can
+   prove a sink absent, never an injection real, and a clean property search returns `UNCERTAIN`,
+   not "correct".
+2. **Fix.** Only the findings that survived are fixed.
+3. **Check for new bugs.** Each hunk must map to its finding, or it is flagged as scope creep. A
+   red-state proof reverts each fix and re-runs its test; a test that passes on the old code is
+   reported as tautological.
+4. **Final review.** The architect gate refuses the change unless every confirmed finding has a fix
+   and every edit has a finding. A commit guard refuses `git commit` until the run is complete and
+   the architect reads `APPROVED`.
+
+Risk picks the tier, not the user: diffs touching money, auth or numeric code are forced to the full
+adversarial path. The design rule: a check that could not run must never look like a check that
+passed.
+
+<p align="center">
+  <a href="https://github.com/GiulioDER/cca-audit/blob/master/docs/diagrams/README.md">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/diagrams/cca-overview-dark.png">
+      <img src="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/diagrams/cca-overview-light.png" alt="CCA-Audit architecture: two entry points, scope and tier selection, parallel auditors, consolidation, verification backed by deterministic settlers, the fix and prove loop, the architect gate, and the commit guard reading the recorded run state" width="100%">
+    </picture>
+  </a>
+</p>
 
 ## Results on code I did not write
 
@@ -33,74 +63,33 @@ regression test. I opened the PR myself under SciPy's AI policy and disclosed th
 **Polymarket py-sdk, fixed by the maintainers.** Price validation counted decimal places instead of
 checking tick-grid membership, so on `0.005` markets a price like `0.007` was signed and then
 rejected by the exchange. Reported in
-[Polymarket/py-sdk#162](https://github.com/Polymarket/py-sdk/issues/162); a maintainer shipped the
-fix in [#181](https://github.com/Polymarket/py-sdk/pull/181). Of four candidates, the adversarial
-verifier rejected two; the survivor was reproduced on about 23,000 price and tick cases first.
+[Polymarket/py-sdk#162](https://github.com/Polymarket/py-sdk/issues/162) and fixed in
+[#181](https://github.com/Polymarket/py-sdk/pull/181). Of four candidates, the adversarial verifier
+rejected two; the survivor was reproduced on about 23,000 price and tick cases first.
 
-Pointed at its own code, CCA also found that CI had silently skipped about 25 tests on every Python
+Pointed at its own code, CCA found that CI had silently skipped about 25 tests on every Python
 version ([PR #22](https://github.com/GiulioDER/cca-audit/pull/22)).
-
-## What is different
-
-- **A tool settles the claim where one can.** `pyright` for definedness, nullability and type,
-  `semgrep` for taint, a `pytest` repro for crashes, `hypothesis` for arithmetic. An LLM may not
-  overturn a tool verdict, and adjudicates only what no tool could settle.
-- **A verdict claims only what its evidence supports.** `semgrep` can prove a sink absent, never an
-  injection real. A clean property search returns `UNCERTAIN`, not "correct".
-- **The fix is audited too.** Each hunk must map to its finding. A red-state proof reverts each fix
-  and re-runs its test; a test that passes on the old code is reported as tautological.
-- **Risk picks the tier, not the user.** Diffs touching money, auth or numeric code are forced to the
-  full adversarial path.
-- **Every step is gated.** Each layer is recorded with `python -m cca_checks pipeline record`. A
-  commit guard refuses `git commit` until the run is complete and the architect reads `APPROVED`.
-
-<p align="center">
-  <a href="https://github.com/GiulioDER/cca-audit/blob/master/docs/diagrams/README.md">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/diagrams/cca-overview-dark.png">
-      <img src="https://raw.githubusercontent.com/GiulioDER/cca-audit/master/docs/diagrams/cca-overview-light.png" alt="CCA-Audit architecture: two entry points, scope and tier selection, parallel auditors, consolidation, verification backed by deterministic settlers, the fix and prove loop, the architect gate, and the commit guard reading the recorded run state" width="100%">
-    </picture>
-  </a>
-</p>
 
 ## Memory across audits
 
-An auditor without memory starts every run from nothing: it can miss a bug class it fixed in the
-same function last month, and raise again a false alarm a verifier already rejected. CCA keeps what
-its runs settled and hands it back through [RE-call](https://github.com/GiulioDER/RE-call), a
-memory server that matches records to code by file, symbol and a hash of the code.
+CCA keeps what its runs settled and hands it back through
+[RE-call](https://github.com/GiulioDER/RE-call), matched to code by file, symbol and a hash of the
+code. Bugs it already fixed at the code a change touches go to every auditor before the audit. A
+false alarm the verifier already rejected on the same code is marked `PRIOR_FP` and listed with its
+citation, never dropped; a high-stakes finding is never suppressed. Fixes are recorded in an append
+only ledger in `~/.claude/cca-bugs/` once their pull request merges.
 
-- **A ledger of real bugs.** When a run's pull request merges, each fix becomes a row in
-  `~/.claude/cca-bugs/`, keyed by the merge commit. A row is `proved` only when a verifier
-  confirmed the bug, the fix merged, the architect approved it and its regression test failed on
-  the old code. The ledger is append only: nothing rewrites a row.
-- **Past bugs in the brief.** Before Layer 1, the bugs CCA fixed at the code a change touches go to
-  every auditor as context. A bug at a symbol the change touches ranks above one elsewhere in the
-  file, and a bug whose fix later caused a regression is marked.
-- **A false alarm is not raised twice.** A finding the verifier rejected and the architect accepted
-  as false becomes a record. When the same finding returns on the same code, it is marked
-  `PRIOR_FP` and listed in the report with its citation, never dropped. Suppression needs an exact
-  code match, the same category and no higher priority; a high-stakes finding is never suppressed,
-  and the gate derives every suppression again rather than trusting the model. `CCA_PRIOR_FP=off`
-  sends each match to the verifier instead.
-- **Lessons the owner accepted.** When three or more past bugs share a pattern, `bugs distill`
-  drafts a lesson. It reaches auditors only after `bugs lesson accept --by NAME`, at most three
-  per run, worded as something to check and never as something to ignore.
-
-All of it is optional. Without a `recall-cca` server, audits run as before with an empty block. A
-hunt never reads memory from your own projects, because it audits someone else's code.
-
-Whether memory raises the number of real findings is not established yet. A pre-registered replay
-of eight past runs with the first version of the brief (2026-10-20 and 21) found a difference within
-run to run noise
-([record](https://github.com/GiulioDER/cca-audit/blob/master/docs/preregistrations/2026-10-20-prior-bugs-rule-and-noise.md)).
-The anchored brief, `PRIOR_FP` and lessons are not measured.
+Memory is optional: without a `recall-cca` server, audits run as before. A hunt never reads memory
+from your own projects. Whether memory raises the number of real findings is not established: a
+pre-registered replay of eight past runs (2026-10-20 and 21) found a difference within run to run
+noise
+([record](https://github.com/GiulioDER/cca-audit/blob/master/docs/preregistrations/2026-10-20-prior-bugs-rule-and-noise.md)),
+and the anchored brief, `PRIOR_FP` and lessons are not measured.
 
 ## The auditors
 
-Scopes do not overlap, so findings do not duplicate.
-[Auditor scopes](https://github.com/GiulioDER/cca-audit/blob/master/docs/auditor-scopes.md) has the
-boundaries.
+Scopes do not overlap, so findings do not duplicate
+([boundaries](https://github.com/GiulioDER/cca-audit/blob/master/docs/auditor-scopes.md)).
 
 **Core** (FAST runs the first three):
 
@@ -155,11 +144,6 @@ arithmetic findings on high-stakes code cannot be auto-fixed.** To see what your
 python -m cca_checks capabilities --file <source file>
 ```
 
-Recording needs no server: `pipeline close` saves each run that fixed something, and
-`python -m cca_checks bugs resolve --write` writes its rows once the pull request merges (by hand or
-on a schedule). To give the record back to auditors, serve the memos in `~/.claude/cca-bugs/memos/`
-with RE-call and register it as an MCP server named `recall-cca`.
-
 ## Usage
 
 ```
@@ -182,10 +166,8 @@ In Codex, drop the slash: `audit+fix`, `audit+fix hunt src/`.
 | **DEEP** | money, auth, numeric, hunt | STANDARD plus 2-of-3 adversarial review |
 
 P1 findings are fixed with a red→green test, P2 are fixed now, P3 are deferred to an optional gated
-pass. A long run can stop with `pipeline pause --reason` and continue later with `pipeline resume`.
-
-Hunt mode executes the audited repository's tests and imports, so run it on third-party code in a
-sandbox. See the [Security Policy](https://github.com/GiulioDER/cca-audit/blob/master/SECURITY.md).
+pass. Hunt mode executes the audited repository's tests and imports, so run it on third-party code
+in a sandbox. See the [Security Policy](https://github.com/GiulioDER/cca-audit/blob/master/SECURITY.md).
 
 ## Limits
 
